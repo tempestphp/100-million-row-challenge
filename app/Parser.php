@@ -13,7 +13,7 @@ final class Parser
         $data = [];
 
         while (($line = fgets($handle)) !== false) {
-            [$uri, $date] = explode(';', trim($line));
+            [$uri, $date] = explode(',', trim($line));
 
             $date = new DateTimeImmutable($date);
             $path = parse_url($uri, PHP_URL_PATH);
