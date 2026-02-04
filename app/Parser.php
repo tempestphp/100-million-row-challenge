@@ -12,6 +12,8 @@ final class Parser
 
         $data = [];
 
+        $i = 0;
+
         while (($line = fgets($handle)) !== false) {
             [$uri, $date] = explode(',', trim($line));
 
@@ -21,6 +23,12 @@ final class Parser
             $data[$path][$date->format('Y-m-d')] ??= 0;
 
             $data[$path][$date->format('Y-m-d')] += 1;
+
+            $i++;
+
+            if ($i % 50_000 === 0) {
+                echo number_format($i) . "/100,000,000" . PHP_EOL;
+            }
         }
 
         foreach ($data as &$visits) {
