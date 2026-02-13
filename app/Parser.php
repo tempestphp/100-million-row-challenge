@@ -8,6 +8,7 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
+        // TODO: improve
         $handle = fopen($inputPath, 'r');
 
         $data = [];
