@@ -1,15 +1,35 @@
 name: Run Benchmarks
 
 on:
-  pull_request:
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to benchmark"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   run_benchmarks:
+    environment: benchmarks
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout PR code
         uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          fetch-depth: 0
+
+      - name: Print benchmark target (PR + commit)
+        shell: bash
+        run: |
+          echo "Benchmarking PR #${{ inputs.pr_number }}"
+          echo "Checked out commit: $(git rev-parse HEAD)"
+          echo "Checked out ref:    $(git symbolic-ref -q --short HEAD || echo 'DETACHED_HEAD')"
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -37,13 +57,8 @@ jobs:
       - name: Determine branch + fetch ref
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "BRANCH=${{ github.head_ref }}" >> "$GITHUB_ENV"
-            echo "FETCH_REF=refs/pull/${{ github.event.pull_request.number }}/head" >> "$GITHUB_ENV"
-          else
-            echo "BRANCH=${{ github.ref_name }}" >> "$GITHUB_ENV"
-            echo "FETCH_REF=refs/heads/${{ github.ref_name }}" >> "$GITHUB_ENV"
-          fi
+          echo "BRANCH=pr-${{ inputs.pr_number }}" >> "$GITHUB_ENV"
+          echo "FETCH_REF=refs/pull/${{ inputs.pr_number }}/head" >> "$GITHUB_ENV"
 
       - name: Checkout code on server
         shell: bash
@@ -53,11 +68,20 @@ jobs:
             cd ~/benchmark
           
             git fetch --prune origin
-            git checkout main
-            git pull origin main
+            
+            git reset --hard
+            git clean -fd
+            
+            git checkout -f main
+            git reset --hard origin/main
+            git clean -fd
+            
             git branch -D \"$BRANCH\" 2>/dev/null || true
             git fetch origin \"$FETCH_REF:$BRANCH\"
-            git checkout \"$BRANCH\"
+            git checkout -f \"$BRANCH\"
+            
+            git reset --hard
+            git clean -fd
           '"
 
       - name: Run benchmark
@@ -68,13 +92,43 @@ jobs:
           
             php8.5 /usr/local/bin/composer install --no-dev
   
-            php8.5 tempest data:parse --store
-  
+            php8.5 tempest data:parse --inputPath="~/benchmark/data/real-data.csv" --outputPath="~/benchmark/data/real-data.json" --store
+            php8.5 tempest data:validate --inputPath="~/benchmark/data/real-data.csv" --outputPath="~/benchmark/data/real-data.json" --store
+            
+            ENTRY=\$(tail -n 1 leaderboard.csv)
+
+            git reset --hard
+
+            git fetch origin main
             git checkout main
-  
+            git pull --ff-only origin main
+
+            echo \"\$ENTRY\" >> leaderboard.csv
             git add leaderboard.csv
   
             git commit -m '\''Update leaderboard'\'' || true
   
             git push origin main
           '"
+
+      - name: Comment on PR with benchmark run link
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number('${{ inputs.pr_number }}');
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const status = '${{ job.status }}';
+
+            const body = [
+              `Benchmarks finished with **${status}**.`,
+              ``,
+              `Workflow run: ${runUrl}`
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body
+            });
