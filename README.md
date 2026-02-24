@@ -12,7 +12,7 @@ composer install
 php tempest data:generate
 ```
 
-By default, the `data:generate` command will generate a dataset of 1,000,000 visits. The real benchmark will use 100,000,000 visits. Next, implement your solution in `app/Parser.php`:
+By default, the `data:generate` command will generate a dataset of 1,000,000 visits. The real benchmark will use 100,000,000 visits. You can adjust the number of visits as well by running `php tempest data:generate 100_000_000` Next, implement your solution in `app/Parser.php`:
 
 ```php
 final class Parser
