@@ -91,7 +91,9 @@ jobs:
             cd ~/benchmark
           
             php8.5 /usr/local/bin/composer install --no-dev
-  
+            
+            php8.5 tempest cache:clear --force
+            php8.5 tempest discovery:generate
             php8.5 tempest data:parse --inputPath="/home/forge/data/real-data.csv" --outputPath="/home/forge/data/real-data.json" --store
             php8.5 tempest data:verify --actualPath="/home/forge/data/real-data.json" --expectedPath="/home/forge/data/real-data-expected.json"
             
