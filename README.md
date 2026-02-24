@@ -1,7 +1,7 @@
 > [!IMPORTANT]
 > The 100-million-row challenge is now **live**. You have until March 15, 11:59PM to submit your entry!
     
-Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from X to Y. When it's done, the top three fastest solutions will win a prize! 
+Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize! 
 
 ## Getting started
 
@@ -13,6 +13,8 @@ php tempest data:generate
 ```
 
 By default, the `data:generate` command will generate a dataset of 1,000,000 visits. The real benchmark will use 100,000,000 visits. You can adjust the number of visits as well by running `php tempest data:generate 100_000_000` Next, implement your solution in `app/Parser.php`:
+
+Also, the generator will use a seeded randomizer so that, for local development, you work on the same dataset as others. You can overwrite the seed with the `data:generate --seed=123456` parameter, and you can also pass in the `data:generate --no-seed` parameter for an unseeded random data set. The real data set was generated without a seed and is secret.
 
 ```php
 final class Parser
@@ -106,13 +108,15 @@ The benchmark results of each run are stored in [leaderboard.csv](./leaderboard.
 
 #### What kind of server is used for the benchmark?
 
-The benchmark runs on a Premium Intel Digital Ocean Droplet with 1vCPU and 2GB of memory. We deliberately chose not to use a more powerful server because we like to test in a somewhat "standard" environment for PHP.
+The benchmark runs on a Premium Intel Digital Ocean Droplet with 2vCPUs and 1.5GB of available memory. We deliberately chose not to use a more powerful server because we like to test in a somewhat "standard" environment for PHP.
 
 #### How to ensure fair results?
 
 Each submission will be manually verified before its benchmark is run on the benchmark server. We'll also only ever run one single submission at a time to prevent any bias in the results. Additionally, we'll use a consistent, dedicated server to run benchmarks on to ensure that the results are comparable.
 
 If needed, multiple runs will be performed for the top submissions, and their average will be compared.
+
+Finally, everyone is asked to respect other participant's entries. You can look at others for inspiration (simply because there's no way we can prevent that from happening), but straight-up copying other entries is prohibited. We'll try our best to watch over this. If you run into any issues, feel free to tag @brendt or @xHeaven in the PR comments.
 
 #### Why not one billion?
 

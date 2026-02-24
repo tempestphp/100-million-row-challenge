@@ -2,6 +2,8 @@
 
 namespace App\Commands;
 
+use Random\Engine\Xoshiro256StarStar;
+use Random\Randomizer;
 use Tempest\Console\ConsoleCommand;
 use Tempest\Console\HasConsole;
 use Tempest\Console\Middleware\ForceMiddleware;
@@ -11,11 +13,19 @@ final class DataGenerateCommand
 {
     use HasConsole;
 
+    private ?Randomizer $randomizer = null;
+
     #[ConsoleCommand(middleware: [ForceMiddleware::class])]
     public function __invoke(
         int|string $iterations = 1_000_000,
-        string $outputPath = __DIR__.'/../../data/data.csv',
-    ): void {
+        string $outputPath = __DIR__ . '/../../data/data.csv',
+        int $seed = 1,
+    ): void
+    {
+        $this->randomizer = $seed === 0
+            ? new Randomizer(new Xoshiro256StarStar())
+            : new Randomizer(new Xoshiro256StarStar($seed));
+
         $iterations = parse_int(str_replace([',', '_'], '', $iterations));
 
         if (! $this->confirm(sprintf(
@@ -37,7 +47,7 @@ final class DataGenerateCommand
         $datePoolSize = 10_000;
         $datePool = [];
         for ($d = 0; $d < $datePoolSize; $d++) {
-            $datePool[$d] = date('c', $now - mt_rand(0, $fiveYearsInSeconds));
+            $datePool[$d] = date('c', $now - $this->random(0, $fiveYearsInSeconds));
         }
 
         $handle = fopen($outputPath, 'w');
@@ -48,14 +58,14 @@ final class DataGenerateCommand
         $progressInterval = 100_000;
 
         for ($i = 1; $i <= $iterations; $i++) {
-            $buffer .= $uris[mt_rand(0, $uriCount - 1)].','.$datePool[mt_rand(0, $datePoolSize - 1)]."\n";
+            $buffer .= $uris[$this->random(0, $uriCount - 1)] . ',' . $datePool[$this->random(0, $datePoolSize - 1)] . "\n";
 
             if ($i % $bufferSize === 0) {
                 fwrite($handle, $buffer);
                 $buffer = '';
 
                 if ($i % $progressInterval === 0) {
-                    $this->info('Generated '.number_format($i).' rows');
+                    $this->info('Generated ' . number_format($i) . ' rows');
                 }
             }
         }
@@ -66,6 +76,15 @@ final class DataGenerateCommand
 
         fclose($handle);
 
-        $this->success('Done');
+        if ($seed !== 0) {
+            $this->info('Seed: ' . $seed);
+        }
+
+        $this->success("Done: {$outputPath}");
+    }
+
+    private function random(int $min, int $max): int
+    {
+        return $this->randomizer->getInt($min, $max);
     }
 }

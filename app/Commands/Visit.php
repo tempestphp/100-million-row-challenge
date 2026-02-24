@@ -6,11 +6,6 @@ final class Visit
 {
     public function __construct(public string $uri) {}
 
-    public function generateDate(): string
-    {
-        return date('c', time() - rand(0, 60 * 60 * 24 * 365 * 5));
-    }
-
     /** @return self[] */
     public static function all(): array
     {
