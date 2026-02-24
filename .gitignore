@@ -2,6 +2,7 @@ vendor/
 data/data.csv
 data/real-data.csv
 data/real-data.json
+data/real-data-expected.json
 data/data.json
 test-data-actual.json
 .idea
