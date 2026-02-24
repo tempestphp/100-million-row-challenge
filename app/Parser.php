@@ -20,50 +20,16 @@ final class Parser
                 ($visitsByPath[$path][$date] ??= 0) + 1;
         }
 
-        $file = fopen($outputPath, "w");
-        stream_set_write_buffer($file, self::WRITE_BUFFER_SIZE);
-
-        fwrite($file, "{\n");
-
-        $pathCount = count($visitsByPath);
-        $currentPathIndex = 0;
-
-        foreach ($visitsByPath as $path => &$visitsByDate) {
+        foreach ($visitsByPath as &$visitsByDate) {
             ksort($visitsByDate);
-
-            $currentPathIndex++;
-
-            $buffer = "    " . json_encode($path) . ": {\n";
-
-            $dateCount = count($visitsByDate);
-            $currentDateIndex = 0;
-
-            foreach ($visitsByDate as $date => $count) {
-                $currentDateIndex++;
-
-                $buffer .= "        " . json_encode($date) . ": " . $count;
-
-                if ($currentDateIndex < $dateCount) {
-                    $buffer .= ",";
-                }
-
-                $buffer .= "\n";
-            }
-
-            $buffer .= "    }";
-
-            if ($currentPathIndex < $pathCount) {
-                $buffer .= ",";
-            }
-
-            $buffer .= "\n";
-
-            fwrite($file, $buffer);
         }
-        unset($visitsByDate, $visitsByPath);
 
-        fwrite($file, "}");
-        fclose($file);
+        unset($visitsByDate);
+
+        file_put_contents(
+            $outputPath,
+            json_encode($visitsByPath, JSON_PRETTY_PRINT),
+        );
     }
 
     private function lines(string $inputPath): \Generator
