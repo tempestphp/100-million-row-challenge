@@ -7,7 +7,6 @@ namespace App;
 use function array_fill;
 use function array_keys;
 use function asort;
-use function count;
 use function fclose;
 use function fgets;
 use function file_get_contents;
@@ -19,19 +18,21 @@ use function fseek;
 use function ftell;
 use function fwrite;
 use function getmypid;
-use function igbinary_serialize;
-use function igbinary_unserialize;
+use function implode;
+use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function strlen;
-use function strrpos;
 use function strpos;
+use function strrpos;
 use function substr;
 use function sys_get_temp_dir;
 use function unlink;
+use function unpack;
+use const SEEK_CUR;
 
 final class Parser
 {
@@ -42,6 +43,7 @@ final class Parser
     private const int DATE_OFFSET_FROM_NL = 25;
     private const int MIN_LINE_LENGTH = 45;
     private const int WORKERS = 4;
+    private const int DISCOVER_SIZE = 8_388_608;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -51,6 +53,8 @@ final class Parser
             $inputPath,
             $fileSize,
         );
+
+        [$pathIds, $paths, $pathCount, $dateIds, $dates, $dateCount] = $this->discover($inputPath, $fileSize);
 
         $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
@@ -64,13 +68,17 @@ final class Parser
             $pid = pcntl_fork();
 
             if ($pid === 0) {
-                $data = $this->parseRangeState(
+                $data = $this->parseRangeFlat(
                     $inputPath,
                     $boundaries[$i],
                     $boundaries[$i + 1],
+                    $pathIds,
+                    $dateIds,
+                    $pathCount,
+                    $dateCount,
                 );
 
-                file_put_contents($tmpFile, $this->encodeWorkerData($data));
+                file_put_contents($tmpFile, pack('V*', ...$data));
 
                 exit(0);
             }
@@ -82,57 +90,87 @@ final class Parser
             $pids[$i] = $pid;
         }
 
-        $parentData = $this->parseRangeState(
+        $mergedCounts = $this->parseRangeFlat(
             $inputPath,
             $boundaries[self::WORKERS - 1],
             $boundaries[self::WORKERS],
+            $pathIds,
+            $dateIds,
+            $pathCount,
+            $dateCount,
         );
 
         foreach ($pids as $pid) {
             pcntl_waitpid($pid, $status);
         }
 
-        $mergedPaths = [];
-        $mergedPathIds = [];
-        $mergedDates = [];
-        $mergedDateIds = [];
-        $mergedCounts = [];
-
         foreach ($tmpFiles as $tmpFile) {
-            $data = $this->decodeWorkerData((string) file_get_contents($tmpFile));
+            $wCounts = unpack('V*', (string) file_get_contents($tmpFile));
             unlink($tmpFile);
 
-            $this->mergeState(
-                $mergedPaths,
-                $mergedPathIds,
-                $mergedDates,
-                $mergedDateIds,
-                $mergedCounts,
-                $data,
-            );
+            $j = 0;
+            foreach ($wCounts as $v) {
+                $mergedCounts[$j++] += $v;
+            }
         }
 
-        $this->mergeState(
-            $mergedPaths,
-            $mergedPathIds,
-            $mergedDates,
-            $mergedDateIds,
-            $mergedCounts,
-            $parentData,
-        );
-        unset($parentData);
-
-        $this->writeOutputFromState($outputPath, $mergedPaths, $mergedDates, $mergedCounts);
+        $this->writeOutput($outputPath, $paths, $dates, $mergedCounts, $dateCount);
     }
 
-    private function encodeWorkerData(array $data): string
+    private function discover(string $inputPath, int $fileSize): array
     {
-        return (string) igbinary_serialize($data);
-    }
+        $dateIds = [];
+        $dates = [];
+        $dateCount = 0;
 
-    private function decodeWorkerData(string $payload): mixed
-    {
-        return igbinary_unserialize($payload);
+        for ($y = 2020; $y <= 2026; $y++) {
+            for ($m = 1; $m <= 12; $m++) {
+                $daysInMonth = match ($m) {
+                    2 => ($y % 4 === 0) ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+
+                for ($d = 1; $d <= $daysInMonth; $d++) {
+                    $date = $y . '-' . ($m < 10 ? '0' : '') . $m . '-' . ($d < 10 ? '0' : '') . $d;
+                    $dateIds[$date] = $dateCount;
+                    $dates[$dateCount] = $date;
+                    $dateCount++;
+                }
+            }
+        }
+
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $warmUpSize = $fileSize > self::DISCOVER_SIZE ? self::DISCOVER_SIZE : $fileSize;
+        $chunk = fread($handle, $warmUpSize);
+        fclose($handle);
+
+        $lastNl = strrpos($chunk, "\n");
+        $pathIds = [];
+        $paths = [];
+        $pathCount = 0;
+        $pos = 0;
+
+        while ($pos < $lastNl) {
+            $nlPos = strpos($chunk, "\n", $pos + 50);
+
+            $path = substr(
+                $chunk,
+                $pos + self::URI_PREFIX_LENGTH,
+                $nlPos - $pos - self::MIN_LINE_LENGTH,
+            );
+
+            if (($pathIds[$path] ?? -1) === -1) {
+                $pathIds[$path] = $pathCount;
+                $paths[$pathCount] = $path;
+                $pathCount++;
+            }
+
+            $pos = $nlPos + 1;
+        }
+
+        return [$pathIds, $paths, $pathCount, $dateIds, $dates, $dateCount];
     }
 
     private function calculateBoundaries(
@@ -157,39 +195,41 @@ final class Parser
         return $boundaries;
     }
 
-    private function parseRangeState(string $inputPath, int $start, int $end): array
-    {
-        $pathIds = [];
-        $paths = [];
-        $pathCount = 0;
-        $dateIds = [];
-        $dates = [];
-        $dateCount = 0;
-        $counts = [];
+    private function parseRangeFlat(
+        string $inputPath,
+        int $start,
+        int $end,
+        array $pathIds,
+        array $dateIds,
+        int $pathCount,
+        int $dateCount,
+    ): array {
+        $stride = $dateCount;
+        $counts = array_fill(0, $pathCount * $stride, 0);
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
 
-        $toRead = $end - $start;
-        $remainder = '';
+        $remaining = $end - $start;
 
-        while ($toRead > 0) {
-            $chunk = fread($handle, $toRead > self::READ_CHUNK_SIZE ? self::READ_CHUNK_SIZE : $toRead);
-
-            $toRead -= strlen($chunk);
-
-            if ($remainder !== '') {
-                $chunk = $remainder . $chunk;
-            }
+        while ($remaining > 0) {
+            $chunk = fread($handle, $remaining > self::READ_CHUNK_SIZE ? self::READ_CHUNK_SIZE : $remaining);
+            $chunkLen = strlen($chunk);
+            $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
-            $remainder = substr($chunk, $lastNl + 1);
+
+            if ($lastNl < ($chunkLen - 1)) {
+                $excess = $chunkLen - $lastNl - 1;
+                fseek($handle, -$excess, SEEK_CUR);
+                $remaining += $excess;
+            }
 
             $pos = 0;
 
             while ($pos < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $pos);
+                $nlPos = strpos($chunk, "\n", $pos + 50);
 
                 $path = substr(
                     $chunk,
@@ -202,130 +242,38 @@ final class Parser
                     self::DATE_LENGTH,
                 );
 
-                $pathId = $pathIds[$path] ?? $pathCount;
+                $pathId = $pathIds[$path] ?? -1;
 
-                if ($pathId === $pathCount) {
+                if ($pathId === -1) {
+                    $pathId = $pathCount;
                     $pathIds[$path] = $pathId;
-                    $paths[$pathCount] = $path;
-                    $counts[$pathCount] = array_fill(0, $dateCount, 0);
+
+                    for ($j = 0; $j < $stride; $j++) {
+                        $counts[] = 0;
+                    }
+
                     $pathCount++;
                 }
 
-                $dateId = $dateIds[$date] ?? $dateCount;
+                $dateId = $dateIds[$date];
 
-                if ($dateId === $dateCount) {
-                    $dateIds[$date] = $dateId;
-                    $dates[$dateCount] = $date;
-
-                    for ($i = 0; $i < $pathCount; $i++) {
-                        $counts[$i][$dateCount] = 0;
-                    }
-
-                    $dateCount++;
-                }
-
-                $counts[$pathId][$dateId]++;
+                $counts[($pathId * $stride) + $dateId]++;
 
                 $pos = $nlPos + 1;
             }
         }
 
-        if ($remainder !== '') {
-            $len = strlen($remainder);
-
-            $path = substr(
-                $remainder,
-                self::URI_PREFIX_LENGTH,
-                $len - self::MIN_LINE_LENGTH,
-            );
-            $date = substr(
-                $remainder,
-                $len - self::DATE_OFFSET_FROM_NL,
-                self::DATE_LENGTH,
-            );
-
-            $pathId = $pathIds[$path] ?? $pathCount;
-
-            if ($pathId === $pathCount) {
-                $pathIds[$path] = $pathId;
-                $paths[$pathCount] = $path;
-                $counts[$pathCount] = array_fill(0, $dateCount, 0);
-                $pathCount++;
-            }
-
-            $dateId = $dateIds[$date] ?? $dateCount;
-
-            if ($dateId === $dateCount) {
-                $dateIds[$date] = $dateId;
-                $dates[$dateCount] = $date;
-
-                for ($i = 0; $i < $pathCount; $i++) {
-                    $counts[$i][$dateCount] = 0;
-                }
-
-                $dateCount++;
-            }
-
-            $counts[$pathId][$dateId]++;
-        }
-
         fclose($handle);
 
-        return [$paths, $dates, $counts];
+        return $counts;
     }
 
-    private function mergeState(
-        array &$mergedPaths,
-        array &$mergedPathIds,
-        array &$mergedDates,
-        array &$mergedDateIds,
-        array &$mergedCounts,
-        array $state,
-    ): void {
-        [$paths, $dates, $counts] = $state;
-
-        $dateMap = [];
-        $mergedPathCount = count($mergedPaths);
-        $mergedDateCount = count($mergedDates);
-
-        foreach ($dates as $dateId => $date) {
-            $mergedDateId = $mergedDateIds[$date] ?? $mergedDateCount;
-
-            if ($mergedDateId === $mergedDateCount) {
-                $mergedDateCount++;
-                $mergedDateIds[$date] = $mergedDateId;
-                $mergedDates[$mergedDateId] = $date;
-
-                for ($i = 0; $i < $mergedPathCount; $i++) {
-                    $mergedCounts[$i][$mergedDateId] = 0;
-                }
-            }
-
-            $dateMap[$dateId] = $mergedDateId;
-        }
-
-        foreach ($paths as $pathId => $path) {
-            $mergedPathId = $mergedPathIds[$path] ?? $mergedPathCount;
-
-            if ($mergedPathId === $mergedPathCount) {
-                $mergedPathCount++;
-                $mergedPathIds[$path] = $mergedPathId;
-                $mergedPaths[$mergedPathId] = $path;
-                $mergedCounts[$mergedPathId] = array_fill(0, $mergedDateCount, 0);
-            }
-
-            foreach ($counts[$pathId] as $dateId => $count) {
-                $mergedDateId = $dateMap[$dateId];
-                $mergedCounts[$mergedPathId][$mergedDateId] += $count;
-            }
-        }
-    }
-
-    private function writeOutputFromState(
+    private function writeOutput(
         string $outputPath,
         array $paths,
         array $dates,
         array $counts,
+        int $dateCount,
     ): void {
         $sortedDates = $dates;
         asort($sortedDates);
@@ -343,27 +291,20 @@ final class Parser
             $escapedPath = str_replace('/', '\\/', $path);
             $pathBuffer .= "\n    \"{$escapedPath}\": {";
 
-            $firstDate = true;
-            $pathCounts = $counts[$pathId];
+            $entries = [];
+            $base = $pathId * $dateCount;
 
             foreach ($orderedDateIds as $dateId) {
-                $count = $pathCounts[$dateId];
+                $count = $counts[$base + $dateId];
 
                 if ($count === 0) {
                     continue;
                 }
 
-                if ($firstDate) {
-                    $pathBuffer .= "\n";
-                    $firstDate = false;
-                } else {
-                    $pathBuffer .= ",\n";
-                }
-
-                $pathBuffer .= "        \"{$dates[$dateId]}\": {$count}";
+                $entries[] = "        \"{$dates[$dateId]}\": {$count}";
             }
 
-            $pathBuffer .= "\n    }";
+            $pathBuffer .= "\n" . implode(",\n", $entries) . "\n    }";
             fwrite($out, $pathBuffer);
         }
 
