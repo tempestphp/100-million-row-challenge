@@ -23,7 +23,11 @@ final class Parser
             $outputData[$path][$date]++;
         }
 
-        $json = json_encode((object) $outputData);
+        foreach ($outputData as $path => $dates) {
+            ksort($outputData[$path]);
+        }
+
+        $json = json_encode((object) $outputData, JSON_PRETTY_PRINT);
 
         file_put_contents($outputPath, $json);
     }
