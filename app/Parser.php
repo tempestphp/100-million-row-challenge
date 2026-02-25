@@ -7,7 +7,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int DISCOVER_SIZE = 16_777_216;
+    private const int DISCOVER_SIZE = 1_048_576;
     private const int WORKERS = 5;
     private const int READ_CHUNK = 1_048_576;
 
@@ -57,7 +57,7 @@ final class Parser
 
             $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
             if (!isset($pathIds[$slug])) {
-                $pathIds[$slug] = $pathCount;
+                $pathIds[$slug] = $pathCount * $dateCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
@@ -69,7 +69,7 @@ final class Parser
         foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, 25);
             if (!isset($pathIds[$slug])) {
-                $pathIds[$slug] = $pathCount;
+                $pathIds[$slug] = $pathCount * $dateCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
@@ -126,34 +126,36 @@ final class Parser
         array $pathIds, array $dateIds,
         int $pathCount, int $dateCount
     ): array {
-        $stride = $dateCount;
-        $counts = array_fill(0, $pathCount * $stride, 0);
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining);
+            $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
+            $chunk = fread($handle, $toRead);
             $chunkLen = strlen($chunk);
+            if ($chunkLen === 0) break;
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
             if ($lastNl === false) {
-                continue;
+                fseek($handle, -$chunkLen, SEEK_CUR);
+                break;
             }
 
-            if ($lastNl < $chunkLen - 1) {
-                $excess = $chunkLen - $lastNl - 1;
-                fseek($handle, -$excess, SEEK_CUR);
-                $remaining += $excess;
+            $tail = $chunkLen - $lastNl - 1;
+            if ($tail > 0) {
+                fseek($handle, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
 
             $pos = 0;
             while ($pos < $lastNl) {
                 $nlPos = strpos($chunk, "\n", $pos + 52);
 
-                $counts[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)] * $stride + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                $counts[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
 
                 $pos = $nlPos + 1;
             }
