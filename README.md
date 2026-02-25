@@ -1,5 +1,5 @@
 > [!IMPORTANT]
-> The 100-million-row challenge is now **live**. You have until March 15, 11:59PM to submit your entry!
+> The 100-million-row challenge is now **live**. You have until March 15, 11:59PM CET to submit your entry!
     
 Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize! 
 
@@ -12,9 +12,11 @@ composer install
 php tempest data:generate
 ```
 
-By default, the `data:generate` command will generate a dataset of 1,000,000 visits. The real benchmark will use 100,000,000 visits. You can adjust the number of visits as well by running `php tempest data:generate 100_000_000` Next, implement your solution in `app/Parser.php`:
+By default, the `data:generate` command will generate a dataset of 1,000,000 visits. The real benchmark will use 100,000,000 visits. You can adjust the number of visits as well by running `php tempest data:generate 100_000_000`.
 
 Also, the generator will use a seeded randomizer so that, for local development, you work on the same dataset as others. You can overwrite the seed with the `data:generate --seed=123456` parameter, and you can also pass in the `data:generate --no-seed` parameter for an unseeded random data set. The real data set was generated without a seed and is secret.
+
+Next, implement your solution in `app/Parser.php`:
 
 ```php
 final class Parser
@@ -32,7 +34,7 @@ You can always run your implementation to check your work:
 php tempest data:parse
 ```
 
-Furthermore, you can validate whether your output file is formatted correctly by running the `data:validate` command:
+Furthermore, you can validate whether your output file is formatted correctly by running the `data:validate` command. This command will run on a small dataset with a predetermined expected output. If validation succeeds, you can be sure you implemented a working solution:
 
 ```sh
 php tempest data:validate
@@ -73,13 +75,17 @@ Your parser should store the following output in `$outputPath` as a JSON file:
 
 Send a pull request to this repository with your solution. The title of your pull request should simply be your GitHub's username. If your solution validates, we'll run it on the benchmark server and store your time in [leaderboard.csv](./leaderboard.csv). You can continue to improve your solution, but keep in mind that benchmarks are manually triggered, and you might need to wait a while before your results are published.
 
+## A note on copying other branches
+
+You might be tempted to look for inspiration from other competitors. While we have no means of preventing you from doing that, we will remove submissions that have clearly been copied from other submissions. We validate each submission by hand up front and ask you to come up with an original solution of your own.
+
 ## FAQ
 
 #### What can I win?
 
 Prizes are sponsored by [PhpStorm](https://www.jetbrains.com/phpstorm/) and [Tideways](https://tideways.com/). The winners will be determined based on the fastest entries submitted, if two equally fast entries are registered, time of submission will be taken into account.
 
-All entries must be submitted before March 16, 2026 (so you have until March 15, 11:59PM to submit). Any entries submitted after the cutoff date won't be taken into account.
+All entries must be submitted before March 16, 2026 (so you have until March 15, 11:59PM CET to submit). Any entries submitted after the cutoff date won't be taken into account.
 
 First place will get:
 
@@ -108,7 +114,11 @@ The benchmark results of each run are stored in [leaderboard.csv](./leaderboard.
 
 #### What kind of server is used for the benchmark?
 
-The benchmark runs on a Premium Intel Digital Ocean Droplet with 2vCPUs and 1.5GB of available memory. We deliberately chose not to use a more powerful server because we like to test in a somewhat "standard" environment for PHP.
+The benchmark runs on a Premium Intel Digital Ocean Droplet with 2vCPUs and 1.5GB of available memory. We deliberately chose not to use a more powerful server because we like to test in a somewhat "standard" environment for PHP. These PHP extensions are available:
+
+```txt
+bcmath, calendar, Core, ctype, curl, date, dom, exif, fileinfo, filter, ftp, gd, gettext, gmp, hash, iconv, igbinary, imagick, imap, intl, json, lexbor, libxml, mbstring, memcached, msgpack, mysqli, mysqlnd, openssl, pcntl, pcre, PDO, pdo_mysql, pdo_pgsql, pdo_sqlite, pgsql, Phar, posix, random, readline, redis, Reflection, session, shmop, SimpleXML, soap, sockets, sodium, SPL, sqlite3, standard, sysvmsg, sysvsem, sysvshm, tokenizer, uri, xml, xmlreader, xmlwriter, xsl, Zend OPcache, zip, zlib, Zend OPcache
+```
 
 #### How to ensure fair results?
 
@@ -125,3 +135,11 @@ This challenge was inspired by the [1 billion row challenge in Java](https://git
 #### What about the JIT?
 
 While testing this challenge, the JIT didn't seem to offer any significant performance boost. Furthermore, on occasion it caused segfaults. This led to the decision for the JIT to be disabled for this challenge.
+
+#### Can I use FFI?
+
+The point of this challenge is to push PHP to its limits. That's why you're not allowed to use FFI.
+
+#### How long should I wait for benchmark results to come in?
+
+We manually verify each submission before running it on the benchmark sever. Depending on our availability, this means possible waiting times. If we haven't gotten to your submission within 24 hours, feel free to ping @brendt or @xHeaven in a comment to make sure we don't forget you.

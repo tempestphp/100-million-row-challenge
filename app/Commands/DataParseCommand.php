@@ -15,6 +15,7 @@ final class DataParseCommand
         string $inputPath = __DIR__ . '/../../data/data.csv',
         string $outputPath = __DIR__ . '/../../data/data.json',
         bool $store = false,
+        ?string $name = null,
     ): void {
         $startTime = microtime(true);
 
@@ -23,9 +24,9 @@ final class DataParseCommand
         $endTime = microtime(true);
         $executionTime = $endTime - $startTime;
 
-        $branchName = exec('git branch --show-current');
+        $name ??= exec('git branch --show-current');
 
-        $leaderBoardEntry = time() . ',' . $branchName . ',' . $executionTime;
+        $leaderBoardEntry = time() . ',' . $name . ',' . $executionTime;
 
         if ($store) {
             $leaderBoardFile = fopen(__DIR__ . '/../../leaderboard.csv', 'a');
