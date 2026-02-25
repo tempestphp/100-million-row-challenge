@@ -88,18 +88,6 @@ final readonly class Parser
         }
 
         unset($chunk);
-        $quickPath = [];
-        foreach ($paths as $id => $p) {
-            $pLen = strlen($p);
-            $fc = $p[0];
-            $lc = $p[$pLen - 1];
-
-            if (!isset($quickPath[$pLen][$fc][$lc])) {
-                $quickPath[$pLen][$fc][$lc] = $id;
-            } else {
-                $quickPath[$pLen][$fc][$lc] = -1;
-            }
-        }
 
         $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
@@ -119,7 +107,6 @@ final readonly class Parser
                     $dateIds,
                     $pathCount,
                     $dateCount,
-                    $quickPath,
                     $safeSkip,
                 );
                 file_put_contents($tmpFile, pack('V*', ...$data));
@@ -137,7 +124,6 @@ final readonly class Parser
             $dateIds,
             $pathCount,
             $dateCount,
-            $quickPath,
             $safeSkip,
         );
 
@@ -196,7 +182,6 @@ final readonly class Parser
         array $dateIds,
         int $pathCount,
         int $dateCount,
-        array $quickPath,
         int $safeSkip,
     ): array {
         $stride = $dateCount;
@@ -225,19 +210,15 @@ final readonly class Parser
             while ($pos < $lastNl) {
                 $nlPos = strpos($chunk, "\n", $pos + $safeSkip);
 
-                $pathLen = $nlPos - $pos - 51;
-                $pathId = $quickPath[$pathLen][$chunk[$pos + 25]][$chunk[$nlPos - 27]] ?? -1;
-
-                if ($pathId < 0) {
-                    $path = substr($chunk, $pos + 25, $pathLen);
-                    $pathId = $pathIds[$path] ?? $pathCount;
-                    if ($pathId === $pathCount) {
-                        $pathIds[$path] = $pathId;
-                        for ($j = 0; $j < $stride; $j++) {
-                            $counts[($pathCount * $stride) + $j] = 0;
-                        }
-                        $pathCount++;
+                $path = substr($chunk, $pos + 25, $nlPos - $pos - 51);
+                $pathId = $pathIds[$path] ?? -1;
+                if ($pathId === -1) {
+                    $pathId = $pathCount;
+                    $pathIds[$path] = $pathId;
+                    for ($j = 0; $j < $stride; $j++) {
+                        $counts[($pathCount * $stride) + $j] = 0;
                     }
+                    $pathCount++;
                 }
 
                 $date = substr($chunk, $nlPos - 25, 10);
