@@ -9,22 +9,28 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         $result = [];
+        $endresult = [];
 
         $file = new SplFileObject($inputPath);
         while (!$file->eof()) {
-            if (preg_match('/^https:\/\/stitcher.io(.*),(.{10}).*$/', $file->current(), $matches)) {
-                $result[$matches[1]] ??= [];
-                $result[$matches[1]][$matches[2]] =
-                    ($result[$matches[1]][$matches[2]] ?? 0) + 1;
+            $line = $file->current();
+
+            if ($pos = strpos($line, ',')) {
+                $url = substr($line, 0, $pos);
+                $timestamp = substr($line, $pos + 1, 10);
+
+                $result[$url] ??= [];
+                $result[$url][$timestamp] = ($result[$url][$timestamp] ?? 0) + 1;
             }
 
             $file->next();
         }
 
-        foreach ($result as &$row) {
+        foreach ($result as $index => &$row) {
             ksort($row);
+            $endresult[str_replace('https://stitcher.io','',$index)] = $row;
         }
 
-        file_put_contents($outputPath, json_encode($result, JSON_PRETTY_PRINT));
+        file_put_contents($outputPath, json_encode($endresult, JSON_PRETTY_PRINT));
     }
 }
