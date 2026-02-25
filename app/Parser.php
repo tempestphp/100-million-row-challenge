@@ -44,41 +44,6 @@ final readonly class Parser
 
         fclose($handle);
         $boundaries[] = $fileSize;
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
-        $warmUpSize = $fileSize > 8_388_608 ? 8_388_608 : $fileSize;
-        $chunk = fread($handle, $warmUpSize);
-        fclose($handle);
-        $lastNl = strrpos($chunk, "\n");
-        $pathIds = [];
-        $paths = [];
-        $pathCount = 0;
-        $dateIds = [];
-        $dates = [];
-        $dateCount = 0;
-        $pos = 0;
-        while ($pos < $lastNl) {
-            $nlPos = strpos($chunk, "\n", $pos + 55);
-            $path = substr($chunk, $pos + 25, $nlPos - $pos - 51);
-
-            if (!isset($pathIds[$path])) {
-                $pathIds[$path] = $pathCount;
-                $paths[$pathCount] = $path;
-                $pathCount++;
-            }
-
-            $date = substr($chunk, $nlPos - 25, 10);
-
-            if (!isset($dateIds[$date])) {
-                $dateIds[$date] = $dateCount;
-                $dates[$dateCount] = $date;
-                $dateCount++;
-            }
-
-            $pos = $nlPos + 1;
-        }
-
-        unset($chunk);
 
         $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
@@ -90,6 +55,7 @@ final readonly class Parser
             $pid = pcntl_fork();
 
             if ($pid === 0) {
+                [$pathIds, , $pathCount, $dateIds, , $dateCount] = self::discover($inputPath, $fileSize);
                 $data = self::processChunk(
                     $inputPath,
                     $boundaries[$i],
@@ -106,6 +72,7 @@ final readonly class Parser
             $pids[$i] = $pid;
         }
 
+        [$pathIds, $paths, $pathCount, $dateIds, $dates, $dateCount] = self::discover($inputPath, $fileSize);
         $parentCounts = self::processChunk(
             $inputPath,
             $boundaries[$workers - 1],
@@ -161,6 +128,45 @@ final readonly class Parser
 
         fwrite($out, "\n}");
         fclose($out);
+    }
+
+    private static function discover(string $inputPath, int $fileSize): array
+    {
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $warmUpSize = $fileSize > 8_388_608 ? 8_388_608 : $fileSize;
+        $chunk = fread($handle, $warmUpSize);
+        fclose($handle);
+        $lastNl = strrpos($chunk, "\n");
+        $pathIds = [];
+        $paths = [];
+        $pathCount = 0;
+        $dateIds = [];
+        $dates = [];
+        $dateCount = 0;
+        $pos = 0;
+        while ($pos < $lastNl) {
+            $nlPos = strpos($chunk, "\n", $pos + 55);
+            $path = substr($chunk, $pos + 25, $nlPos - $pos - 51);
+
+            if (!isset($pathIds[$path])) {
+                $pathIds[$path] = $pathCount;
+                $paths[$pathCount] = $path;
+                $pathCount++;
+            }
+
+            $date = substr($chunk, $nlPos - 25, 10);
+
+            if (!isset($dateIds[$date])) {
+                $dateIds[$date] = $dateCount;
+                $dates[$dateCount] = $date;
+                $dateCount++;
+            }
+
+            $pos = $nlPos + 1;
+        }
+
+        return [$pathIds, $paths, $pathCount, $dateIds, $dates, $dateCount];
     }
 
     private static function processChunk(
