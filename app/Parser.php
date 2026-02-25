@@ -4,6 +4,35 @@ declare(strict_types=1);
 
 namespace App;
 
+use function array_fill;
+use function array_keys;
+use function asort;
+use function count;
+use function fclose;
+use function fgets;
+use function file_get_contents;
+use function file_put_contents;
+use function filesize;
+use function fopen;
+use function fread;
+use function fseek;
+use function ftell;
+use function fwrite;
+use function getmypid;
+use function igbinary_serialize;
+use function igbinary_unserialize;
+use function pcntl_fork;
+use function pcntl_waitpid;
+use function str_replace;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function strlen;
+use function strrpos;
+use function strpos;
+use function substr;
+use function sys_get_temp_dir;
+use function unlink;
+
 final class Parser
 {
     private const int READ_CHUNK_SIZE = 1_048_576;
