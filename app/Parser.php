@@ -58,6 +58,7 @@ final class Parser
 
     private static function parseRange(string $inputPath, int $start, int $end): array
     {
+        set_error_handler(static fn() => true);
         $data = [];
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -83,12 +84,7 @@ final class Parser
                 $lineLen = strlen($line);
 
                 if ($lineLen > 35) {
-                    $key = substr($line, 19, $lineLen - 34);
-                    if (isset($data[$key])) {
-                        $data[$key]++;
-                    } else {
-                        $data[$key] = 1;
-                    }
+                    $data[substr($line, 19, $lineLen - 34)]++;
                 }
 
                 $pos = $firstNl + 1;
@@ -107,12 +103,7 @@ final class Parser
 
             while ($pos < $lastNl) {
                 $nlPos = strpos($chunk, "\n", $pos);
-                $key = substr($chunk, $pos + 19, $nlPos - $pos - 34);
-                if (isset($data[$key])) {
-                    $data[$key]++;
-                } else {
-                    $data[$key] = 1;
-                }
+                $data[substr($chunk, $pos + 19, $nlPos - $pos - 34)]++;
                 $pos = $nlPos + 1;
             }
         }
@@ -121,16 +112,12 @@ final class Parser
             $len = strlen($tail);
 
             if ($len > 35) {
-                $key = substr($tail, 19, $len - 34);
-                if (isset($data[$key])) {
-                    $data[$key]++;
-                } else {
-                    $data[$key] = 1;
-                }
+                $data[substr($tail, 19, $len - 34)]++;
             }
         }
 
         fclose($handle);
+        restore_error_handler();
 
         return $data;
     }
