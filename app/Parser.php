@@ -6,24 +6,13 @@ namespace App;
 
 use PDO;
 use function fclose;
+use function fgets;
 use function file_put_contents;
-use function filesize;
 use function fopen;
-use function fread;
-use function fseek;
-use function ftell;
-use function strlen;
-use function strpos;
-use function strrpos;
-use function substr;
-use function sys_get_temp_dir;
-use function unlink;
-use const SEEK_CUR;
+use function rtrim;
 
 final class Parser
 {
-    private const int READ_CHUNK_SIZE = 1_048_576 * 4; // 4MB chunks
-
     public function parse(string $inputPath, string $outputPath): void
     {
         $db = new PDO('sqlite::memory:');
@@ -60,40 +49,13 @@ final class Parser
 
         $db->beginTransaction();
 
-        while (!feof($handle)) {
-            $chunk = fread($handle, self::READ_CHUNK_SIZE);
-            if ($chunk === false || $chunk === '') {
-                break;
+        while (($line = fgets($handle)) !== false) {
+            if ($line !== "\n" && $line !== '') {
+                // Remove trailing newline character(s)
+                $line = rtrim($line, "\r\n");
+                $stmt->execute([':line' => $line, ':offset' => $offset]);
             }
-
-            $chunkLen = strlen($chunk);
-
-            $lastNl = strrpos($chunk, "
-");
-
-            if ($lastNl !== false && $lastNl < ($chunkLen - 1)) {
-                $excess = $chunkLen - $lastNl - 1;
-                fseek($handle, -$excess, SEEK_CUR);
-                $chunkLen = $lastNl + 1;
-                $chunk = substr($chunk, 0, $chunkLen);
-            }
-
-            $pos = 0;
-            while ($pos < $chunkLen) {
-                $nlPos = strpos($chunk, "
-", $pos);
-                if ($nlPos === false) {
-                    break;
-                }
-
-                $line = substr($chunk, $pos, $nlPos - $pos);
-                if ($line !== '') {
-                    $stmt->execute([':line' => $line, ':offset' => $offset]);
-                }
-                
-                $offset++;
-                $pos = $nlPos + 1;
-            }
+            $offset++;
         }
 
         $db->commit();
