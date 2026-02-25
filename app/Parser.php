@@ -31,8 +31,8 @@ final class Parser
     private function readCsv(string $inputPath): iterable
     {
         $handle = \fopen($inputPath, "r");
-        while (($row = \fgetcsv($handle, escape: '\\')) !== false) {
-            yield $row;
+        while (($line = \fgets($handle)) !== false) {
+            yield \explode(',', $line, 2);
         }
         \fclose($handle);
     }
