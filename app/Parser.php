@@ -1,226 +1,306 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App;
+
+use function array_fill;
+use function array_keys;
+use function asort;
+use function fclose;
+use function fopen;
+use function fread;
+use function fseek;
+use function ftell;
+use function fwrite;
+use function implode;
+use function pack;
+use function str_replace;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function strlen;
+use function strpos;
+use function strrpos;
+use function substr;
+use function function_exists;
+use function pcntl_fork;
+use function pcntl_waitpid;
+use function getmypid;
+use function sys_get_temp_dir;
+use function file_get_contents;
+use function file_put_contents;
+use function unpack;
+use function unlink;
+use function sprintf;
+use function filesize;
 
 final class Parser
 {
+    private const int READ_CHUNK_SIZE = 16 * 1024 * 1024; // 16MB
+    private const int WRITE_BUFFER_SIZE = 1 * 1024 * 1024; // 1MB
+    private const int URI_PREFIX_LENGTH = 19; // Skips "https://stitcher.io" to get "/blog/..."
+    private const int DATE_TAIL_LENGTH = 25; // "2026-01-24T01:16:58+00:00"
+    private const int WORKERS = 4;
+    private const int DATE_STRIDE = 2640; // Enough for 2020-2026 with formula index
+
     public function parse(string $inputPath, string $outputPath): void
     {
-        $handle = fopen($inputPath, 'r');
-        if (!$handle) {
-            throw new \RuntimeException('Cannot open file: ' . $inputPath);
+        $fileSize = filesize($inputPath);
+
+        // 1. Preparation: Boundaries
+        // We use a math-based date index to avoid string lookups
+        $dates = $this->generateDates();
+
+        // 2. Discovery: Find all paths
+        [$pathIds, $pathNames, $pathCount] = $this->discoverPaths($inputPath, min($fileSize, 32 * 1024 * 1024));
+
+        // 3. Execution
+        $mergedCounts = $this->executeParallel(
+            $inputPath,
+            $fileSize,
+            $pathIds,
+            $pathCount
+        );
+
+        // 4. Output
+        $this->writeOutput($outputPath, $pathNames, $dates, $mergedCounts);
+    }
+
+    private function generateDates(): array
+    {
+        $dates = [];
+        for ($y = 2020; $y <= 2026; $y++) {
+            for ($m = 1; $m <= 12; $m++) {
+                $daysInMonth = match ($m) {
+                    2 => ($y % 4 === 0 && ($y % 100 !== 0 || $y % 400 === 0)) ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+                for ($d = 1; $d <= $daysInMonth; $d++) {
+                    $idx = ($y - 2020) * 372 + $m * 31 + $d;
+                    $dates[$idx] = sprintf('%04d-%02d-%02d', $y, $m, $d);
+                }
+            }
+        }
+        return $dates;
+    }
+
+    private function discoverPaths(string $inputPath, int $size): array
+    {
+        $handle = fopen($inputPath, 'rb');
+        $chunk = fread($handle, $size);
+        fclose($handle);
+
+        $lastNl = strrpos($chunk, "\n");
+        if ($lastNl === false)
+            return [[], [], 0];
+
+        $pathIds = [];
+        $pathNames = [];
+        $pathCount = 0;
+        $pos = 0;
+
+        while ($pos < $lastNl) {
+            $commaPos = strpos($chunk, ',', $pos);
+            if ($commaPos === false || $commaPos > $lastNl)
+                break;
+
+            $path = substr($chunk, $pos + self::URI_PREFIX_LENGTH, $commaPos - ($pos + self::URI_PREFIX_LENGTH));
+
+            if (!isset($pathIds[$path])) {
+                $pathIds[$path] = $pathCount;
+                $pathNames[$pathCount] = $path;
+                $pathCount++;
+            }
+
+            $pos = strpos($chunk, "\n", $commaPos) + 1;
         }
 
-        // Increase read buffer and chunk size for better I/O performance with large files
-        // Use 16MB buffers for 100M rows
-        stream_set_read_buffer($handle, 16 * 1024 * 1024);
-        stream_set_chunk_size($handle, 16 * 1024 * 1024);
+        return [$pathIds, $pathNames, $pathCount];
+    }
 
-        // Path ID mapping to avoid duplicate string storage
-        $pathToId = [];
-        $idToPath = [];
-        $nextPathId = 0;
-        
-        // Data structure: pathId => [dateInt => count]
-        $data = [];
-        $domainLength = null; // Will be computed from first line
-        
-        while (($line = fgets($handle)) !== false) {
-            // Optimized string processing:
-            // 1. Use rtrim instead of substr for newline removal
-            // 2. Use explode instead of strpos+substr for splitting
-            
-            $line = rtrim($line, "\n\r");
-            if ($line === '') {
-                continue;
-            }
+    private function executeParallel(
+        string $inputPath,
+        int $fileSize,
+        array $pathIds,
+        int $pathCount
+    ): array {
+        $numWorkers = function_exists('pcntl_fork') ? self::WORKERS : 1;
 
-            // Find comma using strpos (still needed for performance)
-            // But we can combine with substr for single pass
-            $commaPos = strpos($line, ',');
-            if ($commaPos === false) {
-                continue;
-            }
+        if ($numWorkers === 1) {
+            return $this->parseRange($inputPath, 0, $fileSize, $pathIds, $pathCount);
+        }
 
-            // Compute domain length if not yet known
-            if ($domainLength === null) {
-                // Find the position of the third slash after ://
-                $schemeEnd = strpos($line, '://');
-                if ($schemeEnd === false) {
-                    continue; // malformed line
+        // Multi-processing logic
+        $chunkSize = (int) ($fileSize / $numWorkers);
+        $boundaries = [0];
+        $handle = fopen($inputPath, 'rb');
+        for ($i = 1; $i < $numWorkers; $i++) {
+            fseek($handle, $i * $chunkSize);
+            fgets($handle); // reach end of line
+            $boundaries[] = ftell($handle);
+        }
+        $boundaries[] = $fileSize;
+        fclose($handle);
+
+        $tmpDir = sys_get_temp_dir();
+        $myPid = getmypid();
+        $pids = [];
+        $tmpFiles = [];
+
+        for ($i = 0; $i < $numWorkers; $i++) {
+            if ($i < $numWorkers - 1) {
+                $tmpFile = $tmpDir . "/php_parser_{$myPid}_{$i}.bin";
+                $tmpFiles[] = $tmpFile;
+
+                $pid = pcntl_fork();
+                if ($pid === 0) {
+                    $counts = $this->parseRange($inputPath, $boundaries[$i], $boundaries[$i + 1], $pathIds, $pathCount);
+                    file_put_contents($tmpFile, pack('V*', ...$counts));
+                    exit(0);
                 }
-                $pathStart = strpos($line, '/', $schemeEnd + 3);
-                if ($pathStart === false) {
-                    continue; // malformed line
-                }
-                $domainLength = $pathStart;
+                $pids[] = $pid;
+            } else {
+                // Last partial is handled by main process
+                $mergedCounts = $this->parseRange($inputPath, $boundaries[$i], $boundaries[$i + 1], $pathIds, $pathCount);
             }
-            
-            // Extract path - skip domain
-            $path = substr($line, $domainLength, $commaPos - $domainLength);
-            
-            // Extract date and convert to integer YYYYMMDD for memory efficiency
-            // Date starts at $commaPos+1, format: YYYY-MM-DD
-            // Convert to integer: remove hyphens using direct character access
-            // Positions: YYYY-MM-DD
-            // 0 1 2 3 4 5 6 7 8 9 (relative to $commaPos+1)
-            $dateInt = (int) ($line[$commaPos+1] . $line[$commaPos+2] . $line[$commaPos+3] . $line[$commaPos+4]
-                            . $line[$commaPos+6] . $line[$commaPos+7] . $line[$commaPos+9] . $line[$commaPos+10]);
+        }
 
-            // Get or create path ID
-            if (!isset($pathToId[$path])) {
-                $pathId = $nextPathId++;
-                $pathToId[$path] = $pathId;
-                $idToPath[$pathId] = $path;
-                $data[$pathId] = [];
-            } else {
-                $pathId = $pathToId[$path];
+        // Wait for workers
+        $status = 0;
+        foreach ($pids as $pid) {
+            pcntl_waitpid($pid, $status);
+        }
+
+        // Merge results
+        foreach ($tmpFiles as $tmpFile) {
+            $data = (string) file_get_contents($tmpFile);
+            $workerCounts = unpack('V*', $data);
+            unlink($tmpFile);
+
+            $j = 0;
+            foreach ($workerCounts as $val) {
+                $mergedCounts[$j++] += $val;
             }
-            
-            // Increment count - use isset for performance
-            if (isset($data[$pathId][$dateInt])) {
-                $data[$pathId][$dateInt]++;
-            } else {
-                $data[$pathId][$dateInt] = 1;
+        }
+
+        return $mergedCounts;
+    }
+
+    private function parseRange(
+        string $inputPath,
+        int $start,
+        int $end,
+        array $pathIds,
+        int $pathCount
+    ): array {
+        $stride = self::DATE_STRIDE;
+        $counts = array_fill(0, $pathCount * $stride, 0);
+
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        fseek($handle, $start);
+
+        $remaining = $end - $start;
+
+        while ($remaining > 0) {
+            $bufferSize = min($remaining, self::READ_CHUNK_SIZE);
+            $chunk = fread($handle, $bufferSize);
+            if ($chunk === '' || $chunk === false)
+                break;
+
+            $chunkLen = strlen($chunk);
+            $lastNl = strrpos($chunk, "\n");
+
+            if ($lastNl === false) {
+                fseek($handle, $start + ($end - $start - $remaining) + $chunkLen);
+                break;
+            }
+
+            if ($lastNl < $chunkLen - 1) {
+                $rewind = $chunkLen - $lastNl - 1;
+                fseek($handle, -$rewind, SEEK_CUR);
+                $remaining += $rewind;
+                $chunk = substr($chunk, 0, $lastNl + 1);
+                $chunkLen = $lastNl + 1;
+            }
+
+            $remaining -= $chunkLen;
+
+            // V2 INNER LOOP: Comma-free and Math-based
+            $pos = 0;
+            while ($pos < $chunkLen) {
+                // Find next newline. Standard lines are ~60-80 chars.
+                $nextNl = strpos($chunk, "\n", $pos + 40);
+                if ($nextNl === false)
+                    break;
+
+                // Optimization: The date/time suffix is fixed length (25 chars).
+                // Example: ,2026-01-24T01:16:58+00:00\n
+                // Byte offsets relative to $nextNl:
+                // ,    => -26
+                // YYYY => -25, -24, -23, -22
+                // -    => -21
+                // MM   => -20, -19
+                // -    => -18
+                // DD   => -17, -16
+
+                // Pure Math Date Index (0-2555 range)
+                $dateIdx = ((ord($chunk[$nextNl - 25]) - 48) * 1000 + (ord($chunk[$nextNl - 24]) - 48) * 100 + (ord($chunk[$nextNl - 23]) - 48) * 10 + (ord($chunk[$nextNl - 22]) - 48) - 2020) * 372
+                    + ((ord($chunk[$nextNl - 20]) - 48) * 10 + (ord($chunk[$nextNl - 19]) - 48)) * 31
+                    + ((ord($chunk[$nextNl - 17]) - 48) * 10 + (ord($chunk[$nextNl - 16]) - 48));
+
+                // Path starts at $pos + URI_PREFIX_LENGTH.
+                // It ends EXACTLY before the comma at $nextNl - 26.
+                $pathLen = ($nextNl - 26) - ($pos + self::URI_PREFIX_LENGTH);
+                $path = substr($chunk, $pos + self::URI_PREFIX_LENGTH, $pathLen);
+
+                if (isset($pathIds[$path])) {
+                    $counts[$pathIds[$path] * $stride + $dateIdx]++;
+                }
+
+                $pos = $nextNl + 1;
             }
         }
 
         fclose($handle);
+        return $counts;
+    }
 
-        // Write JSON incrementally to avoid large string in memory
-        $this->writeIncrementalJsonWithPathMapping($data, $idToPath, $outputPath);
-    }
-    
-    /**
-     * Write JSON output incrementally to avoid large string in memory
-     */
-    private function writeIncrementalJson(array $data, string $outputPath): void
-    {
-        $fp = fopen($outputPath, 'w');
-        if (!$fp) {
-            throw new \RuntimeException('Cannot open output file: ' . $outputPath);
-        }
-        
-        fwrite($fp, "{\n");
-        
+    private function writeOutput(
+        string $outputPath,
+        array $pathNames,
+        array $dates,
+        array $counts
+    ): void {
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, self::WRITE_BUFFER_SIZE);
+        fwrite($out, "{\n");
+
         $firstPath = true;
-        foreach ($data as $path => $dates) {
-            ksort($dates);
-            
-            if (!$firstPath) {
-                fwrite($fp, ",\n");
-            }
+        foreach ($pathNames as $pathId => $path) {
+            if (!$firstPath)
+                fwrite($out, ",\n");
             $firstPath = false;
-            
-            // Write path key
-            fwrite($fp, '    "' . $this->escapeJsonString($path) . '": {' . "\n");
-            
+
+            $escapedPath = str_replace('/', '\\/', $path);
+            fwrite($out, "    \"{$escapedPath}\": {\n");
+
             $firstDate = true;
-            foreach ($dates as $dateInt => $count) {
-                if (!$firstDate) {
-                    fwrite($fp, ",\n");
+            $base = $pathId * self::DATE_STRIDE;
+            foreach ($dates as $dateIdx => $date) {
+                $count = $counts[$base + $dateIdx];
+                if ($count > 0) {
+                    if (!$firstDate)
+                        fwrite($out, ",\n");
+                    $firstDate = false;
+                    fwrite($out, "        \"{$date}\": {$count}");
                 }
-                $firstDate = false;
-                
-                // Convert integer date back to string format
-                $dateStr = (string) $dateInt;
-                $formattedDate = substr($dateStr, 0, 4) . '-' .
-                                 substr($dateStr, 4, 2) . '-' .
-                                 substr($dateStr, 6, 2);
-                
-                fwrite($fp, '        "' . $formattedDate . '": ' . $count);
             }
-            
-            fwrite($fp, "\n    }");
+            fwrite($out, "\n    }");
         }
-        
-        fwrite($fp, "\n}");
-        fclose($fp);
-    }
-    
-    /**
-     * Write JSON output with path ID mapping using buffered writes
-     */
-    private function writeIncrementalJsonWithPathMapping(array $data, array $idToPath, string $outputPath): void
-    {
-        $fp = fopen($outputPath, 'w');
-        if (!$fp) {
-            throw new \RuntimeException('Cannot open output file: ' . $outputPath);
-        }
-        
-        // Buffered writing to reduce system call overhead
-        $buffer = '';
-        $bufferSize = 0;
-        $maxBufferSize = 1024 * 1024; // 1MB
-        
-        $flushBuffer = function() use (&$buffer, &$bufferSize, $fp) {
-            if ($bufferSize > 0) {
-                fwrite($fp, $buffer);
-                $buffer = '';
-                $bufferSize = 0;
-            }
-        };
-        
-        $write = function(string $data) use (&$buffer, &$bufferSize, $flushBuffer, $maxBufferSize) {
-            $buffer .= $data;
-            $bufferSize += strlen($data);
-            if ($bufferSize >= $maxBufferSize) {
-                $flushBuffer();
-            }
-        };
-        
-        $write("{\n");
-        
-        $firstPath = true;
-        // Iterate through path IDs in order (0, 1, 2, ...)
-        for ($pathId = 0; $pathId < count($idToPath); $pathId++) {
-            $path = $idToPath[$pathId];
-            $dates = $data[$pathId];
-            ksort($dates);
-            
-            if (!$firstPath) {
-                $write(",\n");
-            }
-            $firstPath = false;
-            
-            // Write path key
-            $write('    "' . $this->escapeJsonString($path) . '": {' . "\n");
-            
-            $firstDate = true;
-            foreach ($dates as $dateInt => $count) {
-                if (!$firstDate) {
-                    $write(",\n");
-                }
-                $firstDate = false;
-                
-                // Convert integer date back to string format
-                $dateStr = (string) $dateInt;
-                $formattedDate = substr($dateStr, 0, 4) . '-' .
-                                 substr($dateStr, 4, 2) . '-' .
-                                 substr($dateStr, 6, 2);
-                
-                $write('        "' . $formattedDate . '": ' . $count);
-            }
-            
-            $write("\n    }");
-        }
-        
-        $write("\n}");
-        
-        // Flush any remaining buffer
-        $flushBuffer();
-        
-        fclose($fp);
-    }
-    
-    /**
-     * Escape string for JSON using json_encode for proper escaping
-     */
-    private function escapeJsonString(string $str): string
-    {
-        // Use json_encode for proper JSON escaping, then strip surrounding quotes
-        $json = json_encode($str, JSON_UNESCAPED_UNICODE);
-        // json_encode returns quoted string, remove the quotes
-        return substr($json, 1, -1);
+
+        fwrite($out, "\n}");
+        fclose($out);
     }
 }
