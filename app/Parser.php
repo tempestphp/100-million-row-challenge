@@ -2,8 +2,6 @@
 
 namespace App;
 
-use SplFileObject;
-
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
@@ -11,20 +9,19 @@ final class Parser
         $result = [];
         $endresult = [];
 
-        $file = new SplFileObject($inputPath);
-        while (!$file->eof()) {
-            $line = $file->current();
+        $handle = fopen($inputPath, 'r');
 
-            if ($pos = strpos($line, ',')) {
-                $url = substr($line, 0, $pos);
-                $timestamp = substr($line, $pos + 1, 10);
+        while ($line = fgets($handle)) {
+            $pos = strpos($line, ',');
+            $url = substr($line, 0, $pos);
+            $timestamp = substr($line, $pos + 1, 10);
 
-                $result[$url] ??= [];
-                $result[$url][$timestamp] = ($result[$url][$timestamp] ?? 0) + 1;
-            }
-
-            $file->next();
+            $result[$url] ??= [];
+            $result[$url][$timestamp] =
+                ($result[$url][$timestamp] ?? 0) + 1;
         }
+
+        fclose($handle);
 
         foreach ($result as $index => &$row) {
             ksort($row);
