@@ -2,6 +2,14 @@
 
 namespace App;
 
+use function fopen;
+use function fgets;
+use function strlen;
+use function substr;
+use function ksort;
+use function fwrite;
+use function json_encode;
+
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
