@@ -19,10 +19,8 @@ use function ord;
 use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
-use function stream_get_contents;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
-use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
@@ -30,9 +28,6 @@ use function substr;
 use function unpack;
 
 use const SEEK_CUR;
-use const STREAM_IPPROTO_IP;
-use const STREAM_PF_UNIX;
-use const STREAM_SOCK_STREAM;
 
 final readonly class Parser
 {
@@ -111,14 +106,16 @@ final readonly class Parser
             }
         }
 
-        $pipes = [];
+        $tmpDir = sys_get_temp_dir();
+        $myPid = getmypid();
+        $tmpFiles = [];
         $pids = [];
         for ($i = 0; $i < ($workers - 1); $i++) {
-            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            $tmpFile = $tmpDir . '/parse_' . $myPid . '_' . $i;
+            $tmpFiles[$i] = $tmpFile;
             $pid = pcntl_fork();
 
             if ($pid === 0) {
-                fclose($pair[0]);
                 $data = self::processChunk(
                     $inputPath,
                     $boundaries[$i],
@@ -130,15 +127,10 @@ final readonly class Parser
                     $quickPath,
                     $safeSkip,
                 );
-                $binary = igbinary_serialize($data);
-                fwrite($pair[1], $binary);
-
-                fclose($pair[1]);
+                file_put_contents($tmpFile, pack('V*', ...$data));
                 exit(0);
             }
 
-            fclose($pair[1]);
-            $pipes[$i] = $pair[0];
             $pids[$i] = $pid;
         }
 
@@ -154,13 +146,16 @@ final readonly class Parser
             $safeSkip,
         );
 
+        foreach ($pids as $pid) {
+            pcntl_waitpid($pid, $status);
+        }
+
         $total = $pathCount * $dateCount;
         $mergedCounts = $parentCounts;
         unset($parentCounts);
-        foreach ($pipes as $i => $pipe) {
-            $wCounts = igbinary_unserialize(stream_get_contents($pipe));
-            fclose($pipe);
-            pcntl_waitpid($pids[$i], $status);
+        foreach ($tmpFiles as $tmpFile) {
+            $wCounts = unpack('V*', file_get_contents($tmpFile));
+            unlink($tmpFile);
 
             $j = 0;
             foreach ($wCounts as $v) {
