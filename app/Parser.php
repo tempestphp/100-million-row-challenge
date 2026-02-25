@@ -151,10 +151,7 @@ final class Parser
                 $nlPos = strpos($chunk, "\n", $pos + 52);
                 if ($nlPos === false || $nlPos > $lastNl) break;
 
-                $pathId = $pathIndex[substr($chunk, $pos + 25, $nlPos - $pos - 51)] ?? -1;
-                if ($pathId >= 0) {
-                    $counts[$pathId * $stride + $dates[substr($chunk, $nlPos - 25, 10)]]++;
-                }
+                $counts[$pathIndex[substr($chunk, $pos + 25, $nlPos - $pos - 51)] * $stride + $dates[substr($chunk, $nlPos - 25, 10)]]++;
 
                 $pos = $nlPos + 1;
             }
