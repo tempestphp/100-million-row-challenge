@@ -17,8 +17,6 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
-        gc_disable();
-
         $fileSize = (int) filesize($inputPath);
         [$pathToId, $pathById, $dateToId, $dateById] = $this->discoverDictionary($inputPath, $fileSize);
 
@@ -121,7 +119,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > self::CHUNK_BYTES ? self::CHUNK_BYTES : $remaining);
+            $chunk = (string) fread($handle, $remaining > self::CHUNK_BYTES ? self::CHUNK_BYTES : $remaining);
             if ($chunk === '') {
                 break;
             }
