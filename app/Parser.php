@@ -40,6 +40,7 @@ final class Parser
         ");
 
         $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 8388608); // 8MB buffer
 
         $db->beginTransaction();
 
