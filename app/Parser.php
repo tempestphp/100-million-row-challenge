@@ -18,10 +18,6 @@ final class Parser
                 $collector[$firstKey][$secondKey] = 0;
             }
             $collector[$firstKey][$secondKey]++;
-
-
-            unset($line);
-            unset($key);
         }
 
         fclose($file);
