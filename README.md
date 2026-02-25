@@ -34,14 +34,37 @@ final class Parser
 You can always run your implementation to check your work:
 
 ```sh
-php tempest data:parse
-```
-
-Furthermore, you can validate whether your output file is formatted correctly by running the `data:validate` command. This command will run on a small dataset with a predetermined expected output. If validation succeeds, you can be sure you implemented a working solution:
-
-```sh
 php tempest data:validate
 ```
+
+### Running via Docker (Optional)
+
+If you don't want to install PHP 8.5 on your local machine, you can run all commands through Docker. We provide a tiny Docker environment using `docker-compose.yml`.
+
+First, build the container:
+
+```sh
+docker compose build
+```
+
+Then, you can install the dependencies and run the `tempest` commands inside the container:
+
+```sh
+# Install dependencies
+docker compose run --rm app composer install
+
+# Generate the local dataset
+docker compose run --rm app php tempest data:generate
+
+# Test your parser implementation
+docker compose run --rm app php tempest data:parse
+
+# Validate your solution
+docker compose run --rm app php tempest data:validate
+```
+
+> [!NOTE]
+> File I/O performance (reading and writing files) through Docker on macOS and Windows might be slightly slower than running PHP natively. This is perfectly fine for implementing and validating your solution locally. We will run the final benchmarks natively on a Linux server.
 
 ## Output formatting rules
 
