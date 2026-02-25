@@ -133,9 +133,15 @@ final class Parser
         $db->exec("PRAGMA busy_timeout = 60000;");
 
         // The single prepared statement that directly updates aggregated_counts
+        // Path escaping and date splitting are done entirely in SQL.
         $stmt = $db->prepare("
             INSERT INTO aggregated_counts (path, date, cnt, first_seen)
-            VALUES (?, ?, 1, ?)
+            VALUES (
+                replace(substr(:line, 20, instr(:line, ',') - 20), '/', '\/'), 
+                substr(:line, instr(:line, ',') + 1, 10), 
+                1, 
+                :offset
+            )
             ON CONFLICT(path, date) DO UPDATE SET 
               cnt = cnt + 1,
               first_seen = MIN(first_seen, excluded.first_seen)
@@ -173,14 +179,9 @@ final class Parser
                         break;
                     }
 
-                    // Trim off "https://stitcher.io" (19) and ",202x..." (26)
-                    // Then escape paths directly in PHP
-                    $pathLen = $nlPos - $pos - 45;
-                    if ($pathLen > 0) {
-                        $path = str_replace('/', '\\/', substr($chunk, $pos + 19, $pathLen));
-                        $date = substr($chunk, $nlPos - 25, 10);
-
-                        $stmt->execute([$path, $date, $offset]);
+                    $line = substr($chunk, $pos, $nlPos - $pos);
+                    if ($line !== '') {
+                        $stmt->execute([':line' => $line, ':offset' => $offset]);
                     }
                     
                     $offset++;
