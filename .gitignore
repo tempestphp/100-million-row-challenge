@@ -9,3 +9,35 @@ test-data-actual.json
 .tempest
 .env
 .DS_Store
+
+# PHP
+*.log
+*.cache
+.phpunit.result.cache
+
+# Runtime data
+build/
+
+# Environment files (except .env.example)
+.env.local
+.env.*.local
+.env.production
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# System
+Thumbs.db
+*.tmp
+
+# Composer dependencies (vendor is already ignored)
+/composer.phar
+
+# Temp files
+/tmp/
+
+# Test output
+/coverage/
