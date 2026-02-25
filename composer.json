@@ -1,7 +1,7 @@
 {
     "require": {
-        "php": "^8.4",
-        "tempest/framework": "^2.14"
+        "php": "^8.5",
+        "tempest/framework": "^3.2"
     },
     "autoload": {
         "psr-4": {
