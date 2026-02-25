@@ -42,10 +42,7 @@ final class Parser
 
         $countsBytes = $numPaths * $numDates * 4;
         $totalCounts = $numPaths * $numDates;
-        $useShmop = PHP_OS_FAMILY === 'Linux'
-            && function_exists('shmop_open')
-            && function_exists('shmop_delete')
-            && function_exists('ftok');
+        $useShmop = true;
         $shmKeys = [];
         $shmSegments = [];
 
@@ -93,7 +90,6 @@ final class Parser
                     $shm = $this->tryShmopOpen($shmKeys[$w], 'w', 0, 0);
                     if ($shm !== false) {
                         shmop_write($shm, pack('V*', ...$counts), 0);
-                        shmop_close($shm);
                     }
                 } else {
                     file_put_contents($tempFiles[$w], pack('V*', ...$counts));
@@ -109,7 +105,6 @@ final class Parser
             if ($useShmop) {
                 $raw = shmop_read($shmSegments[$w], 0, $countsBytes);
                 shmop_delete($shmSegments[$w]);
-                shmop_close($shmSegments[$w]);
             } else {
                 $raw = file_get_contents($tempFiles[$w]);
                 unlink($tempFiles[$w]);
