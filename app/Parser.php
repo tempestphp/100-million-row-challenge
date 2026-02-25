@@ -9,8 +9,8 @@ final class Parser
     // 16MB read/write buffers.
     const STREAM_BUFFER_SIZE = 16 << 20;
 
-    // 512MB chunk size when reading input.
-    const READ_CHUNK_SIZE = 512 << 20;
+    // 256B chunk size when reading input.
+    const READ_CHUNK_SIZE = 256 << 20;
 
     // A line is ±75 characters, so 75 * 2^14 = 1.2 MiB, which is a good buffer size for this input,
     // so set a mask to quickly check when this many lines have been buffered.
@@ -24,8 +24,8 @@ final class Parser
         // Don't bother with garbage collection, to avoid any random slowdowns.
         \gc_disable();
 
-        // Memory usage is expected to be high, but limited by the chunk size, so allow it to grow as needed.
-        \ini_set('memory_limit', '-1');
+        // Memory usage is expected to be high, but limited by the chunk size, so limit it to less than the 1.5GB that the test machine has.
+        \ini_set('memory_limit', '1024M');
 
         $time = \microtime(true);
         try {
