@@ -44,7 +44,7 @@ final class Parser
             } elseif ($pid === 0) {
                 // Child: parse chunk and write result
                 $data = $this->parseChunk($inputPath, $offsets[$i], $offsets[$i + 1]);
-                \file_put_contents($tempFiles[$i], \serialize($data));
+                \file_put_contents($tempFiles[$i], \igbinary_serialize($data));
                 exit(0);
             } else {
                 $pids[$i] = $pid;
@@ -102,7 +102,7 @@ final class Parser
         $data = [];
 
         foreach ($tempFiles as $tempFile) {
-            $chunk = \unserialize(\file_get_contents($tempFile));
+            $chunk = \igbinary_unserialize(\file_get_contents($tempFile));
 
             foreach ($chunk as $url => $dates) {
                 if (!isset($data[$url])) {
