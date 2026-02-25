@@ -14,19 +14,37 @@ final class Parser
         $next_date_id = 0;
         $date_map = [];
 
-        while (! feof($handle)) {
-            $line = fgets($handle);
-            if (strpos($line, ',') === false) {
-                continue;
+        $carry = '';
+
+        while (true) {
+            $chunk = fread($handle, 1048576);
+
+            if ($chunk === '' || $chunk === false) {
+                break;
             }
 
-            $url = substr($line, 0, -27);
-            $date = substr($line, -26, 10);
+            $buffer = $carry.$chunk;
+            $pos = 0;
 
-            $url_id = $url_map[$url] ??= $next_url_id++;
-            $date_id = $date_map[$date] ??= $next_date_id++;
+            while (true) {
+                $new_line_pos = strpos($buffer, "\n", $pos);
+                if ($new_line_pos === false) {
+                    $carry = substr($buffer, $pos);
+                    break;
+                }
 
-            $visits[$url_id][$date_id] = ($visits[$url_id][$date_id] ?? 0) + 1;
+                $line_len = $new_line_pos - $pos;
+
+                $url = substr($buffer, $pos, $line_len - 26);
+                $date = substr($buffer, $pos + $line_len - 25, 10);
+
+                $url_id = $url_map[$url] ??= $next_url_id++;
+                $date_id = $date_map[$date] ??= $next_date_id++;
+
+                $visits[$url_id][$date_id] = ($visits[$url_id][$date_id] ?? 0) + 1;
+
+                $pos = $new_line_pos + 1;
+            }
         }
 
         fclose($handle);
