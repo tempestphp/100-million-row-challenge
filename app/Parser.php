@@ -25,34 +25,28 @@ final class Parser
                 path TEXT, 
                 date TEXT, 
                 cnt INTEGER, 
-                first_seen INTEGER, 
                 PRIMARY KEY(path, date)
-            ) WITHOUT ROWID
+            )
         ");
 
         $stmt = $db->prepare("
-            INSERT INTO aggregated_counts (path, date, cnt, first_seen)
+            INSERT INTO aggregated_counts (path, date, cnt)
             VALUES (
                 replace(substr(:line, 20, instr(:line, ',') - 20), '/', '\/'), 
                 substr(:line, instr(:line, ',') + 1, 10), 
-                1, 
-                :offset
+                1
             )
-            ON CONFLICT(path, date) DO UPDATE SET 
-              cnt = cnt + 1,
-              first_seen = MIN(first_seen, excluded.first_seen)
+            ON CONFLICT(path, date) DO UPDATE SET cnt = cnt + 1
         ");
 
         $handle = fopen($inputPath, 'rb');
-        $offset = 0;
 
         $db->beginTransaction();
 
         while (($line = fgets($handle)) !== false) {
             if ($line !== "\n" && $line !== '') {
-                $stmt->execute([':line' => $line, ':offset' => $offset]);
+                $stmt->execute([':line' => $line]);
             }
-            $offset++;
         }
 
         $db->commit();
@@ -76,7 +70,7 @@ SELECT '{
 FROM (
   SELECT
     path,
-    MIN(first_seen) as first_seen,
+    MIN(rowid) as first_seen,
     group_concat(
       '        "' || date || '": ' || cnt,
       ',
