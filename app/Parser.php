@@ -166,14 +166,14 @@ final class Parser
 
             // When there is no line ending, but more input to read, grab another chunk and append
             // it to what is left of the current chunk.
-            if ($lineEnd === false && $current < $end) {
+            while ($lineEnd === false && $current < $end) {
                 // No newline found, and we are not at the end of the file, so carry this chunk over to the next read.
                 $chunkSize = \min(self::READ_CHUNK_SIZE, $end - $current);
                 $chunk = \substr($chunk, $chunkStart) . \fread($input, $chunkSize);
                 $chunkLen = \strlen($chunk);
                 $chunkStart = 0;
                 $current = \ftell($input);
-                continue;
+                $lineEnd = \strpos($chunk, "\n", $chunkStart);
             }
 
             // When at the end of the file, there may not be a line ending, so set the line end to the end of the chunk.
