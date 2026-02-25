@@ -36,7 +36,7 @@ final class Parser
     {
         $file = fopen($inputPath, 'r');
 
-        while ($line = fgets($file)) {
+        while (($line = fgets($file)) !== false) {
             yield $line;
         }
 
