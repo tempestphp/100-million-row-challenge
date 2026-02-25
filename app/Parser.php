@@ -23,9 +23,16 @@ final class Parser
         $input = fopen($inputPath, "rb") ?: throw new Exception("Unable to open input file");
         $this->timer('open');
         $prev = '';
-        while ($data = fread($input, 1024)) {
-            $lines = explode("\n", $prev . $data);
-            $prev = array_pop($lines) ?: '';
+        while ($data = fread($input, 1024 * 16)) {
+            $prevLines = explode("\n", $prev);
+            $lines = explode("\n", $data);
+            $prev = array_pop($lines);
+            $lines[0] = array_pop($prevLines) . $lines[0];
+            foreach ($prevLines as $line) {
+                $url = substr($line, 19, -26);
+                $date = substr($line, -25, -15);
+                $result[$url][$date] = ($result[$url][$date] ?? 0) + 1;
+            }
             foreach ($lines as $line) {
                 $url = substr($line, 19, -26);
                 $date = substr($line, -25, -15);
