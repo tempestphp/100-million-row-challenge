@@ -12,8 +12,8 @@ final class Parser
 
         // Read and iterate over the CSV file
         foreach ($this->readCsv($inputPath) as [$url, $date]) {
-            $url = \str_replace('https://stitcher.io', '', $url);
-            $date = \substr($date, 0, 10);
+            $url = \substr($url, 19 /* 'https://stitcher.io' */);
+            $date = \substr($date, 0, 10 /* '2024-06-01' */);
 
             $data[$url][$date] ??= 0;
             $data[$url][$date]++;
