@@ -22,7 +22,8 @@ use function strpos;
 use function fclose;
 use function file_put_contents;
 use function pcntl_waitpid;
-use function unserialize;
+use function igbinary_unserialize;
+use function igbinary_serialize;
 use function file_get_contents;
 use function unlink;
 use function ksort;
@@ -86,13 +87,12 @@ final class Parser
                         $commaPos = strpos($chunk, ',', $pos + 25);
                         $nlPos = strpos($chunk, "\n", $commaPos);
 
-                        $path = substr($chunk, $pos + 19, $commaPos - $pos - 19);
-                        $date = substr($chunk, $commaPos + 1, 10);
+                        $key = substr($chunk, $pos + 19, $commaPos - $pos - 8);
 
-                        if (isset($results[$path][$date])) {
-                            $results[$path][$date]++;
+                        if (isset($results[$key])) {
+                            $results[$key]++;
                         } else {
-                            $results[$path][$date] = 1;
+                            $results[$key] = 1;
                         }
 
                         $pos = $nlPos + 1;
@@ -106,19 +106,18 @@ final class Parser
                     if (strlen($buffer) > 25) {
                         $commaPos = strpos($buffer, ',', 25);
                         if ($commaPos !== false) {
-                            $path = substr($buffer, 19, $commaPos - 19);
-                            $date = substr($buffer, $commaPos + 1, 10);
-                            if (isset($results[$path][$date])) {
-                                $results[$path][$date]++;
+                            $key = substr($buffer, 19, $commaPos - 8);
+                            if (isset($results[$key])) {
+                                $results[$key]++;
                             } else {
-                                $results[$path][$date] = 1;
+                                $results[$key] = 1;
                             }
                         }
                     }
                 }
 
                 fclose($fp);
-                file_put_contents("{$tmpDir}/csv_{$uid}_{$i}.dat", serialize($results));
+                file_put_contents("{$tmpDir}/csv_{$uid}_{$i}.dat", igbinary_serialize($results));
                 exit(0);
             }
 
@@ -132,25 +131,28 @@ final class Parser
         $merged = [];
         for ($i = 0; $i < $threads; $i++) {
             $tempFile = "{$tmpDir}/csv_{$uid}_{$i}.dat";
-            /** @var array<string, array<string, int>> $partial */
-            $partial = unserialize(file_get_contents($tempFile));
+            /** @var array<string, int> $partial */
+            $partial = igbinary_unserialize(file_get_contents($tempFile));
             unlink($tempFile);
 
-            foreach ($partial as $path => $dates) {
-                foreach ($dates as $date => $count) {
-                    if (isset($merged[$path][$date])) {
-                        $merged[$path][$date] += $count;
-                    } else {
-                        $merged[$path][$date] = $count;
-                    }
+            foreach ($partial as $key => $count) {
+                if (isset($merged[$key])) {
+                    $merged[$key] += $count;
+                } else {
+                    $merged[$key] = $count;
                 }
             }
         }
 
-        foreach ($merged as &$result) {
-            ksort($result);
+        $output = [];
+        foreach ($merged as $key => $count) {
+            $output[substr($key, 0, -11)][substr($key, -10)] = $count;
         }
 
-        file_put_contents($outputPath, json_encode($merged, JSON_PRETTY_PRINT));
+        foreach ($output as &$dates) {
+            ksort($dates);
+        }
+
+        file_put_contents($outputPath, json_encode($output, JSON_PRETTY_PRINT));
     }
 }
