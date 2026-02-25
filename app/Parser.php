@@ -147,6 +147,7 @@ final class Parser
         \stream_set_read_buffer($input,  self::STREAM_BUFFER_SIZE);
 
         $counters = [];
+        $dates = [];
 
         \fseek($input, $start);
         $chunkSize = \min(self::READ_CHUNK_SIZE, $end - $start);
@@ -182,7 +183,10 @@ final class Parser
             $comma = \strpos($chunk, ',', $uriStart);
 
             $uri  = \substr($chunk, $uriStart, $comma - $uriStart);
-            $date = \substr($chunk, $comma + 1, 10);
+
+            // Store all dates so that multiple strings for the same date are not created.
+            $dateStr = \substr($chunk, $comma + 1, 10);
+            $date = $dates[$dateStr] ??= $dateStr;
 
             if (!isset($counters[$uri][$date])) {
                 $counters[$uri][$date] = 1;
