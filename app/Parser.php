@@ -11,7 +11,6 @@ final class Parser
     const TIME_LENGTH = 15;
     const DATETIME_LENGTH = self::DATE_LENGTH + self::TIME_LENGTH;
 
-
     public function parse(string $inputPath, string $outputPath): void
     {
         $data = [];
@@ -22,11 +21,30 @@ final class Parser
                 $data[$url][$date] = 1;
             }
         }
-        array_walk(
-            $data,
-            static fn(&$dates) => ksort($dates)
-        );
-        file_put_contents($outputPath, json_encode($data, flags:JSON_PRETTY_PRINT));
+        $r = fopen($outputPath, 'w');
+        fputs($r, "{\n");
+        $countPaths = count($data);
+        $p = 0;
+        foreach ($data as $path => $dates) {
+            $escapedPath = str_replace('/', '\\/', $path);
+            fputs($r, "    \"$escapedPath\": {\n");
+            ksort($dates);
+            $count = count($dates);
+            $i = 0;
+            foreach ($dates as $date => $times) {
+                if ($i++ < $count - 1) {
+                    fputs($r, "        \"$date\": $times,\n");
+                } else {
+                    fputs($r, "        \"$date\": $times\n");
+                }
+            }
+            if ($p++ < $countPaths - 1) {
+                fputs($r, "    },\n");
+            } else {
+                fputs($r, "    }\n");
+            }
+        }
+        fputs($r, "}");
     }
 
     private function parseInput(string $inputPath) {
