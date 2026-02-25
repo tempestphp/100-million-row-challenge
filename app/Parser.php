@@ -19,9 +19,9 @@ final class Parser
             $data[$url][$date]++;
         }
 
-        // Sort the data for each URL
+        // Sort the data for each URL (SORT_STRING is faster for ISO dates)
         foreach ($data as &$urlData) {
-            \ksort($urlData);
+            \ksort($urlData, SORT_STRING);
         }
 
         // Write data
