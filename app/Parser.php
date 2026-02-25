@@ -10,21 +10,20 @@ final class Parser
     {
         $output = [];
 
-        if (($handle = fopen($inputPath, 'r')) !== false) {
-            while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
+        if (($file = fopen($inputPath, 'r')) !== false) {
+            while (($line = fgets($file)) !== false) {
+                $row = explode(',', $line);
                 $url = substr($row[0], 19);
                 $date = substr($row[1], 0, 10);
                 $output[$url][$date] = ($output[$url][$date] ?? 0) + 1;
             }
-            fclose($handle);
+            fclose($file);
         }
 
         foreach ($output as &$dates) {
             ksort($dates, SORT_STRING);
         }
 
-        $output = json_encode($output, JSON_PRETTY_PRINT);
-
-        file_put_contents($outputPath, $output);
+        file_put_contents($outputPath, json_encode($output, JSON_PRETTY_PRINT));
     }
 }
