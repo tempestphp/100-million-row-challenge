@@ -8,23 +8,36 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
-        $handle = fopen($inputPath, 'r');
+        $csv = fopen($inputPath, 'r');
         $data = [];
 
-        while ($line = fgets($handle)) {
+        while ($line = fgets($csv)) {
             $offset = strcspn($line, ',');
-            $path = '/blog/' . substr($line, offset: self::OFFSET_SITE, length: $offset - self::OFFSET_SITE);
+            $path = substr($line, offset: self::OFFSET_SITE, length: $offset - self::OFFSET_SITE);
             $date = substr($line, offset: $offset + 1, length: 10);
             $data[$path][$date] ??= 0;
             $data[$path][$date] += 1;
         }
 
-        foreach ($data as &$visits) {
+        fclose($csv);
+
+        $json = '{' . PHP_EOL;
+
+        foreach ($data as $path => $visits) {
             ksort($visits);
+            $json .= '    "\/blog\/' . $path . '": {' . PHP_EOL;
+
+            foreach ($visits as $date => $count) {
+                $json .= '        "' . $date . '": ' . $count . ',' . PHP_EOL;
+            }
+
+            $json = substr($json, 0, -2) . PHP_EOL;
+
+            $json .= '    },' . PHP_EOL;
         }
 
-        file_put_contents($outputPath, json_encode($data, JSON_PRETTY_PRINT));
+        $json = substr($json, 0, -2) . PHP_EOL;
 
-        fclose($handle);
+        file_put_contents($outputPath, $json . '}');
     }
 }
