@@ -72,15 +72,13 @@ final readonly class Parser
         $dateIds = array_fill(0, 4096, -1);
         $dates = [];
         $dateCount = 0;
-        $warmUpCounts = [];
         $pos = 0;
         while ($pos < $lastNl) {
             $nlPos = strpos($chunk, "\n", $pos + $safeSkip);
             $path = substr($chunk, $pos + 25, $nlPos - $pos - 51);
-            $pathId = $pathIds[$path] ?? $pathCount;
 
-            if ($pathId === $pathCount) {
-                $pathIds[$path] = $pathId;
+            if (!isset($pathIds[$path])) {
+                $pathIds[$path] = $pathCount;
                 $paths[$pathCount] = $path;
                 $pathCount++;
             }
@@ -89,37 +87,17 @@ final readonly class Parser
                 ((ord($chunk[$nlPos - 22]) - 48) << 9)
                 | ((((ord($chunk[$nlPos - 20]) - 48) * 10) + ord($chunk[$nlPos - 19]) - 48) << 5)
                 | (((ord($chunk[$nlPos - 17]) - 48) * 10) + ord($chunk[$nlPos - 16]) - 48);
-            $dateId = $dateIds[$dateKey];
 
-            if ($dateId === -1) {
-                $dateId = $dateCount;
-                $dateIds[$dateKey] = $dateId;
+            if ($dateIds[$dateKey] === -1) {
+                $dateIds[$dateKey] = $dateCount;
                 $dates[$dateCount] = substr($chunk, $nlPos - 23, 8);
                 $dateCount++;
             }
 
-            $warmUpCounts[$pathId][$dateId] = ($warmUpCounts[$pathId][$dateId] ?? 0) + 1;
             $pos = $nlPos + 1;
         }
 
         unset($chunk);
-        $warmUpEnd = $lastNl + 1;
-        for ($i = 0; $i < $workers; $i++) {
-            if ($boundaries[$i] < $warmUpEnd) {
-                $boundaries[$i] = $warmUpEnd;
-            }
-        }
-
-        $warmUpFlat = array_fill(0, $pathCount * $dateCount, 0);
-        foreach ($warmUpCounts as $pId => $dateCounts) {
-            $base = $pId * $dateCount;
-
-            foreach ($dateCounts as $dId => $count) {
-                $warmUpFlat[$base + $dId] = $count;
-            }
-        }
-
-        unset($warmUpCounts);
         $quickPath = [];
         foreach ($paths as $id => $p) {
             $pLen = strlen($p);
@@ -183,8 +161,8 @@ final readonly class Parser
         );
 
         $total = $pathCount * $dateCount;
-        $mergedCounts = $warmUpFlat;
-        unset($warmUpFlat);
+        $mergedCounts = $parentCounts;
+        unset($parentCounts);
         foreach ($pipes as $i => $pipe) {
             $wCounts = unpack('V*', stream_get_contents($pipe));
             fclose($pipe);
@@ -196,11 +174,6 @@ final readonly class Parser
             }
         }
 
-        for ($j = 0; $j < $total; $j++) {
-            $mergedCounts[$j] += $parentCounts[$j];
-        }
-
-        unset($parentCounts);
         $sortedDates = $dates;
         asort($sortedDates);
         $out = fopen($outputPath, 'wb');
