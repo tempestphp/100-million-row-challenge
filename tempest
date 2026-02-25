@@ -5,6 +5,6 @@ use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
 
-ConsoleApplication::boot(loadBuiltInCommands: false)->run();
+ConsoleApplication::boot()->run();
 
 exit;
