@@ -32,8 +32,8 @@ final class Parser
         $stmt = $db->prepare("
             INSERT INTO aggregated_counts (path, date, cnt)
             VALUES (
-                replace(substr(?, 20, instr(?, ',') - 20), '/', '\/'), 
-                substr(?, instr(?, ',') + 1, 10), 
+                replace(substr(?1, 20, instr(?1, ',') - 20), '/', '\/'), 
+                substr(?1, instr(?1, ',') + 1, 10), 
                 1
             )
             ON CONFLICT(path, date) DO UPDATE SET cnt = cnt + 1
@@ -45,7 +45,7 @@ final class Parser
 
         while (($line = fgets($handle)) !== false) {
             if ($line !== "\n" && $line !== '') {
-                $stmt->execute([$line, $line, $line, $line]);
+                $stmt->execute([$line]);
             }
         }
 
