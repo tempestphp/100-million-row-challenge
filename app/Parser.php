@@ -184,8 +184,10 @@ final readonly class Parser
         int $dateCount,
         int $safeSkip,
     ): array {
-        $stride = $dateCount;
-        $counts = array_fill(0, $pathCount * $stride, 0);
+        $counts = [];
+        for ($i = 0; $i < $pathCount; $i++) {
+            $counts[$i] = array_fill(0, $dateCount, 0);
+        }
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -215,9 +217,7 @@ final readonly class Parser
                 if ($pathId === -1) {
                     $pathId = $pathCount;
                     $pathIds[$path] = $pathId;
-                    for ($j = 0; $j < $stride; $j++) {
-                        $counts[($pathCount * $stride) + $j] = 0;
-                    }
+                    $counts[$pathCount] = array_fill(0, $dateCount, 0);
                     $pathCount++;
                 }
 
@@ -226,27 +226,26 @@ final readonly class Parser
                 if ($dateId === -1) {
                     $dateId = $dateCount;
                     $dateIds[$date] = $dateId;
-                    $newStride = $stride + 1;
-                    $newCounts = array_fill(0, $pathCount * $newStride, 0);
                     for ($j = 0; $j < $pathCount; $j++) {
-                        $srcBase = $j * $stride;
-                        $dstBase = $j * $newStride;
-                        for ($k = 0; $k < $dateCount; $k++) {
-                            $newCounts[$dstBase + $k] = $counts[$srcBase + $k];
-                        }
+                        $counts[$j][$dateCount] = 0;
                     }
-                    $counts = $newCounts;
-                    $stride = $newStride;
                     $dateCount++;
                 }
 
-                $counts[($pathId * $stride) + $dateId]++;
+                $counts[$pathId][$dateId]++;
                 $pos = $nlPos + 1;
             }
         }
 
         fclose($handle);
 
-        return $counts;
+        $flat = [];
+        for ($i = 0; $i < $pathCount; $i++) {
+            for ($j = 0; $j < $dateCount; $j++) {
+                $flat[] = $counts[$i][$j];
+            }
+        }
+
+        return $flat;
     }
 }
