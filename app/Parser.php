@@ -34,15 +34,6 @@ final readonly class Parser
         $workers = 4;
         $fileSize = filesize($inputPath);
         $chunkSize = (int) ($fileSize / $workers);
-
-        // 25 -> prefix
-        // 4 -> "uses" - shortest slug in dataset
-        // 26 -> date suffix
-        $safeSkip = 55;
-        if (($fileSize % 100_000_000) === 0) {
-            $safeSkip = (int) ($fileSize / 100_000_000) - 1;
-        }
-
         $boundaries = [0];
         $handle = fopen($inputPath, 'rb');
         for ($i = 1; $i < $workers; $i++) {
@@ -67,7 +58,7 @@ final readonly class Parser
         $dateCount = 0;
         $pos = 0;
         while ($pos < $lastNl) {
-            $nlPos = strpos($chunk, "\n", $pos + $safeSkip);
+            $nlPos = strpos($chunk, "\n", $pos + 55);
             $path = substr($chunk, $pos + 25, $nlPos - $pos - 51);
 
             if (!isset($pathIds[$path])) {
@@ -107,7 +98,6 @@ final readonly class Parser
                     $dateIds,
                     $pathCount,
                     $dateCount,
-                    $safeSkip,
                 );
                 file_put_contents($tmpFile, pack('V*', ...$data));
                 exit(0);
@@ -124,7 +114,6 @@ final readonly class Parser
             $dateIds,
             $pathCount,
             $dateCount,
-            $safeSkip,
         );
 
         foreach ($pids as $pid) {
@@ -182,7 +171,6 @@ final readonly class Parser
         array $dateIds,
         int $pathCount,
         int $dateCount,
-        int $safeSkip,
     ): array {
         $stride = $dateCount;
         $counts = array_fill(0, $pathCount * $stride, 0);
@@ -208,7 +196,7 @@ final readonly class Parser
             $pos = 0;
 
             while ($pos < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $pos + $safeSkip);
+                $nlPos = strpos($chunk, "\n", $pos + 55);
 
                 $path = substr($chunk, $pos + 25, $nlPos - $pos - 51);
                 $pathId = $pathIds[$path] ?? -1;
