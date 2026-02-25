@@ -4,7 +4,7 @@ namespace App;
 
 final class Parser
 {
-    private const WORKERS = 2;
+    private const WORKERS = 3;
     private const PATH_START = 19;
     private const DATE_BITS = 12;
     private const DATE_MASK = 0xFFF;
