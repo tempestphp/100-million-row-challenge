@@ -83,7 +83,12 @@ final class Parser
         $handle = \fopen($inputPath, 'r');
         \fseek($handle, $startOffset);
 
-        while (\ftell($handle) < $endOffset && ($line = \fgets($handle)) !== false) {
+        $chunkSize = $endOffset - $startOffset;
+        $bytesRead = 0;
+
+        while ($bytesRead < $chunkSize && ($line = \fgets($handle)) !== false) {
+            $bytesRead += \strlen($line);
+
             [$url, $date] = \explode(',', $line, 2);
             $url = \substr($url, 19); // Remove 'https://stitcher.io'
             $date = \substr($date, 0, 10); // Keep 'YYYY-MM-DD'
