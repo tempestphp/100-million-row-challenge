@@ -9,7 +9,6 @@ use function fclose;
 use function fgets;
 use function file_put_contents;
 use function fopen;
-use function rtrim;
 
 final class Parser
 {
@@ -51,8 +50,6 @@ final class Parser
 
         while (($line = fgets($handle)) !== false) {
             if ($line !== "\n" && $line !== '') {
-                // Remove trailing newline character(s)
-                $line = rtrim($line, "\r\n");
                 $stmt->execute([':line' => $line, ':offset' => $offset]);
             }
             $offset++;
