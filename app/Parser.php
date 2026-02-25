@@ -6,7 +6,7 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-ini_set('memory_limit', '-1');
+        ini_set('memory_limit', '-1');
         $fileSize = filesize($inputPath);
         $numWorkers = 4;
 
@@ -76,69 +76,44 @@ ini_set('memory_limit', '-1');
         }
 
         $bytesRead = ftell($handle);
-        $readSize = 4 * 1024 * 1024; // 4MB chunks
+        $readSize = 8 * 1024 * 1024; // 8MB chunks
         $leftover = '';
 
-        while (true) {
-            if ($bytesRead >= $endByte && $leftover === '') {
+        while ($bytesRead < $endByte) {
+            $chunk = fread($handle, $readSize);
+            if ($chunk === false || $chunk === '') {
                 break;
             }
+            $bytesRead += strlen($chunk);
 
-            $chunk = '';
-            if ($bytesRead < $endByte) {
-                $chunk = fread($handle, $readSize);
-                if ($chunk === false || $chunk === '') {
-                    break;
-                }
-                $bytesRead += strlen($chunk);
-            }
+            // Split chunk into lines via single C-level explode call
+            // This replaces per-line strpos("\n") with one bulk operation
+            $lines = explode("\n", $chunk);
 
-            // Avoid string copy when no leftover (common case)
+            // Prepend leftover from previous chunk to first line
             if ($leftover !== '') {
-                $buffer = $leftover . $chunk;
-                $leftover = '';
-            } else {
-                $buffer = $chunk;
+                $lines[0] = $leftover . $lines[0];
             }
 
-            $bufLen = strlen($buffer);
-            $lastNl = strrpos($buffer, "\n");
+            // Last element is partial line (or empty if chunk ended with \n)
+            $leftover = array_pop($lines);
 
-            if ($lastNl === false) {
-                if (feof($handle) || $bytesRead >= $endByte) {
-                    break;
-                }
-                $leftover = $buffer;
-                continue;
-            }
+            // Process complete lines
+            // strlen is a PHP opcode (not a function call) — nearly free
+            // This avoids strpos entirely in the hot loop
+            foreach ($lines as $line) {
+                // Comma is always 26 chars before end (25 datetime + 1 comma)
+                $commaPos = strlen($line) - 26;
 
-            // Parse complete lines directly in buffer.
-            // Key insight: ISO 8601 datetime is always 25 chars (YYYY-MM-DDThh:mm:ss+HH:MM)
-            // so the comma separator is always at nlPos - 26.
-            // This eliminates one strpos call per line (100M calls saved).
-            $offset = 0;
-            while ($offset < $lastNl) {
-                $nlPos = strpos($buffer, "\n", $offset);
-                if ($nlPos === false || $nlPos > $lastNl) {
-                    break;
-                }
-
-                // Comma is exactly 26 chars before the newline
-                $commaPos = $nlPos - 26;
-
-                $path = substr($buffer, $offset + 19, $commaPos - $offset - 19);
-                $date = substr($buffer, $commaPos + 1, 10);
+                $path = substr($line, 19, $commaPos - 19);
+                $date = substr($line, $commaPos + 1, 10);
 
                 if (isset($data[$path][$date])) {
                     $data[$path][$date]++;
                 } else {
                     $data[$path][$date] = 1;
                 }
-
-                $offset = $nlPos + 1;
             }
-
-            $leftover = ($lastNl + 1 < $bufLen) ? substr($buffer, $lastNl + 1) : '';
         }
 
         fclose($handle);
