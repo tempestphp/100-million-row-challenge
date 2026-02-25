@@ -85,6 +85,8 @@ final class Parser
             \socket_close($pair[0]);
         }
 
+        echo "Parsed in " . (\microtime(true) - $time) . " seconds.\n";
+
         // Take the first worker results as the starting point, and merge the results of the other workers into it.
         $counters = $results[0];
         for($i = 1; $i < self::WORKER_COUNT; $i++) {
@@ -99,7 +101,7 @@ final class Parser
             }
         }
 
-        echo "Parsed in " . (\microtime(true) - $time) . " seconds.\n";
+        echo "Marged in " . (\microtime(true) - $time) . " seconds.\n";
 
         $output = \fopen($outputPath, 'wb');
         \stream_set_write_buffer($output, self::STREAM_BUFFER_SIZE);
