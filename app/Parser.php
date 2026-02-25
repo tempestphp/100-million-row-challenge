@@ -14,8 +14,6 @@ use function fread;
 use function fseek;
 use function ftell;
 use function fwrite;
-use function getenv;
-use function ord;
 use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
@@ -64,7 +62,7 @@ final readonly class Parser
         $pathIds = [];
         $paths = [];
         $pathCount = 0;
-        $dateIds = array_fill(0, 4096, -1);
+        $dateIds = [];
         $dates = [];
         $dateCount = 0;
         $pos = 0;
@@ -78,14 +76,11 @@ final readonly class Parser
                 $pathCount++;
             }
 
-            $dateKey =
-                ((ord($chunk[$nlPos - 22]) - 48) << 9)
-                | ((((ord($chunk[$nlPos - 20]) - 48) * 10) + ord($chunk[$nlPos - 19]) - 48) << 5)
-                | (((ord($chunk[$nlPos - 17]) - 48) * 10) + ord($chunk[$nlPos - 16]) - 48);
+            $date = substr($chunk, $nlPos - 25, 10);
 
-            if ($dateIds[$dateKey] === -1) {
-                $dateIds[$dateKey] = $dateCount;
-                $dates[$dateCount] = substr($chunk, $nlPos - 23, 8);
+            if (!isset($dateIds[$date])) {
+                $dateIds[$date] = $dateCount;
+                $dates[$dateCount] = $date;
                 $dateCount++;
             }
 
@@ -182,7 +177,7 @@ final readonly class Parser
                     continue;
                 }
 
-                $entries[] = "        \"20{$dateStr}\": {$count}";
+                $entries[] = "        \"{$dateStr}\": {$count}";
             }
 
             $pathBuffer .= "\n" . implode(",\n", $entries) . "\n    }";
@@ -245,15 +240,11 @@ final readonly class Parser
                     }
                 }
 
-                $dateKey =
-                    ((ord($chunk[$nlPos - 22]) - 48) << 9)
-                    | ((((ord($chunk[$nlPos - 20]) - 48) * 10) + ord($chunk[$nlPos - 19]) - 48) << 5)
-                    | (((ord($chunk[$nlPos - 17]) - 48) * 10) + ord($chunk[$nlPos - 16]) - 48);
-
-                $dateId = $dateIds[$dateKey];
+                $date = substr($chunk, $nlPos - 25, 10);
+                $dateId = $dateIds[$date] ?? -1;
                 if ($dateId === -1) {
                     $dateId = $dateCount;
-                    $dateIds[$dateKey] = $dateId;
+                    $dateIds[$date] = $dateId;
                     $newStride = $stride + 1;
                     $newCounts = array_fill(0, $pathCount * $newStride, 0);
                     for ($j = 0; $j < $pathCount; $j++) {
