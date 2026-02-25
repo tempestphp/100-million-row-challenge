@@ -11,9 +11,15 @@ final class Parser
         $handle = fopen($inputPath, 'r');
 
         while (($line = fgets($handle)) !== false) {
-            [$url, $timestamp] = explode(',', trim($line));
-            $path = parse_url($url, PHP_URL_PATH);
-            $date = substr($timestamp, 0, 10);
+            $comma = strpos($line, ',');
+
+            $url = substr($line, 0, $comma);
+            $datetime = substr($line, $comma + 1, 25);
+
+            $pos = strpos($url, '/blog/');
+
+            $path = substr($url, $pos);
+            $date = substr($datetime, 0, 10);
 
             $visitsByPath[$path][$date] = ($visitsByPath[$path][$date] ?? 0) + 1;
         }
