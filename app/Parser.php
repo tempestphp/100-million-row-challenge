@@ -6,11 +6,11 @@ use Exception;
 
 final class Parser
 {
-    // 4MB read/write buffers.
-    const STREAM_BUFFER_SIZE = 4 << 20;
+    // 16MB read/write buffers.
+    const STREAM_BUFFER_SIZE = 16 << 20;
 
-    // 16MB chunk size when reading input.
-    const READ_CHUNK_SIZE = 16 << 20;
+    // 512MB chunk size when reading input.
+    const READ_CHUNK_SIZE = 512 << 20;
 
     // A line is ±75 characters, so 75 * 2^14 = 1.2 MiB, which is a good buffer size for this input,
     // so set a mask to quickly check when this many lines have been buffered.
@@ -21,6 +21,12 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
+        // Don't bother with garbage collection, to avoid any random slowdowns.
+        \gc_disable();
+
+        // Memory usage is expected to be high, but limited by the chunk size, so allow it to grow as needed.
+        \ini_set('memory_limit', '-1');
+
         $time = \microtime(true);
         try {
             $input = \fopen($inputPath, 'rb');
@@ -35,25 +41,25 @@ final class Parser
             $dates = [];
 
             $chunk = \fread($input, self::READ_CHUNK_SIZE);
+            $chunkLen = \strlen($chunk);
             $start = 0;
             do {
                 // Try and find a line ending.
                 $lineEnd = \strpos($chunk, "\n", $start);
 
-                $notEndOfFile = !\feof($input);
-
                 // When there is no line ending, but more input to read, grab another chunk and append
                 // it to what is left of the current chunk.
-                if ($lineEnd === false && $notEndOfFile) {
+                if ($lineEnd === false && !\feof($input)) {
                     // No newline found, and we are not at the end of the file, so carry this chunk over to the next read.
                     $chunk = \substr($chunk, $start) . \fread($input, self::READ_CHUNK_SIZE);
+                    $chunkLen = \strlen($chunk);
                     $start = 0;
                     continue;
                 }
 
                 // When at the end of the file, there may not be a line ending, so set the line end to the end of the chunk.
                 if ($lineEnd === false) {
-                    $lineEnd = \strlen($chunk);
+                    $lineEnd = $chunkLen;
                 }
 
                 $uriStart = $start + self::URI_PREFIX_LEN;
@@ -78,7 +84,7 @@ final class Parser
 
                 $start = $lineEnd + 1;
 
-            } while ($notEndOfFile || $start < \strlen($chunk));
+            } while ($start < $chunkLen || !\feof($input));
 
             echo "Parsed in " . (\microtime(true) - $time) . " seconds.\n";
 
