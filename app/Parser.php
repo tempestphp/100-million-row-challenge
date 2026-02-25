@@ -82,10 +82,10 @@ final class Parser
                     }
 
                     // All rows: https://stitcher.io/blog/PATH,yyyy-mm-ddT00:00:00+00:00
+                    // Datetime suffix is always exactly 25 chars + \n = next line at commaPos+27
                     $pos = 0;
                     while ($pos < $lastNl) {
                         $commaPos = strpos($chunk, ',', $pos + 25);
-                        $nlPos = strpos($chunk, "\n", $commaPos);
 
                         $key = substr($chunk, $pos + 19, $commaPos - $pos - 8);
 
@@ -95,7 +95,7 @@ final class Parser
                             $results[$key] = 1;
                         }
 
-                        $pos = $nlPos + 1;
+                        $pos = $commaPos + 27;
                     }
                 }
 
