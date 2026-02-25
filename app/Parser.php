@@ -52,11 +52,6 @@ final class Parser
         $db->commit();
         fclose($handle);
 
-        $this->writeOutput($db, $outputPath);
-    }
-
-    private function writeOutput(PDO $db, string $outputPath): void
-    {
         $outputSql = <<<SQL
 SELECT '{
 ' || group_concat(
