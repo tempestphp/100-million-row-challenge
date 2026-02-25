@@ -25,6 +25,9 @@ final class Parser
     // Strip this prefix from every URI (length = 19).
     const URI_PREFIX_LEN = 19;
 
+    // The timestamp is always the same length.
+    const TIMESTAMP_LEN = 26;
+
     public function parse(string $inputPath, string $outputPath): void
     {
         // Don't bother with garbage collection, to avoid any random slowdowns.
@@ -180,9 +183,8 @@ final class Parser
 
             $uriStart = $chunkStart + self::URI_PREFIX_LEN;
 
-            // A comma is expected to be found here, because either a line ending or end of file has been found. No
-            // validation is done because the input format is expected to be correct.
-            $comma = \strpos($chunk, ',', $uriStart);
+            // Find the comma position based on the line end.
+            $comma = $lineEnd - self::TIMESTAMP_LEN;
 
             $uri  = \substr($chunk, $uriStart, $comma - $uriStart);
 
