@@ -23,7 +23,7 @@ final class Parser
         $input = fopen($inputPath, "rb") ?: throw new Exception("Unable to open input file");
         $this->timer('open');
         $prev = '';
-        while ($data = fread($input, 4096)) {
+        while ($data = fread($input, 1024)) {
             $lines = explode("\n", $prev . $data);
             $prev = array_pop($lines) ?: '';
             foreach ($lines as $line) {
