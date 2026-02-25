@@ -4,335 +4,191 @@ namespace App;
 
 final class Parser
 {
-    private const DOMAIN_LEN = 19;       // strlen('https://stitcher.io')
-    private const DATE_LEN = 10;         // strlen('YYYY-MM-DD')
-    private const TIMESTAMP_TAIL = 25;   // strlen('YYYY-MM-DDTHH:MM:SS+00:00')
-    private const LINE_OVERHEAD = 45;    // DOMAIN_LEN + 1 (comma) + TIMESTAMP_TAIL
-    private const READ_CHUNK = 1_048_576; // 1MB
-    private const WRITE_CHUNK = 1_048_576;
-    private const WORKERS = 4;
-
-    /** @var string[] */
-    private array $paths = [];
-    /** @var array<string, int> */
-    private array $pathIds = [];
-    /** @var string[] */
-    private array $dates = [];
-    /** @var array<string, int> */
-    private array $dateIds = [];
-    /** @var array<int, array<int, int>> */
-    private array $counts = [];
-
     public function parse(string $inputPath, string $outputPath): void
     {
+        ini_set('memory_limit', '512M');
         $fileSize = filesize($inputPath);
 
-        if ($fileSize > 5_000_000 && function_exists('pcntl_fork')) {
-            $this->parseParallel($inputPath, $outputPath, $fileSize);
-        } else {
-            $this->processRange($inputPath, 0, $fileSize);
-            $this->writeJson($outputPath);
+        if ($fileSize < 10_000_000 || !function_exists('pcntl_fork')) {
+            $data = $this->scan($inputPath, 0, $fileSize);
+            $this->emit($data, $outputPath);
+            return;
         }
-    }
 
-    private function parseParallel(string $inputPath, string $outputPath, int $fileSize): void
-    {
-        $workers = self::WORKERS;
-        $boundaries = $this->findBoundaries($inputPath, $fileSize, $workers);
+        $workers = 4;
 
-        $pids = [];
-        $tmpFiles = [];
-        $myPid = getmypid();
+        // Line-aligned split points
+        $fp = fopen($inputPath, 'rb');
+        $splits = [0];
+        for ($w = 1; $w < $workers; $w++) {
+            fseek($fp, (int)($fileSize * $w / $workers));
+            fgets($fp);
+            $splits[] = ftell($fp);
+        }
+        fclose($fp);
+        $splits[] = $fileSize;
 
-        // Fork workers for all chunks except the last
-        for ($i = 0; $i < $workers - 1; $i++) {
-            $tmpFile = sys_get_temp_dir() . '/p_' . $myPid . '_' . $i;
-            $tmpFiles[$i] = $tmpFile;
+        $pid = getmypid();
+        $children = [];
+        $files = [];
 
-            $pid = pcntl_fork();
-            if ($pid === 0) {
-                // Child
-                $this->processRange($inputPath, $boundaries[$i], $boundaries[$i + 1]);
-                $state = [
-                    $this->paths,
-                    $this->pathIds,
-                    $this->dates,
-                    $this->dateIds,
-                    $this->counts,
-                ];
-                file_put_contents($tmpFile, function_exists('igbinary_serialize')
-                    ? igbinary_serialize($state)
-                    : serialize($state));
+        for ($w = 0; $w < $workers - 1; $w++) {
+            $f = sys_get_temp_dir() . "/c_{$pid}_{$w}";
+            $files[$w] = $f;
+            $cpid = pcntl_fork();
+            if ($cpid === 0) {
+                $d = $this->scan($inputPath, $splits[$w], $splits[$w + 1]);
+                $enc = function_exists('igbinary_serialize') ? igbinary_serialize($d) : serialize($d);
+                file_put_contents($f, $enc);
                 exit(0);
             }
-            $pids[] = $pid;
+            $children[] = $cpid;
         }
 
-        // Parent processes the last chunk
-        $this->processRange($inputPath, $boundaries[$workers - 1], $boundaries[$workers]);
+        // Parent takes last chunk
+        $parent = $this->scan($inputPath, $splits[$workers - 1], $splits[$workers]);
 
-        // Wait for all children
-        foreach ($pids as $pid) {
-            pcntl_waitpid($pid, $status);
+        foreach ($children as $cpid) {
+            pcntl_waitpid($cpid, $st);
         }
 
-        // Merge results from children (in order, to preserve first-appearance URL order)
-        // First, save parent state as the "merged" base
-        $mergedPaths = $this->paths;
-        $mergedPathIds = $this->pathIds;
-        $mergedDates = $this->dates;
-        $mergedDateIds = $this->dateIds;
-        $mergedCounts = $this->counts;
-
-        // We need to merge children in reverse order, then parent last
-        // Actually: children processed chunks 0..N-2, parent processed chunk N-1
-        // For first-appearance order: chunk 0 first, then chunk 1, ..., then parent
-        // So we need children's data merged first, then parent's on top
-
-        // Re-initialize
-        $this->paths = [];
-        $this->pathIds = [];
-        $this->dates = [];
-        $this->dateIds = [];
-        $this->counts = [];
-
-        // Merge children first (chunks 0 to workers-2)
-        for ($i = 0; $i < $workers - 1; $i++) {
-            $raw = file_get_contents($tmpFiles[$i]);
-            $state = function_exists('igbinary_unserialize')
-                ? igbinary_unserialize($raw)
-                : unserialize($raw);
-            unlink($tmpFiles[$i]);
-            $this->mergeState($state[0], $state[1], $state[2], $state[3], $state[4]);
+        // Merge in chunk order (children first for first-appearance key ordering)
+        $result = [];
+        for ($w = 0; $w < $workers - 1; $w++) {
+            $raw = file_get_contents($files[$w]);
+            $chunk = function_exists('igbinary_unserialize') ? igbinary_unserialize($raw) : unserialize($raw);
+            unlink($files[$w]);
+            foreach ($chunk as $p => $dates) {
+                if (isset($result[$p])) {
+                    foreach ($dates as $d => $c) {
+                        $result[$p][$d] = ($result[$p][$d] ?? 0) + $c;
+                    }
+                } else {
+                    $result[$p] = $dates;
+                }
+            }
         }
-
-        // Merge parent's data (last chunk)
-        $this->mergeState($mergedPaths, $mergedPathIds, $mergedDates, $mergedDateIds, $mergedCounts);
-
-        $this->writeJson($outputPath);
-    }
-
-    private function mergeState(
-        array $otherPaths,
-        array $otherPathIds,
-        array $otherDates,
-        array $otherDateIds,
-        array $otherCounts,
-    ): void {
-        $dateCount = count($this->dates);
-
-        // Map other date IDs to merged date IDs
-        $dateMap = [];
-        foreach ($otherDates as $otherId => $date) {
-            if (isset($this->dateIds[$date])) {
-                $dateMap[$otherId] = $this->dateIds[$date];
+        foreach ($parent as $p => $dates) {
+            if (isset($result[$p])) {
+                foreach ($dates as $d => $c) {
+                    $result[$p][$d] = ($result[$p][$d] ?? 0) + $c;
+                }
             } else {
-                $newId = $dateCount++;
-                $this->dates[$newId] = $date;
-                $this->dateIds[$date] = $newId;
-                $dateMap[$otherId] = $newId;
+                $result[$p] = $dates;
             }
         }
 
-        // Map other path IDs and merge counts
-        foreach ($otherPaths as $otherId => $path) {
-            if (isset($this->pathIds[$path])) {
-                $mergedPathId = $this->pathIds[$path];
-            } else {
-                $mergedPathId = count($this->paths);
-                $this->paths[$mergedPathId] = $path;
-                $this->pathIds[$path] = $mergedPathId;
-                $this->counts[$mergedPathId] = [];
-            }
-
-            $otherPathCounts = $otherCounts[$otherId];
-            $merged = &$this->counts[$mergedPathId];
-
-            foreach ($otherPathCounts as $otherDateId => $count) {
-                if ($count === 0) continue;
-                $mergedDateId = $dateMap[$otherDateId];
-                $merged[$mergedDateId] = ($merged[$mergedDateId] ?? 0) + $count;
-            }
-
-            unset($merged);
-        }
+        $this->emit($result, $outputPath);
     }
 
-    private function findBoundaries(string $inputPath, int $fileSize, int $workers): array
+    private function scan(string $inputPath, int $from, int $to): array
     {
-        $boundaries = [0];
-        $fp = fopen($inputPath, 'rb');
-
-        for ($i = 1; $i < $workers; $i++) {
-            $offset = (int)($fileSize * $i / $workers);
-            fseek($fp, $offset);
-            fgets($fp); // align to next line boundary
-            $boundaries[] = ftell($fp);
-        }
-
-        fclose($fp);
-        $boundaries[] = $fileSize;
-        return $boundaries;
-    }
-
-    private function processRange(string $inputPath, int $start, int $end): void
-    {
+        $data = [];
         $fp = fopen($inputPath, 'rb');
         stream_set_read_buffer($fp, 0);
-        fseek($fp, $start);
+        fseek($fp, $from);
 
-        $remaining = $end - $start;
-        $left = '';
+        $remaining = $to - $from;
+        $tail = '';
 
         while ($remaining > 0) {
-            $toRead = min(self::READ_CHUNK, $remaining);
-            $chunk = fread($fp, $toRead);
-            if ($chunk === false || $chunk === '') break;
-            $remaining -= strlen($chunk);
-
-            if ($left !== '') {
-                $chunk = $left . $chunk;
-                $left = '';
-            }
-
-            $len = strlen($chunk);
-            $lastNl = strrpos($chunk, "\n");
-
-            if ($lastNl === false) {
-                $left = $chunk;
-                continue;
-            }
-
-            if ($lastNl < $len - 1) {
-                $left = substr($chunk, $lastNl + 1);
-            }
+            $raw = fread($fp, min(2_097_152, $remaining));
+            if ($raw === false || $raw === '') break;
+            $remaining -= strlen($raw);
 
             $pos = 0;
-            while ($pos < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $pos);
-                if ($nlPos === false) break;
+            $len = strlen($raw);
 
-                // Extract path: between domain end and (nlPos - LINE_OVERHEAD + DOMAIN_LEN)
-                $lineLen = $nlPos - $pos;
-                $pathLen = $lineLen - self::LINE_OVERHEAD;
-                $path = substr($chunk, $pos + self::DOMAIN_LEN, $pathLen);
+            // Splice tail from previous read onto the first line
+            if ($tail !== '') {
+                $nl = strpos($raw, "\n");
+                if ($nl === false) {
+                    $tail .= $raw;
+                    continue;
+                }
+                $line = $tail . substr($raw, 0, $nl);
+                $tail = '';
+                $c = strpos($line, ',', 19);
+                if ($c !== false) {
+                    $p = substr($line, 19, $c - 19);
+                    $d = substr($line, $c + 1, 10);
+                    if (isset($data[$p][$d])) $data[$p][$d]++;
+                    elseif (isset($data[$p])) $data[$p][$d] = 1;
+                    else $data[$p] = [$d => 1];
+                }
+                $pos = $nl + 1;
+            }
 
-                // Extract date: 10 chars starting at TIMESTAMP_TAIL before newline
-                $date = substr($chunk, $nlPos - self::TIMESTAMP_TAIL, self::DATE_LEN);
-
-                // Get or create path ID
-                if (isset($this->pathIds[$path])) {
-                    $pid = $this->pathIds[$path];
-                } else {
-                    $pid = count($this->paths);
-                    $this->paths[$pid] = $path;
-                    $this->pathIds[$path] = $pid;
-                    $this->counts[$pid] = [];
+            // Process complete lines
+            // Comma found via strpos; newline inferred from fixed 25-char timestamp
+            while ($pos + 46 <= $len) {
+                $c = strpos($raw, ',', $pos + 19);
+                if ($c === false || $c + 27 > $len) {
+                    $tail = substr($raw, $pos);
+                    break;
                 }
 
-                // Get or create date ID
-                if (isset($this->dateIds[$date])) {
-                    $did = $this->dateIds[$date];
-                } else {
-                    $did = count($this->dates);
-                    $this->dates[$did] = $date;
-                    $this->dateIds[$date] = $did;
-                    // Expand all existing path count arrays
-                    foreach ($this->counts as &$pc) {
-                        $pc[$did] = 0;
-                    }
-                    unset($pc);
-                }
+                $p = substr($raw, $pos + 19, $c - $pos - 19);
+                $d = substr($raw, $c + 1, 10);
 
-                $this->counts[$pid][$did] = ($this->counts[$pid][$did] ?? 0) + 1;
+                if (isset($data[$p][$d])) $data[$p][$d]++;
+                elseif (isset($data[$p])) $data[$p][$d] = 1;
+                else $data[$p] = [$d => 1];
 
-                $pos = $nlPos + 1;
+                $pos = $c + 27;
+            }
+
+            // Anything left after the loop is a partial line
+            if ($pos < $len) {
+                $tail = substr($raw, $pos);
             }
         }
 
-        if ($left !== '') {
-            $lineLen = strlen($left);
-            if ($lineLen > self::LINE_OVERHEAD) {
-                $pathLen = $lineLen - self::LINE_OVERHEAD;
-                $path = substr($left, self::DOMAIN_LEN, $pathLen);
-                $date = substr($left, $lineLen - self::TIMESTAMP_TAIL, self::DATE_LEN);
-
-                if (isset($this->pathIds[$path])) {
-                    $pid = $this->pathIds[$path];
-                } else {
-                    $pid = count($this->paths);
-                    $this->paths[$pid] = $path;
-                    $this->pathIds[$path] = $pid;
-                    $this->counts[$pid] = [];
-                }
-
-                if (isset($this->dateIds[$date])) {
-                    $did = $this->dateIds[$date];
-                } else {
-                    $did = count($this->dates);
-                    $this->dates[$did] = $date;
-                    $this->dateIds[$date] = $did;
-                    foreach ($this->counts as &$pc) {
-                        $pc[$did] = 0;
-                    }
-                    unset($pc);
-                }
-
-                $this->counts[$pid][$did] = ($this->counts[$pid][$did] ?? 0) + 1;
+        if ($tail !== '') {
+            $c = strpos($tail, ',', 19);
+            if ($c !== false) {
+                $p = substr($tail, 19, $c - 19);
+                $d = substr($tail, $c + 1, 10);
+                if (isset($data[$p][$d])) $data[$p][$d]++;
+                elseif (isset($data[$p])) $data[$p][$d] = 1;
+                else $data[$p] = [$d => 1];
             }
         }
 
         fclose($fp);
+        return $data;
     }
 
-    private function writeJson(string $outputPath): void
+    private function emit(array $data, string $path): void
     {
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, self::WRITE_CHUNK);
-
-        // Sort dates and build sorted date index
-        $dateCount = count($this->dates);
-        $sortedDateIds = range(0, $dateCount - 1);
-        usort($sortedDateIds, fn(int $a, int $b) => $this->dates[$a] <=> $this->dates[$b]);
+        $fp = fopen($path, 'wb');
+        stream_set_write_buffer($fp, 1_048_576);
 
         $buf = "{\n";
-        $pathCount = count($this->paths);
-        $firstPath = true;
+        $first = true;
 
-        for ($p = 0; $p < $pathCount; $p++) {
-            $counts = $this->counts[$p];
-            $escapedPath = str_replace('/', '\\/', $this->paths[$p]);
+        foreach ($data as $key => $dates) {
+            ksort($dates);
+            if (!$first) $buf .= ",\n";
+            $first = false;
 
-            if (!$firstPath) {
-                $buf .= ",\n";
+            $buf .= '    "' . str_replace('/', '\\/', $key) . "\": {\n";
+            $fd = true;
+            foreach ($dates as $dt => $cnt) {
+                if (!$fd) $buf .= ",\n";
+                $fd = false;
+                $buf .= "        \"{$dt}\": {$cnt}";
             }
-            $firstPath = false;
-
-            $buf .= "    \"{$escapedPath}\": {\n";
-
-            $firstDate = true;
-            foreach ($sortedDateIds as $did) {
-                $count = $counts[$did] ?? 0;
-                if ($count === 0) continue;
-
-                if (!$firstDate) {
-                    $buf .= ",\n";
-                }
-                $firstDate = false;
-
-                $buf .= "        \"{$this->dates[$did]}\": {$count}";
-            }
-
             $buf .= "\n    }";
 
-            if (strlen($buf) > self::WRITE_CHUNK) {
-                fwrite($out, $buf);
+            if (strlen($buf) > 1_048_576) {
+                fwrite($fp, $buf);
                 $buf = '';
             }
         }
 
         $buf .= "\n}";
-        fwrite($out, $buf);
-        fclose($out);
+        fwrite($fp, $buf);
+        fclose($fp);
     }
 }
