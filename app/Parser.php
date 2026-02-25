@@ -80,14 +80,15 @@ final class Parser
         $leftover = '';
 
         while ($bytesRead < $endByte) {
-            $chunk = fread($handle, $readSize);
+            // Never read past endByte — prevents double-counting with next worker
+            $toRead = min($readSize, $endByte - $bytesRead);
+            $chunk = fread($handle, $toRead);
             if ($chunk === false || $chunk === '') {
                 break;
             }
             $bytesRead += strlen($chunk);
 
             // Split chunk into lines via single C-level explode call
-            // This replaces per-line strpos("\n") with one bulk operation
             $lines = explode("\n", $chunk);
 
             // Prepend leftover from previous chunk to first line
@@ -99,12 +100,26 @@ final class Parser
             $leftover = array_pop($lines);
 
             // Process complete lines
-            // strlen is a PHP opcode (not a function call) — nearly free
-            // This avoids strpos entirely in the hot loop
             foreach ($lines as $line) {
-                // Comma is always 26 chars before end (25 datetime + 1 comma)
                 $commaPos = strlen($line) - 26;
 
+                $path = substr($line, 19, $commaPos - 19);
+                $date = substr($line, $commaPos + 1, 10);
+
+                if (isset($data[$path][$date])) {
+                    $data[$path][$date]++;
+                } else {
+                    $data[$path][$date] = 1;
+                }
+            }
+        }
+
+        // Complete the last partial line that straddles the endByte boundary
+        if ($leftover !== '') {
+            $rest = fgets($handle);
+            if ($rest !== false) {
+                $line = $leftover . rtrim($rest, "\n");
+                $commaPos = strlen($line) - 26;
                 $path = substr($line, 19, $commaPos - 19);
                 $date = substr($line, $commaPos + 1, 10);
 
