@@ -130,14 +130,8 @@ final readonly class Parser
                     $quickPath,
                     $safeSkip,
                 );
-                $binary = pack('V*', ...$data);
-                $len = strlen($binary);
-                $written = 0;
-
-                while ($written < $len) {
-                    $w = fwrite($pair[1], substr($binary, $written, 65536));
-                    $written += $w;
-                }
+                $binary = igbinary_serialize($data);
+                fwrite($pair[1], $binary);
 
                 fclose($pair[1]);
                 exit(0);
@@ -164,7 +158,7 @@ final readonly class Parser
         $mergedCounts = $parentCounts;
         unset($parentCounts);
         foreach ($pipes as $i => $pipe) {
-            $wCounts = unpack('V*', stream_get_contents($pipe));
+            $wCounts = igbinary_unserialize(stream_get_contents($pipe));
             fclose($pipe);
             pcntl_waitpid($pids[$i], $status);
 
