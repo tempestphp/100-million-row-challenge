@@ -2,10 +2,14 @@
 
 namespace App;
 
+use App\Commands\Visit;
+use const SEEK_CUR;
+
 final class Parser
 {
     private const int DISCOVER_SIZE = 16_777_216;
-    private const int WORKERS = 4;
+    private const int WORKERS = 5;
+    private const int READ_CHUNK = 1_048_576;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -13,8 +17,27 @@ final class Parser
 
         $fileSize = filesize($inputPath);
 
-        $dates = self::generateDateCatalog();
-        $dateCount = count($dates);
+        $dateIds = [];
+        $dates = [];
+        $dateCount = 0;
+        for ($y = 20; $y <= 26; $y++) {
+            $yStr = ($y < 10 ? '0' : '') . $y;
+            for ($m = 1; $m <= 12; $m++) {
+                $maxD = match ($m) {
+                    2 => (($y + 2000) % 4 === 0) ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+                $mStr = ($m < 10 ? '0' : '') . $m;
+                $ymStr = $yStr . '-' . $mStr . '-';
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $key = $ymStr . (($d < 10 ? '0' : '') . $d);
+                    $dateIds[$key] = $dateCount;
+                    $dates[$dateCount] = $key;
+                    $dateCount++;
+                }
+            }
+        }
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -22,7 +45,7 @@ final class Parser
         $raw = fread($handle, $warmUpSize);
         fclose($handle);
 
-        $pathIndex = [];
+        $pathIds = [];
         $paths = [];
         $pathCount = 0;
         $pos = 0;
@@ -30,11 +53,11 @@ final class Parser
 
         while ($pos < $lastNl) {
             $nlPos = strpos($raw, "\n", $pos + 52);
-            if ($nlPos === false || $nlPos > $lastNl) break;
+            if ($nlPos === false) break;
 
             $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
-            if (!isset($pathIndex[$slug])) {
-                $pathIndex[$slug] = $pathCount;
+            if (!isset($pathIds[$slug])) {
+                $pathIds[$slug] = $pathCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
@@ -43,10 +66,10 @@ final class Parser
         }
         unset($raw);
 
-        foreach (\App\Commands\Visit::all() as $visit) {
+        foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, 25);
-            if (!isset($pathIndex[$slug])) {
-                $pathIndex[$slug] = $pathCount;
+            if (!isset($pathIds[$slug])) {
+                $pathIds[$slug] = $pathCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
@@ -70,9 +93,9 @@ final class Parser
             $tmpFile = $shmDir . '/p100m_' . $myPid . '_' . $w;
             $pid = pcntl_fork();
             if ($pid === 0) {
-                $wCounts = self::parseRange(
+                $wCounts = $this->parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $pathIndex, $dates, $pathCount, $dateCount
+                    $pathIds, $dateIds, $pathCount, $dateCount
                 );
                 file_put_contents($tmpFile, pack('V*', ...$wCounts));
                 exit(0);
@@ -80,9 +103,9 @@ final class Parser
             $children[] = [$pid, $tmpFile];
         }
 
-        $counts = self::parseRange(
+        $counts = $this->parseRange(
             $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
-            $pathIndex, $dates, $pathCount, $dateCount
+            $pathIds, $dateIds, $pathCount, $dateCount
         );
 
         foreach ($children as [$cpid, $tmpFile]) {
@@ -95,32 +118,12 @@ final class Parser
             }
         }
 
-        self::writeJson($outputPath, $counts, $paths, $dateCount);
+        $this->writeJson($outputPath, $counts, $paths, $dates, $dateCount);
     }
 
-    private static function generateDateCatalog(): array
-    {
-        $dates = [];
-        $id = 0;
-        for ($y = 2020; $y <= 2026; $y++) {
-            for ($m = 1; $m <= 12; $m++) {
-                $maxD = match ($m) {
-                    2 => ($y % 4 === 0) ? 29 : 28,
-                    4, 6, 9, 11 => 30,
-                    default => 31,
-                };
-                $ym = $y . '-' . ($m < 10 ? '0' . $m : $m) . '-';
-                for ($d = 1; $d <= $maxD; $d++) {
-                    $dates[$ym . ($d < 10 ? '0' . $d : $d)] = $id++;
-                }
-            }
-        }
-        return $dates;
-    }
-
-    private static function parseRange(
+    private function parseRange(
         string $inputPath, int $start, int $end,
-        array $pathIndex, array $dates,
+        array $pathIds, array $dateIds,
         int $pathCount, int $dateCount
     ): array {
         $stride = $dateCount;
@@ -131,7 +134,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > 1_048_576 ? 1_048_576 : $remaining);
+            $chunk = fread($handle, $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
 
@@ -149,9 +152,8 @@ final class Parser
             $pos = 0;
             while ($pos < $lastNl) {
                 $nlPos = strpos($chunk, "\n", $pos + 52);
-                if ($nlPos === false || $nlPos > $lastNl) break;
 
-                $counts[$pathIndex[substr($chunk, $pos + 25, $nlPos - $pos - 51)] * $stride + $dates[substr($chunk, $nlPos - 25, 10)]]++;
+                $counts[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)] * $stride + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
 
                 $pos = $nlPos + 1;
             }
@@ -161,70 +163,46 @@ final class Parser
         return $counts;
     }
 
-    private static function writeJson(
+    private function writeJson(
         string $outputPath, array $counts, array $paths,
-        int $dateCount
+        array $dates, int $dateCount
     ): void {
-        $daysInMonth = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        $sortedDates = [];
-        for ($y = 2020; $y <= 2026; $y++) {
-            $isLeap = ($y % 4 === 0 && ($y % 100 !== 0 || $y % 400 === 0));
-            for ($m = 1; $m <= 12; $m++) {
-                $maxD = $daysInMonth[$m];
-                if ($m === 2 && $isLeap) $maxD = 29;
-                $ym = $y . '-' . ($m < 10 ? '0' . $m : $m) . '-';
-                for ($d = 1; $d <= $maxD; $d++) {
-                    $sortedDates[] = $ym . ($d < 10 ? '0' . $d : $d);
-                }
-            }
-        }
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 1_048_576);
+        fwrite($out, '{');
 
-        $pathCount = count($paths);
-        $fh = fopen($outputPath, 'wb');
-        stream_set_write_buffer($fh, 1_048_576);
-        $buf = "{\n";
         $firstPath = true;
+        $pathCount = count($paths);
 
         for ($p = 0; $p < $pathCount; $p++) {
             $base = $p * $dateCount;
-            $hasAny = false;
-            for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$base + $d] > 0) {
-                    $hasAny = true;
-                    break;
-                }
-            }
-            if (!$hasAny) continue;
-
-            if (!$firstPath) {
-                $buf .= ",\n";
-            }
-            $firstPath = false;
-
-            $buf .= '    "\\/blog\\/' . str_replace('/', '\\/', $paths[$p]) . '": {' . "\n";
-
             $firstDate = true;
+            $dateBuf = '';
+
             for ($d = 0; $d < $dateCount; $d++) {
-                $val = $counts[$base + $d];
-                if ($val > 0) {
-                    if (!$firstDate) {
-                        $buf .= ",\n";
-                    }
-                    $firstDate = false;
-                    $buf .= '        "' . $sortedDates[$d] . '": ' . $val;
+                $count = $counts[$base + $d];
+                if ($count === 0) {
+                    continue;
                 }
+
+                if (!$firstDate) {
+                    $dateBuf .= ",\n";
+                }
+                $firstDate = false;
+                $dateBuf .= '        "20' . $dates[$d] . '": ' . $count;
             }
 
-            $buf .= "\n    }";
-
-            if (strlen($buf) > 1048576) {
-                fwrite($fh, $buf);
-                $buf = '';
+            if ($firstDate) {
+                continue;
             }
+
+            $buf = $firstPath ? '' : ',';
+            $firstPath = false;
+            $buf .= "\n    \"\\/blog\\/" . str_replace('/', '\\/', $paths[$p]) . "\": {\n" . $dateBuf . "\n    }";
+            fwrite($out, $buf);
         }
 
-        $buf .= "\n}";
-        fwrite($fh, $buf);
-        fclose($fh);
+        fwrite($out, "\n}");
+        fclose($out);
     }
 }
