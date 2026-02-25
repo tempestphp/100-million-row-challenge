@@ -16,9 +16,12 @@ final class Parser
                 continue;
             }
 
-            [$url, $timestamp] = explode(',', $line, 2);
+            $comma_pos = strpos($line, ',');
+            $url = substr($line, 0, $comma_pos);
+            $timestamp = substr($line, $comma_pos + 1);
 
-            [$date] = explode('T', $timestamp);
+            $t_pos = strpos($timestamp, 'T');
+            $date = substr($timestamp, 0, $t_pos);
 
             if (isset($visits[$url])) {
                 if (isset($visits[$url][$date])) {
