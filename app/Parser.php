@@ -9,6 +9,10 @@ final class Parser
         $handle = fopen($inputPath, 'r');
 
         $visits = [];
+        $next_url_id = 0;
+        $url_map = [];
+        $next_date_id = 0;
+        $date_map = [];
 
         while (! feof($handle)) {
             $line = fgets($handle);
@@ -16,47 +20,40 @@ final class Parser
                 continue;
             }
 
-            $comma_pos = strpos($line, ',');
-            $url = substr($line, 0, $comma_pos);
-            $timestamp = substr($line, $comma_pos + 1);
+            $url = substr($line, 0, -27);
+            $date = substr($line, -26, 10);
 
-            $t_pos = strpos($timestamp, 'T');
-            $date = substr($timestamp, 0, $t_pos);
+            $url_id = $url_map[$url] ??= $next_url_id++;
+            $date_id = $date_map[$date] ??= $next_date_id++;
 
-            if (isset($visits[$url])) {
-                if (isset($visits[$url][$date])) {
-                    $visits[$url][$date]++;
-                } else {
-                    $visits[$url][$date] = 1;
-                }
-            } else {
-                $visits[$url] = [
-                    $date => 1,
-                ];
-            }
+            $visits[$url_id][$date_id] = ($visits[$url_id][$date_id] ?? 0) + 1;
         }
 
         fclose($handle);
+
+        $url_list = array_flip($url_map);
+        $date_list = array_flip($date_map);
 
         $write_handle = fopen($outputPath, 'w');
 
         $segment = '{';
 
-        $first_line = true;
+        $first_url = true;
+        foreach ($visits as $url_id => $dates) {
+            uksort($dates, static fn ($a, $b) => $date_list[$a] <=> $date_list[$b]);
 
-        foreach ($visits as $url => $dates) {
-            ksort($dates);
-
+            $url = $url_list[$url_id];
             [, $formatted_url] = explode('.io\/', str_replace('/', '\/', $url), 2);
-            if (! $first_line) {
+            if (! $first_url) {
                 $segment .= "\n    },\n    \"\/$formatted_url\": {";
             } else {
-                $first_line = false;
+                $first_url = false;
                 $segment .= "\n    \"\/$formatted_url\": {";
             }
 
             $first_entry = true;
-            foreach ($dates as $date => $count) {
+            foreach ($dates as $date_id => $count) {
+                $date = $date_list[$date_id];
                 if (! $first_entry) {
                     $segment .= ",\n        \"$date\": $count";
                 } else {
@@ -75,4 +72,3 @@ final class Parser
         fwrite($write_handle, $segment);
     }
 }
-
