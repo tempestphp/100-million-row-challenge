@@ -85,19 +85,19 @@ final class Parser
         fclose($bh);
         $boundaries[] = $fileSize;
 
-        $shmDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
+        $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
         $myPid = getmypid();
 
         $children = [];
         for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $tmpFile = $shmDir . '/p100m_' . $myPid . '_' . $w;
+            $tmpFile = $tmpDir . '/p100m_' . $myPid . '_' . $w;
             $pid = pcntl_fork();
             if ($pid === 0) {
-                $wCounts = $this->parseRange(
+                $counts = $this->parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $pathIds, $dateIds, $pathCount, $dateCount
                 );
-                file_put_contents($tmpFile, pack('V*', ...$wCounts));
+                file_put_contents($tmpFile, pack('V*', ...array_merge(...$counts)));
                 exit(0);
             }
             $children[] = [$pid, $tmpFile];
@@ -108,17 +108,20 @@ final class Parser
             $pathIds, $dateIds, $pathCount, $dateCount
         );
 
+        $merged = array_merge(...$counts);
+        unset($counts);
+
         foreach ($children as [$cpid, $tmpFile]) {
             pcntl_waitpid($cpid, $status);
             $wCounts = unpack('V*', file_get_contents($tmpFile));
             unlink($tmpFile);
             $j = 0;
             foreach ($wCounts as $v) {
-                $counts[$j++] += $v;
+                $merged[$j++] += $v;
             }
         }
 
-        $this->writeJson($outputPath, $counts, $paths, $dates, $dateCount);
+        $this->writeJson($outputPath, $merged, $paths, $dates, $dateCount);
     }
 
     private function parseRange(
@@ -126,8 +129,8 @@ final class Parser
         array $pathIds, array $dateIds,
         int $pathCount, int $dateCount
     ): array {
-        $stride = $dateCount;
-        $counts = array_fill(0, $pathCount * $stride, 0);
+        $emptyRow = array_fill(0, $dateCount, 0);
+        $counts = array_fill(0, $pathCount, $emptyRow);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
@@ -153,7 +156,7 @@ final class Parser
             while ($pos < $lastNl) {
                 $nlPos = strpos($chunk, "\n", $pos + 52);
 
-                $counts[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)] * $stride + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                $counts[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]][$dateIds[substr($chunk, $nlPos - 23, 8)]]++;
 
                 $pos = $nlPos + 1;
             }
