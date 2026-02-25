@@ -35,111 +35,109 @@ final class Parser
 
 
         $time = \microtime(true);
-        try {
 
-            $fileSize = \filesize($inputPath);
-            $splitSize = (int)($fileSize / self::WORKER_COUNT);
-            // The first worker will always start at the beginning of the file, so start with that split point.
-            $splits = [0];
+        $fileSize = \filesize($inputPath);
+        $splitSize = (int)($fileSize / self::WORKER_COUNT);
+        // The first worker will always start at the beginning of the file, so start with that split point.
+        $splits = [0];
 
-            // Calculate split points for the remaining workers by finding the first newline after
-            // the split point, and positioning the split after it. This ensures that workers are
-            // always processing whole lines.
-            $input = \fopen($inputPath, 'rb');
-            \stream_set_read_buffer($input,  self::NEWLINE_SEARCH_SIZE);
-            for ($i = 1; $i < self::WORKER_COUNT; $i++) {
-                \fseek($input, $i * $splitSize);
-                $data = \fread($input, self::NEWLINE_SEARCH_SIZE);
+        // Calculate split points for the remaining workers by finding the first newline after
+        // the split point, and positioning the split after it. This ensures that workers are
+        // always processing whole lines.
+        $input = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($input,  self::NEWLINE_SEARCH_SIZE);
+        for ($i = 1; $i < self::WORKER_COUNT; $i++) {
+            \fseek($input, $i * $splitSize);
+            $data = \fread($input, self::NEWLINE_SEARCH_SIZE);
 
-                // Find the first newline in the after the split point.
-                $nl = \strpos($data, "\n");
+            // Find the first newline in the after the split point.
+            $nl = \strpos($data, "\n");
 
-                // Bail if the newline is not found, so an error is thrown instead of silently producing incorrect output.
-                if ($nl === false) {
-                    throw new Exception("Failed to find newline after split point for worker $i");
-                }
-
-                $splits[] = \ftell($input) - \strlen($data) + $nl + 1;
-            }
-            $splits[] = $fileSize;
-
-            for ($i = 0; $i < self::WORKER_COUNT; $i++) {
-                socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $sockets[$i]);
-                $pid = pcntl_fork();
-                if ($pid === 0) {
-                    // Each worker closes the parent end of the socket,...
-                    socket_close($sockets[$i][0]);
-
-                    // ...sends the results back to the parent through the socket, and exits.
-                    socket_write($sockets[$i][1], self::serialize($this->parseSection($inputPath, $splits[$i], $splits[$i + 1])));
-                    socket_close($sockets[$i][1]);
-                    exit(0);
-                }
-                socket_close($sockets[$i][1]);
+            // Bail if the newline is not found, so an error is thrown instead of silently producing incorrect output.
+            if ($nl === false) {
+                throw new Exception("Failed to find newline after split point for worker $i");
             }
 
-            // Fetch and unserialize the results from the workers.
-            foreach ($sockets as $pair) {
-                $data = '';
-                while ($chunk = socket_read($pair[0], self::STREAM_BUFFER_SIZE)) $data .= $chunk;
-                $results[] = self::unserialize($data);
-            }
-
-            // Take the first worker results as the starting point, and merge the results of the other workers into it.
-            $counters = $results[0];
-            for($i = 1; $i < self::WORKER_COUNT; $i++) {
-                foreach ($results[$i] as $uri => $dates) {
-                    foreach ($dates as $date => $count) {
-                        if (!isset($counters[$uri][$date])) {
-                            $counters[$uri][$date] = $count;
-                        } else {
-                            $counters[$uri][$date] += $count;
-                        }
-                    }
-                }
-            }
-
-            echo "Parsed in " . (\microtime(true) - $time) . " seconds.\n";
-
-            $output = \fopen($outputPath, 'wb');
-            \stream_set_write_buffer($output, self::STREAM_BUFFER_SIZE);
-            $buffer = "{";
-            $lines = 0;
-            $firstUri = true;
-            // Output validation requires that the URIs are the order they were first encountered in the input.
-            foreach ($counters as $uri => $dates) {
-                if (!$firstUri) {
-                    $buffer .= ",";
-                }
-                $firstUri = false;
-
-                // Output validation requires that the URI slashes are escaped.
-                $buffer .= "\n    \"" . str_replace('/', '\\/', $uri) . "\": {";
-
-                // Output validation requires that the dates are in ascending order.
-                ksort($dates, \SORT_STRING);
-
-                $firstDate = true;
-                foreach ($dates as $date => $count) {
-                    if (!$firstDate) {
-                        $buffer .=  ",";
-                    }
-                    $firstDate = false;
-                    $buffer .=  "\n        \"$date\": $count";
-                    if ((++$lines & self::LINE_BUFFER_MASK) === 0) {
-                        \fwrite($output, $buffer);
-                        $buffer = '';
-                    }
-                }
-                $buffer .= "\n    }";
-            }
-            $buffer .= "\n}";
-            \fwrite($output, $buffer);
-
-            echo "Written in " . (\microtime(true) - $time) . " seconds.\n";
-        } finally {
-            @\fclose($output);
+            $splits[] = \ftell($input) - \strlen($data) + $nl + 1;
         }
+        $splits[] = $fileSize;
+
+        for ($i = 0; $i < self::WORKER_COUNT; $i++) {
+            socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $sockets[$i]);
+            $pid = pcntl_fork();
+            if ($pid === 0) {
+                // Each worker closes the parent end of the socket,...
+                socket_close($sockets[$i][0]);
+
+                // ...sends the results back to the parent through the socket, and exits.
+                socket_write($sockets[$i][1], self::serialize($this->parseSection($inputPath, $splits[$i], $splits[$i + 1])));
+                socket_close($sockets[$i][1]);
+                exit(0);
+            }
+            socket_close($sockets[$i][1]);
+        }
+
+        // Fetch and unserialize the results from the workers.
+        foreach ($sockets as $pair) {
+            $data = '';
+            while ($chunk = socket_read($pair[0], self::STREAM_BUFFER_SIZE)) $data .= $chunk;
+            $results[] = self::unserialize($data);
+        }
+
+        // Take the first worker results as the starting point, and merge the results of the other workers into it.
+        $counters = $results[0];
+        for($i = 1; $i < self::WORKER_COUNT; $i++) {
+            foreach ($results[$i] as $uri => $dates) {
+                foreach ($dates as $date => $count) {
+                    if (!isset($counters[$uri][$date])) {
+                        $counters[$uri][$date] = $count;
+                    } else {
+                        $counters[$uri][$date] += $count;
+                    }
+                }
+            }
+        }
+
+        echo "Parsed in " . (\microtime(true) - $time) . " seconds.\n";
+
+        $output = \fopen($outputPath, 'wb');
+        \stream_set_write_buffer($output, self::STREAM_BUFFER_SIZE);
+        $buffer = "{";
+        $lines = 0;
+        $firstUri = true;
+        // Output validation requires that the URIs are the order they were first encountered in the input.
+        foreach ($counters as $uri => $dates) {
+            if (!$firstUri) {
+                $buffer .= ",";
+            }
+            $firstUri = false;
+
+            // Output validation requires that the URI slashes are escaped.
+            $buffer .= "\n    \"" . str_replace('/', '\\/', $uri) . "\": {";
+
+            // Output validation requires that the dates are in ascending order.
+            ksort($dates, \SORT_STRING);
+
+            $firstDate = true;
+            foreach ($dates as $date => $count) {
+                if (!$firstDate) {
+                    $buffer .=  ",";
+                }
+                $firstDate = false;
+                $buffer .=  "\n        \"$date\": $count";
+                if ((++$lines & self::LINE_BUFFER_MASK) === 0) {
+                    \fwrite($output, $buffer);
+                    $buffer = '';
+                }
+            }
+            $buffer .= "\n    }";
+        }
+        $buffer .= "\n}";
+        \fwrite($output, $buffer);
+
+        echo "Written in " . (\microtime(true) - $time) . " seconds.\n";
+
+        @\fclose($output);
     }
 
     private function parseSection($inputPath, $start, $end): array
