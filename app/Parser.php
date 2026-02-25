@@ -12,9 +12,10 @@ final class Parser
 
         if (($file = fopen($inputPath, 'r')) !== false) {
             while (($line = fgets($file)) !== false) {
-                $row = explode(',', $line);
-                $url = substr($row[0], 19);
-                $date = substr($row[1], 0, 10);
+                $end = strpos($line, ',');
+                $url = substr($line, 19, $end - 19);
+                $date = substr($line, -26, 10);
+
                 $output[$url][$date] = ($output[$url][$date] ?? 0) + 1;
             }
             fclose($file);
