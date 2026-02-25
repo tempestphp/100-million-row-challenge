@@ -16,10 +16,13 @@ final class DataParseCommand
         string $outputPath = __DIR__ . '/../../data/data.json',
         bool $store = false,
         ?string $name = null,
+        int $workers = 4,
     ): void {
+        // Spec: 2 vCPUs, 1.5GB RAM max
+        ini_set('memory_limit', '1536M');
         $startTime = microtime(true);
 
-        new Parser()->parse($inputPath, $outputPath);
+        new Parser()->parse($inputPath, $outputPath, $workers);
 
         $endTime = microtime(true);
         $executionTime = $endTime - $startTime;
