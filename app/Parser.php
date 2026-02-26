@@ -46,7 +46,7 @@ final class Parser
         gc_disable();
 
         $fileSize = filesize($inputPath);
-        $workers = (int) (getenv('WORKER_COUNT') ?: 8);
+        $workers = (int) (getenv('WORKER_COUNT') ?: 10);
 
         // ─── Build date lookup ───
         // Map 7-char truncated dates ("Y-MM-DD") → sequential IDs for flat array indexing.
