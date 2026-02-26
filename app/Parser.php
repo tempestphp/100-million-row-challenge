@@ -3,7 +3,6 @@
 namespace App;
 
 use function ceil;
-use function dirname;
 use function fclose;
 use function fgets;
 use function file_get_contents;
@@ -16,25 +15,24 @@ use function ftell;
 use function getmypid;
 use function igbinary_serialize;
 use function igbinary_unserialize;
-use function is_dir;
 use function ksort;
 use function min;
 use function pcntl_fork;
 use function pcntl_waitpid;
-use function shell_exec;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function sys_get_temp_dir;
 use function unlink;
 
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        $threads = (int) shell_exec('nproc 2>/dev/null');
+        $threads = 8;
         $filesize = filesize($inputPath);
-        $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : dirname($outputPath);
+        $tmpDir = sys_get_temp_dir();
         $uid = getmypid();
 
         $chunkSize = (int) ceil($filesize / $threads);
