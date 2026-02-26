@@ -103,63 +103,29 @@ final class Parser
         $order = [];
         $orderCounter = 0;
         $pos = $start;
-        $bufferSize = 4194304; // 4MB
-        $tail = '';
+        $maxLineLen = 1024;
 
-        while ($pos < $end) {
-            $bytesToRead = $end - $pos;
-            if ($bytesToRead > $bufferSize)
-                $bytesToRead = $bufferSize;
-            $raw = fread($fp, $bytesToRead);
-            $pos += $bytesToRead;
+        while ($pos < $end && ($line = stream_get_line($fp, $maxLineLen, "\n")) !== false) {
+            $pos += strlen($line) + 1; // +1 for the consumed newline delimiter
 
-            if ($tail !== '') {
-                $chunk = $tail . $raw;
-            } else {
-                $chunk = $raw;
-            }
-            $offset = 0;
+            // Line: https://stitcher.io/path/here,2026-01-24T01:16:58+00:00
+            // Domain prefix is always 19 chars: "https://stitcher.io"
+            $commaPos = strpos($line, ",", 20);
+            if ($commaPos === false)
+                continue;
 
-            while (($nlPos = strpos($chunk, "\n", $offset)) !== false) {
-                // Line: https://stitcher.io/path/here,2026-01-24T01:16:58+00:00
-                // Domain prefix is always 19 chars: "https://stitcher.io"
-                $commaPos = strpos($chunk, ",", $offset + 20);
-                if ($commaPos !== false && $commaPos < $nlPos) {
-                    $path = substr($chunk, $offset + 19, $commaPos - $offset - 19);
-                    $date = substr($chunk, $commaPos + 1, 10);
+            $path = substr($line, 19, $commaPos - 19);
+            $date = substr($line, $commaPos + 1, 10);
 
-                    if (isset($result[$path])) {
-                        if (isset($result[$path][$date])) {
-                            $result[$path][$date]++;
-                        } else {
-                            $result[$path][$date] = 1;
-                        }
-                    } else {
-                        $result[$path] = [$date => 1];
-                        $order[$path] = $orderCounter++;
-                    }
-                }
-                $offset = $nlPos + 1;
-            }
-            $tail = ($offset < strlen($chunk)) ? substr($chunk, $offset) : '';
-        }
-
-        // Handle remaining tail
-        if ($tail !== '') {
-            $commaPos = strpos($tail, ",", 19);
-            if ($commaPos !== false) {
-                $path = substr($tail, 19, $commaPos - 19);
-                $date = substr($tail, $commaPos + 1, 10);
-                if (isset($result[$path])) {
-                    if (isset($result[$path][$date])) {
-                        $result[$path][$date]++;
-                    } else {
-                        $result[$path][$date] = 1;
-                    }
+            if (isset($result[$path])) {
+                if (isset($result[$path][$date])) {
+                    $result[$path][$date]++;
                 } else {
-                    $result[$path] = [$date => 1];
-                    $order[$path] = $orderCounter++;
+                    $result[$path][$date] = 1;
                 }
+            } else {
+                $result[$path] = [$date => 1];
+                $order[$path] = $orderCounter++;
             }
         }
 
