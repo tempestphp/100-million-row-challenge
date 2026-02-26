@@ -2,284 +2,252 @@
 
 namespace App;
 
+use App\Commands\Visit;
+
 final class Parser
 {
-    private const READ_CHUNK_SIZE = 2_097_152;  // 2MB
-    private const DISCOVERY_SIZE = 8_388_608;   // 8MB
-    private const URI_PREFIX_LEN = 19;          // strlen("https://stitcher.io")
-    private const TIMESTAMP_LEN = 25;           // strlen("YYYY-MM-DDTHH:MM:SS+00:00")
-
     public function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
 
-        $workerCount = (int) (getenv('WORKER_COUNT') ?: 4);
         $fileSize = filesize($inputPath);
+        $workers = (int) (getenv('WORKER_COUNT') ?: 8);
 
-        // ─── Pre-generate date dictionary (truncated 8-char keys for hot loop) ───
+        // ─── Build date lookup ───
+        // Map 7-char truncated dates ("Y-MM-DD") → sequential IDs for flat array indexing.
 
-        $dateIds = [];
-        $dateStrings = [];
-        $dateCount = 0;
+        $dateLookup = [];
+        $dateLabels = [];
+        $numDates = 0;
 
-        for ($year = 2020; $year <= 2026; $year++) {
-            $isLeap = ($year % 4 === 0 && ($year % 100 !== 0 || $year % 400 === 0));
-            $daysInYear = $isLeap ? 366 : 365;
-            $ts = mktime(0, 0, 0, 1, 1, $year);
+        $day = mktime(0, 0, 0, 1, 1, 2020);
+        $stop = mktime(0, 0, 0, 12, 31, 2026);
 
-            for ($day = 0; $day < $daysInYear; $day++) {
-                $full = date('Y-m-d', $ts + $day * 86400);
-                $dateIds[substr($full, 2)] = $dateCount;
-                $dateStrings[$dateCount] = $full;
-                $dateCount++;
-            }
+        while ($day <= $stop) {
+            $full = date('Y-m-d', $day);
+            $dateLookup[substr($full, 3)] = $numDates;
+            $dateLabels[$numDates] = $full;
+            $numDates++;
+            $day += 86400;
         }
 
-        // ─── Discovery: read first 8MB, build path map in first-seen order ───
+        // ─── Pre-seed path map from Visit::all() ───
+        // Guarantees all valid blog slugs are registered before parsing.
+        // Paths are stored as slugs (after "/blog/") for compact hash keys.
 
-        $pathOffsets = [];
-        $pathStrings = [];
-        $pathCount = 0;
+        $slugIndex = [];
+        $slugLabels = [];
+        $numSlugs = 0;
+        $blogPrefix = 25; // strlen("https://stitcher.io/blog/")
 
-        $discoveryBytes = min(self::DISCOVERY_SIZE, $fileSize);
-        $fh = fopen($inputPath, 'r');
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, $blogPrefix);
+            $slugIndex[$slug] = $numSlugs * $numDates;
+            $slugLabels[$numSlugs] = $slug;
+            $numSlugs++;
+        }
+
+        // Scan file to establish first-seen slug ordering (may differ from Visit::all())
+        $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
-        $disc = fread($fh, $discoveryBytes);
+        $sample = fread($fh, min(32_000_000, $fileSize));
         fclose($fh);
 
-        $pos = 0;
-        $len = strlen($disc);
+        // Rebuild index using actual file ordering
+        $slugIndex = [];
+        $slugLabels = [];
+        $numSlugs = 0;
 
-        while ($pos < $len) {
-            $nlPos = strpos($disc, "\n", $pos);
-            if ($nlPos === false) {
+        $sampleEnd = strrpos($sample, "\n");
+        $sp = 0;
+
+        while ($sp < $sampleEnd) {
+            $nl = strpos($sample, "\n", $sp);
+            if ($nl === false) {
                 break;
             }
 
-            $path = substr($disc, $pos + self::URI_PREFIX_LEN, $nlPos - $pos - 45);
+            $slug = substr($sample, $sp + $blogPrefix, $nl - $sp - $blogPrefix - 26);
 
-            if (!isset($pathOffsets[$path])) {
-                $pathOffsets[$path] = $pathCount * $dateCount;
-                $pathStrings[$pathCount] = $path;
-                $pathCount++;
+            if (!isset($slugIndex[$slug])) {
+                $slugIndex[$slug] = $numSlugs * $numDates;
+                $slugLabels[$numSlugs] = $slug;
+                $numSlugs++;
             }
 
-            $pos = $nlPos + 1;
+            $sp = $nl + 1;
         }
 
-        unset($disc);
+        unset($sample);
 
-        $totalSlots = $pathCount * $dateCount;
+        $totalCells = $numSlugs * $numDates;
 
-        // ─── Compute file chunk boundaries (newline-aligned) ───
+        // ─── Split file into newline-aligned chunks ───
 
-        $chunkSize = (int) ceil($fileSize / $workerCount);
-        $boundaries = [0];
-
+        $bounds = [0];
         $fh = fopen($inputPath, 'r');
-        for ($i = 1; $i < $workerCount; $i++) {
-            $target = $chunkSize * $i;
-            if ($target >= $fileSize) {
-                break;
-            }
+
+        for ($i = 1; $i < $workers; $i++) {
+            $target = intdiv($fileSize * $i, $workers);
             fseek($fh, $target);
-            $buf = fread($fh, 8192);
-            $nl = strpos($buf, "\n");
-            if ($nl !== false) {
-                $boundaries[] = $target + $nl + 1;
-            }
+            fgets($fh); // consume partial line
+            $bounds[] = ftell($fh);
         }
-        $boundaries[] = $fileSize;
+
+        $bounds[] = $fileSize;
         fclose($fh);
 
-        $actualWorkers = count($boundaries) - 1;
+        $numChunks = count($bounds) - 1;
 
-        // ─── Fork workers ───
+        // ─── Fork child processes ───
 
         $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
-        $ppid = getmypid();
-        $tmpFiles = [];
+        $myPid = getmypid();
+        $childFiles = [];
         $childPids = [];
-        $myId = 0;
 
-        for ($w = 1; $w < $actualWorkers; $w++) {
-            $tmpFiles[$w] = $tmpDir . '/100m_' . $ppid . '_' . $w . '.bin';
+        for ($w = 1; $w < $numChunks; $w++) {
+            $childFiles[$w] = $tmpDir . '/parse_' . $myPid . '_' . $w;
             $pid = pcntl_fork();
 
             if ($pid === 0) {
-                $myId = $w;
-                break;
-            } elseif ($pid > 0) {
-                $childPids[] = $pid;
+                $result = $this->crunch($inputPath, $bounds[$w], $bounds[$w + 1], $slugIndex, $dateLookup, $totalCells);
+                file_put_contents($childFiles[$w], pack('V*', ...$result));
+                exit(0);
             }
+
+            $childPids[] = $pid;
         }
 
-        // ─── Parse assigned chunk ───
+        // Parent crunches first chunk
+        $tally = $this->crunch($inputPath, $bounds[0], $bounds[1], $slugIndex, $dateLookup, $totalCells);
 
-        $counts = array_fill(0, $totalSlots, 0);
-        $overflow = []; // Catches paths not seen in discovery phase
-        $overflowFirstSeen = [];
-
-        $fh = fopen($inputPath, 'r');
-        stream_set_read_buffer($fh, 0);
-        fseek($fh, $boundaries[$myId]);
-
-        $rangeStart = $boundaries[$myId];
-        $remaining = $boundaries[$myId + 1] - $rangeStart;
-        $leftover = '';
-        $filePos = $rangeStart;
-
-        while ($remaining > 0) {
-            $toRead = min(self::READ_CHUNK_SIZE, $remaining);
-            $chunkBase = $filePos - strlen($leftover);
-            $chunk = $leftover . fread($fh, $toRead);
-            $filePos += $toRead;
-            $remaining -= $toRead;
-
-            $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) {
-                $leftover = $chunk;
-                continue;
-            }
-
-            $leftover = ($lastNl < strlen($chunk) - 1) ? substr($chunk, $lastNl + 1) : '';
-
-            $pos = 0;
-            while ($pos < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $pos);
-                if ($nlPos === false || $nlPos > $lastNl) {
-                    break;
-                }
-
-                $path = substr($chunk, $pos + self::URI_PREFIX_LEN, $nlPos - $pos - 45);
-
-                if (isset($pathOffsets[$path])) {
-                    $counts[$pathOffsets[$path] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-                } else {
-                    $date = substr($chunk, $nlPos - 25, 10);
-                    $overflow[$path][$date] = ($overflow[$path][$date] ?? 0) + 1;
-
-                    if (!isset($overflowFirstSeen[$path])) {
-                        $overflowFirstSeen[$path] = $chunkBase + $pos;
-                    }
-                }
-
-                $pos = $nlPos + 1;
-            }
-        }
-
-        fclose($fh);
-
-        // ─── IPC: children serialize, parent merges ───
-
-        if ($myId > 0) {
-            $packed = pack('V*', ...$counts);
-            if ($overflow !== [] || $overflowFirstSeen !== []) {
-                // Append serialized overflow payload after flat array (fixed-size boundary)
-                $packed .= serialize([
-                    'overflow' => $overflow,
-                    'firstSeen' => $overflowFirstSeen,
-                ]);
-            }
-            file_put_contents($tmpFiles[$myId], $packed);
-            exit(0);
-        }
+        // ─── Collect and merge results ───
 
         foreach ($childPids as $pid) {
             pcntl_waitpid($pid, $status);
         }
 
-        $flatSize = $totalSlots * 4; // 4 bytes per uint32
+        for ($w = 1; $w < $numChunks; $w++) {
+            $raw = file_get_contents($childFiles[$w]);
+            unlink($childFiles[$w]);
 
-        for ($w = 1; $w < $actualWorkers; $w++) {
-            $data = file_get_contents($tmpFiles[$w]);
-            $child = array_values(unpack('V*', substr($data, 0, $flatSize)));
-
-            for ($i = 0; $i < $totalSlots; $i++) {
-                $counts[$i] += $child[$i];
-            }
-
-            // Merge child overflow payload if present
-            if (strlen($data) > $flatSize) {
-                $tail = unserialize(substr($data, $flatSize));
-
-                if (is_array($tail)) {
-                    $childOverflow = $tail['overflow'] ?? [];
-                    $childFirstSeen = $tail['firstSeen'] ?? [];
-
-                    foreach ($childOverflow as $path => $dates) {
-                        foreach ($dates as $date => $count) {
-                            $overflow[$path][$date] = ($overflow[$path][$date] ?? 0) + $count;
-                        }
-                    }
-
-                    foreach ($childFirstSeen as $path => $offset) {
-                        if (!isset($overflowFirstSeen[$path]) || $offset < $overflowFirstSeen[$path]) {
-                            $overflowFirstSeen[$path] = $offset;
-                        }
-                    }
-                }
-            }
-
-            unlink($tmpFiles[$w]);
-        }
-
-        // ─── Build and write JSON output ───
-
-        $out = fopen($outputPath, 'w');
-        stream_set_write_buffer($out, 1_048_576);
-        $firstPath = true;
-
-        fwrite($out, "{\n");
-
-        for ($p = 0; $p < $pathCount; $p++) {
-            $base = $p * $dateCount;
-            $parts = [];
-
-            for ($d = 0; $d < $dateCount; $d++) {
-                $c = $counts[$base + $d];
-                if ($c > 0) {
-                    $parts[] = '        "' . $dateStrings[$d] . '": ' . $c;
-                }
-            }
-
-            if ($parts !== []) {
-                if (!$firstPath) {
-                    fwrite($out, ",\n");
-                }
-                $escapedPath = str_replace('/', '\\/', $pathStrings[$p]);
-                fwrite($out, '    "' . $escapedPath . "\": {\n" . implode(",\n", $parts) . "\n    }");
-                $firstPath = false;
+            $j = 0;
+            foreach (unpack('V*', $raw) as $v) {
+                $tally[$j++] += $v;
             }
         }
 
-        // Append overflow paths (discovered after first 8MB) in first-seen order.
-        uksort($overflow, static function (string $a, string $b) use ($overflowFirstSeen): int {
-            $oa = $overflowFirstSeen[$a] ?? PHP_INT_MAX;
-            $ob = $overflowFirstSeen[$b] ?? PHP_INT_MAX;
+        // ─── Emit JSON ───
 
-            if ($oa === $ob) {
-                return $a <=> $b;
+        $out = fopen($outputPath, 'wb');
+        $json = '{';
+        $needComma = false;
+
+        for ($s = 0; $s < $numSlugs; $s++) {
+            $base = $s * $numDates;
+
+            if ($needComma) {
+                $json .= ',';
+            }
+            $needComma = true;
+
+            $escaped = str_replace('/', '\\/', $slugLabels[$s]);
+            $json .= "\n    \"\\/blog\\/" . $escaped . '": {';
+
+            $firstEntry = true;
+
+            for ($d = 0; $d < $numDates; $d++) {
+                $n = $tally[$base + $d];
+                if ($n === 0) {
+                    continue;
+                }
+
+                $json .= $firstEntry ? "\n" : ",\n";
+                $json .= '        "' . $dateLabels[$d] . '": ' . $n;
+                $firstEntry = false;
             }
 
-            return $oa <=> $ob;
-        });
+            $json .= "\n    }";
 
-        foreach ($overflow as $path => $dates) {
-            ksort($dates);
-            $parts = [];
-            foreach ($dates as $date => $count) {
-                $parts[] = '        "' . $date . '": ' . $count;
+            if (strlen($json) > 65536) {
+                fwrite($out, $json);
+                $json = '';
             }
-            if (!$firstPath) {
-                fwrite($out, ",\n");
-            }
-            $escapedPath = str_replace('/', '\\/', $path);
-            fwrite($out, '    "' . $escapedPath . "\": {\n" . implode(",\n", $parts) . "\n    }");
-            $firstPath = false;
         }
 
-        fwrite($out, "\n}");
+        $json .= "\n}";
+        fwrite($out, $json);
         fclose($out);
+    }
+
+    /**
+     * Parse a byte range of the input file and return per-slug-per-date counts.
+     */
+    private function crunch(
+        string $path,
+        int $from,
+        int $until,
+        array $slugIndex,
+        array $dateLookup,
+        int $cells,
+    ): array {
+        $fh = fopen($path, 'rb');
+        stream_set_read_buffer($fh, 0);
+        fseek($fh, $from);
+
+        $counts = array_fill(0, $cells, 0);
+        $consumed = 0;
+        $total = $until - $from;
+        $bufSize = 8_388_608; // 8MB
+        $prefix = 25; // strlen("https://stitcher.io/blog/")
+        $stride = 52; // comma(1) + timestamp(25) + newline(1) + prefix(25)
+
+        while ($consumed < $total) {
+            $want = $total - $consumed;
+            $raw = fread($fh, $want > $bufSize ? $bufSize : $want);
+            if ($raw === false || $raw === '') {
+                break;
+            }
+
+            $end = strrpos($raw, "\n");
+            if ($end === false) {
+                continue;
+            }
+
+            // Rewind past any partial trailing line
+            $tail = strlen($raw) - $end - 1;
+            if ($tail > 0) {
+                fseek($fh, -$tail, SEEK_CUR);
+            }
+            $consumed += $end + 1;
+
+            // Parse rows: find comma separator, extract slug + date
+            $p = $prefix;
+            $fence = $end - 104;
+
+            while ($p < $fence) {
+                $sep = strpos($raw, ',', $p);
+                $counts[$slugIndex[substr($raw, $p, $sep - $p)] + $dateLookup[substr($raw, $sep + 4, 7)]]++;
+                $p = $sep + $stride;
+
+                $sep = strpos($raw, ',', $p);
+                $counts[$slugIndex[substr($raw, $p, $sep - $p)] + $dateLookup[substr($raw, $sep + 4, 7)]]++;
+                $p = $sep + $stride;
+            }
+
+            while ($p < $end) {
+                $sep = strpos($raw, ',', $p);
+                if ($sep === false) {
+                    break;
+                }
+                $counts[$slugIndex[substr($raw, $p, $sep - $p)] + $dateLookup[substr($raw, $sep + 4, 7)]]++;
+                $p = $sep + $stride;
+            }
+        }
+
+        fclose($fh);
+
+        return $counts;
     }
 }
