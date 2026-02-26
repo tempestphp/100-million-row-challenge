@@ -14,6 +14,7 @@ use function fopen;
 use function fread;
 use function fseek;
 use function ftell;
+use function fwrite;
 use function gc_disable;
 use function getmypid;
 use function intdiv;
@@ -22,6 +23,8 @@ use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
 use function strlen;
 use function strpos;
 use function strrpos;
@@ -333,6 +336,7 @@ final class Parser
         // Pre-calculate chunk boundaries aligned to line endings
         $boundaries = [];
         $bfp = fopen($inputPath, 'rb');
+        stream_set_read_buffer($bfp, 0);
         $approxChunkSize = (int) ceil($filesize / self::THREADS);
         $start = 0;
         for ($i = 0; $i < (self::THREADS - 1); $i++) {
@@ -378,6 +382,7 @@ final class Parser
                 [$startByte, $endByte] = $boundaries[$i];
 
                 $fp = fopen($inputPath, 'rb');
+                stream_set_read_buffer($fp, 0);
                 fseek($fp, $startByte);
 
                 $bytesRemaining = $endByte - $startByte;
@@ -456,28 +461,36 @@ final class Parser
 
     private function jsonOutput(string $outputPath, array $results): void
     {
-        $output = "{\n";
+        $fh = fopen($outputPath, 'wb');
+        stream_set_write_buffer($fh, 0);
+        $buf = "{\n";
 
         $firstPath = true;
         foreach ($results as $path => $dates) {
             if (! $firstPath) {
-                $output .= ",\n";
+                $buf .= ",\n";
             }
             $firstPath = false;
 
-            $output .= "    \"\/blog\/$path\": {\n";
+            $buf .= "    \"\/blog\/$path\": {\n";
 
             $firstDate = true;
             foreach ($dates as $date => $count) {
                 if (! $firstDate) {
-                    $output .= ",\n";
+                    $buf .= ",\n";
                 }
                 $firstDate = false;
-                $output .= "        \"$date\": $count";
+                $buf .= "        \"$date\": $count";
             }
-            $output .= "\n    }";
+            $buf .= "\n    }";
+
+            if (strlen($buf) > 65536) {
+                fwrite($fh, $buf);
+                $buf = '';
+            }
         }
-        $output .= "\n}";
-        file_put_contents($outputPath, $output);
+
+        fwrite($fh, $buf."\n}");
+        fclose($fh);
     }
 }
