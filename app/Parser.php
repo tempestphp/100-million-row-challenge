@@ -50,7 +50,7 @@ final class Parser
         // Scan file to establish first-seen slug ordering (may differ from Visit::all())
         $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
-        $sample = fread($fh, min(32_000_000, $fileSize));
+        $sample = fread($fh, min(2_097_152, $fileSize));
         fclose($fh);
 
         // Rebuild index using actual file ordering
@@ -79,6 +79,16 @@ final class Parser
         }
 
         unset($sample);
+
+        // Catch any slugs not seen in the sample
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, $blogPrefix);
+            if (!isset($slugIndex[$slug])) {
+                $slugIndex[$slug] = $numSlugs * $numDates;
+                $slugLabels[$numSlugs] = $slug;
+                $numSlugs++;
+            }
+        }
 
         $totalCells = $numSlugs * $numDates;
 
@@ -147,14 +157,7 @@ final class Parser
         for ($s = 0; $s < $numSlugs; $s++) {
             $base = $s * $numDates;
 
-            if ($needComma) {
-                $json .= ',';
-            }
-            $needComma = true;
-
-            $escaped = str_replace('/', '\\/', $slugLabels[$s]);
-            $json .= "\n    \"\\/blog\\/" . $escaped . '": {';
-
+            $dateBuf = '';
             $firstEntry = true;
 
             for ($d = 0; $d < $numDates; $d++) {
@@ -163,12 +166,24 @@ final class Parser
                     continue;
                 }
 
-                $json .= $firstEntry ? "\n" : ",\n";
-                $json .= '        "' . $dateLabels[$d] . '": ' . $n;
+                if (!$firstEntry) {
+                    $dateBuf .= ",\n";
+                }
+                $dateBuf .= '        "' . $dateLabels[$d] . '": ' . $n;
                 $firstEntry = false;
             }
 
-            $json .= "\n    }";
+            if ($firstEntry) {
+                continue;
+            }
+
+            if ($needComma) {
+                $json .= ',';
+            }
+            $needComma = true;
+
+            $escaped = str_replace('/', '\\/', $slugLabels[$s]);
+            $json .= "\n    \"\\/blog\\/" . $escaped . "\": {\n" . $dateBuf . "\n    }";
 
             if (strlen($json) > 65536) {
                 fwrite($out, $json);
