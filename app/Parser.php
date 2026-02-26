@@ -6,6 +6,7 @@ namespace App;
 
 use App\Commands\Visit;
 
+use function array_chunk;
 use function array_count_values;
 use function array_fill;
 use function chr;
@@ -13,7 +14,6 @@ use function count;
 use function fclose;
 use function fgets;
 use function file_get_contents;
-use function file_put_contents;
 use function filesize;
 use function fopen;
 use function fread;
@@ -150,7 +150,11 @@ final class Parser
                     $inputPath, $bounds[$w], $bounds[$w + 1],
                     $slugIndex, $dateChars, $numSlugs, $numDates,
                 );
-                file_put_contents($tmpFile, pack('V*', ...$result));
+                $wfh = fopen($tmpFile, 'wb');
+                foreach (array_chunk($result, 8192) as $batch) {
+                    fwrite($wfh, pack('V*', ...$batch));
+                }
+                fclose($wfh);
                 exit(0);
             }
 
@@ -262,17 +266,9 @@ final class Parser
             }
 
             $p = 0;
-            $fence = $end - 720;
+            $fence = $end - 480;
 
             while ($p < $fence) {
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
-
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
-
                 $nl = strpos($raw, "\n", $p + 52);
                 $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
                 $p = $nl + 1;
