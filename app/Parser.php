@@ -2,12 +2,12 @@
 
 namespace App;
 
-use Exception;
+use App\Solutions\Papoon;
 
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        throw new Exception('TODO');
+        (new Papoon())($inputPath, $outputPath);
     }
 }

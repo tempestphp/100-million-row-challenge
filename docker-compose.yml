@@ -1,0 +1,7 @@
+services:
+  app:
+    build: .
+    container_name: 100m-dev
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
