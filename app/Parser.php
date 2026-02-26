@@ -4,6 +4,7 @@ namespace App;
 
 use App\Commands\Visit;
 
+use function array_count_values;
 use function array_fill;
 use function chr;
 use function count;
@@ -38,7 +39,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int WORKERS = 11;
+    private const int WORKERS = 12;
     private const int READ_CHUNK = 8_388_608;
     private const int DISCOVER_SIZE = 2_097_152;
 
@@ -226,8 +227,8 @@ final class Parser
         for ($p = 0; $p < $pathCount; $p++) {
             if ($buckets[$p] === '') continue;
             $offset = $p * $dateCount;
-            foreach (unpack('v*', $buckets[$p]) as $did) {
-                $counts[$offset + $did]++;
+            foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
+                $counts[$offset + $did] += $count;
             }
         }
 
