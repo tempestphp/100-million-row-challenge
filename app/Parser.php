@@ -7,39 +7,26 @@ final class Parser
   public function parse(string $inputPath, string $outputPath): void
   {
     $handle = fopen($inputPath, "r");
+    $data = [];
 
-    if ($handle) {
-      while (($row = fgets($handle)) !== false) {
-        // skip empty rows
-        if ($row == [null]) continue;
+    while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
+      [$url, $date] = $row;
+      $path = parse_url($url, PHP_URL_PATH);
 
-        [$url, $date] = explode(',', $row);
+      // parse date from beginning of string up to 'T'
+      $date_record = substr($date, 0, strpos($date, 'T'));
 
-        // TODO: Bottleneck
-        // encode path as json and push into data array
-        $path = parse_url($url, PHP_URL_PATH);
-        // $path = $url;
+      // nested upsert value in subarray
+      $data[$path][$date_record] = ($data[$path][$date_record] ?? 0) + 1;
+    }
 
-        if (!isset($data[$path])) {
-          $data[$path] = [];
-        }
+    fclose($handle);
 
-        // parse date 
-        $date_str = strtotime($date);
-        $date_record = date('Y-m-d', $date_str);
-
-        // nested upsert value in subarray
-        $data[$path][$date_record] = ($data[$path][$date_record] ?? 0) + 1;
-
-        ksort($data[$path]);
-      }
+    // sort date subarrays asc
+    foreach ($data as &$record) {
+      ksort($record);
     }
 
     file_put_contents($outputPath, json_encode($data, JSON_PRETTY_PRINT));
-
-    fclose($handle);
   }
 }
-
-// 1,000 iterations
-// 1772053169,main,0.0024039745330811
