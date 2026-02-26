@@ -39,7 +39,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int WORKERS = 10;
+    private const int WORKERS = 12;
     private const int READ_CHUNK = 33_554_432;
     private const int DISCOVER_SIZE = 2_097_152;
 
