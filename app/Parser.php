@@ -1,3 +1,342 @@
 <?php
+
 namespace App;
-final class Parser{public function parse($a,$b){\ini_set('memory_limit','1G');\gc_disable();$c=\filesize($a);$d=\fopen($a,'rb');$e=\fread($d,\min($c,16777216));\fclose($d);$g=[];$h=[];$j=[];$k=0;$l=0;while(($m=\strpos($e,"\n",$l))!==false){$n=\substr($e,$l+19,$m-$l-45);if(!isset($g[$n])){$g[$n]=$k;$h[$k]=$n;$k++;}$o=\substr($e,$m-25,10);$j[$o]=true;$l=$m+1;}unset($e);\ksort($j);$p=[];$q=[];$r=0;foreach($j as $o=>$_){$p[$o]=$r;$q[$r]=$o;$r++;}unset($j);$s=$r;$t=$k*$s;$z=2097152;if($c>=10485760){$d=\fopen($a,'rb');\fseek($d,(int)($c/2));\fgets($d);$v=\ftell($d);\fclose($d);$w=$t*4;$x=\ftok($a,'A');$y=@\shmop_open($x,'c',0644,$w);$u=($y!==false);$f='';if(!$u){$f=\sys_get_temp_dir().'/p_'.\getmypid();}$i=\pcntl_fork();if($i===-1){if($u)\shmop_delete($y);}else{if($i===0){if(\function_exists('pcntl_setcpuaffinity')){\pcntl_setcpuaffinity(0,[1]);}$d=\fopen($a,'rb');\stream_set_read_buffer($d,0);\fseek($d,$v);$A=\array_fill(0,$t,0);$B='';$C=$c-$v;while($C>0){$D=$C<$z?$C:$z;$e=\fread($d,$D);if($e===false||$e==='')break;$C-=\strlen($e);$l=0;if($B!==''){$m=\strpos($e,"\n");if($m===false){$B.=$e;continue;}$E=$B.\substr($e,0,$m);$F=\strlen($E);$n=\substr($E,19,$F-45);$o=\substr($E,$F-25,10);if(isset($g[$n])&&isset($p[$o])){$A[$g[$n]*$s+$p[$o]]++;}$l=$m+1;}while(true){$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;}}if($B!==''){$F=\strlen($B);if($F>=46){$n=\substr($B,19,$F-45);$o=\substr($B,$F-25,10);if(isset($g[$n])&&isset($p[$o])){$A[$g[$n]*$s+$p[$o]]++;}}};\fclose($d);$G=\pack('V*',...$A);if($u){\shmop_write($y,$G,0);}else{\file_put_contents($f,$G);}exit(0);}if(\function_exists('pcntl_setcpuaffinity')){\pcntl_setcpuaffinity(0,[0]);}$d=\fopen($a,'rb');\stream_set_read_buffer($d,0);$A=\array_fill(0,$t,0);$B='';$C=$v;while($C>0){$D=$C<$z?$C:$z;$e=\fread($d,$D);if($e===false||$e==='')break;$C-=\strlen($e);$l=0;if($B!==''){$m=\strpos($e,"\n");if($m===false){$B.=$e;continue;}$E=$B.\substr($e,0,$m);$F=\strlen($E);$n=\substr($E,19,$F-45);$o=\substr($E,$F-25,10);if(isset($g[$n])&&isset($p[$o])){$A[$g[$n]*$s+$p[$o]]++;}$l=$m+1;}while(true){$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;}}if($B!==''){$F=\strlen($B);if($F>=46){$n=\substr($B,19,$F-45);$o=\substr($B,$F-25,10);if(isset($g[$n])&&isset($p[$o])){$A[$g[$n]*$s+$p[$o]]++;}}};\fclose($d);\pcntl_waitpid($i,$H);if($u){$I=\shmop_read($y,0,$w);\shmop_delete($y);}else{$I=\file_get_contents($f);\unlink($f);}$J=\array_values(\unpack('V*',$I));unset($I);for($K=0;$K<$t;$K++){$A[$K]+=$J[$K];}unset($J);$d=\fopen($b,'wb');$L='{';$M=true;for($N=0;$N<$k;$N++){$O=$N*$s;$P=false;for($Q=0;$Q<$r;$Q++){if($A[$O+$Q]>0){$P=true;break;}}if(!$P)continue;if(!$M)$L.=',';$M=false;$L.="\n    \"".\str_replace('/','\\/',$h[$N])."\": {";$R=true;for($Q=0;$Q<$r;$Q++){$S=$A[$O+$Q];if($S===0)continue;if(!$R)$L.=',';$R=false;$L.="\n        \"".$q[$Q]."\": ".$S;}$L.="\n    }";if(\strlen($L)>65536){\fwrite($d,$L);$L='';}}$L.="\n}";\fwrite($d,$L);\fclose($d);return;}}$d=\fopen($a,'rb');\stream_set_read_buffer($d,0);$A=\array_fill(0,$t,0);$B='';$C=$c;while($C>0){$D=$C<$z?$C:$z;$e=\fread($d,$D);if($e===false||$e==='')break;$C-=\strlen($e);$l=0;if($B!==''){$m=\strpos($e,"\n");if($m===false){$B.=$e;continue;}$E=$B.\substr($e,0,$m);$F=\strlen($E);$n=\substr($E,19,$F-45);$o=\substr($E,$F-25,10);if(isset($g[$n])&&isset($p[$o])){$A[$g[$n]*$s+$p[$o]]++;}$l=$m+1;}while(true){$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;$m=\strpos($e,"\n",$l);if($m===false){$B=\substr($e,$l);break;}$A[$g[\substr($e,$l+19,$m-$l-45)]*$s+$p[\substr($e,$m-25,10)]]++;$l=$m+1;}}if($B!==''){$F=\strlen($B);if($F>=46){$n=\substr($B,19,$F-45);$o=\substr($B,$F-25,10);if(isset($g[$n])&&isset($p[$o])){$A[$g[$n]*$s+$p[$o]]++;}}};\fclose($d);$d=\fopen($b,'wb');$L='{';$M=true;for($N=0;$N<$k;$N++){$O=$N*$s;$P=false;for($Q=0;$Q<$r;$Q++){if($A[$O+$Q]>0){$P=true;break;}}if(!$P)continue;if(!$M)$L.=',';$M=false;$L.="\n    \"".\str_replace('/','\\/',$h[$N])."\": {";$R=true;for($Q=0;$Q<$r;$Q++){$S=$A[$O+$Q];if($S===0)continue;if(!$R)$L.=',';$R=false;$L.="\n        \"".$q[$Q]."\": ".$S;}$L.="\n    }";if(\strlen($L)>65536){\fwrite($d,$L);$L='';}}$L.="\n}";\fwrite($d,$L);\fclose($d);}}
+
+final class Parser
+{
+    public function parse($inputPath, $outputPath)
+    {
+        \ini_set('memory_limit', '1G');
+        \gc_disable();
+
+        $fileSize = \filesize($inputPath);
+
+        $handle = \fopen($inputPath, 'rb');
+        $discoverChunk = \fread($handle, \min($fileSize, 16777216));
+        \fclose($handle);
+
+        $pathIds = [];
+        $pathList = [];
+        $dateSet = [];
+        $pathCount = 0;
+
+        $pos = 0;
+        while (($nlPos = \strpos($discoverChunk, "\n", $pos)) !== false) {
+            $path = \substr($discoverChunk, $pos + 19, $nlPos - $pos - 45);
+            if (!isset($pathIds[$path])) {
+                $pathIds[$path] = $pathCount;
+                $pathList[$pathCount] = $path;
+                $pathCount++;
+            }
+            $date = \substr($discoverChunk, $nlPos - 25, 10);
+            $dateSet[$date] = true;
+            $pos = $nlPos + 1;
+        }
+        unset($discoverChunk);
+
+        \ksort($dateSet);
+        $dateIds = [];
+        $dateList = [];
+        $dateCount = 0;
+        foreach ($dateSet as $date => $_) {
+            $dateIds[$date] = $dateCount;
+            $dateList[$dateCount] = $date;
+            $dateCount++;
+        }
+        unset($dateSet);
+
+        $stride = $dateCount;
+        $totalCells = $pathCount * $stride;
+        $chunkSize = 2097152;
+
+        $pathOffsets = [];
+        foreach ($pathIds as $path => $id) {
+            $pathOffsets[$path] = $id * $stride;
+        }
+
+        if ($fileSize >= 10485760) {
+            $numWorkers = 4;
+            $handle = \fopen($inputPath, 'rb');
+            $splits = [0];
+            for ($w = 1; $w < $numWorkers; $w++) {
+                \fseek($handle, (int)($fileSize * $w / $numWorkers));
+                \fgets($handle);
+                $splits[] = \ftell($handle);
+            }
+            $splits[] = $fileSize;
+            \fclose($handle);
+
+            $tmpDir = \is_dir('/dev/shm') ? '/dev/shm' : \sys_get_temp_dir();
+            $tmpPrefix = $tmpDir . '/p_' . \getmypid() . '_';
+
+            $childPids = [];
+            for ($w = 1; $w < $numWorkers; $w++) {
+                $pid = \pcntl_fork();
+                if ($pid === -1) continue;
+                if ($pid === 0) {
+                    $handle = \fopen($inputPath, 'rb');
+                    \stream_set_read_buffer($handle, 0);
+                    \fseek($handle, $splits[$w]);
+                    $counts = \array_fill(0, $totalCells, 0);
+                    $leftover = '';
+                    $remaining = $splits[$w + 1] - $splits[$w];
+
+                    while ($remaining > 0) {
+                        $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
+                        $chunk = \fread($handle, $toRead);
+                        if ($chunk === false || $chunk === '') break;
+                        $remaining -= \strlen($chunk);
+                        $pos = 0;
+                        if ($leftover !== '') {
+                            $nlPos = \strpos($chunk, "\n");
+                            if ($nlPos === false) { $leftover .= $chunk; continue; }
+                            $fullLine = $leftover . \substr($chunk, 0, $nlPos);
+                            $lineLen = \strlen($fullLine);
+                            $path = \substr($fullLine, 19, $lineLen - 45);
+                            $date = \substr($fullLine, $lineLen - 25, 10);
+                            if (isset($pathOffsets[$path]) && isset($dateIds[$date])) {
+                                $counts[$pathOffsets[$path] + $dateIds[$date]]++;
+                            }
+                            $pos = $nlPos + 1;
+                        }
+                        while (true) {
+                            $nlPos = \strpos($chunk, "\n", $pos);
+                            if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                            $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                            $pos = $nlPos + 1;
+                            $nlPos = \strpos($chunk, "\n", $pos);
+                            if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                            $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                            $pos = $nlPos + 1;
+                            $nlPos = \strpos($chunk, "\n", $pos);
+                            if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                            $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                            $pos = $nlPos + 1;
+                            $nlPos = \strpos($chunk, "\n", $pos);
+                            if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                            $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                            $pos = $nlPos + 1;
+                            $nlPos = \strpos($chunk, "\n", $pos);
+                            if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                            $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                            $pos = $nlPos + 1;
+                            $nlPos = \strpos($chunk, "\n", $pos);
+                            if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                            $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                            $pos = $nlPos + 1;
+                        }
+                    }
+                    if ($leftover !== '') {
+                        $lineLen = \strlen($leftover);
+                        if ($lineLen >= 46) {
+                            $path = \substr($leftover, 19, $lineLen - 45);
+                            $date = \substr($leftover, $lineLen - 25, 10);
+                            if (isset($pathOffsets[$path]) && isset($dateIds[$date])) {
+                                $counts[$pathOffsets[$path] + $dateIds[$date]]++;
+                            }
+                        }
+                    }
+                    \fclose($handle);
+                    \file_put_contents($tmpPrefix . $w, \pack('V*', ...$counts));
+                    exit(0);
+                }
+                $childPids[$w] = $pid;
+            }
+
+            $handle = \fopen($inputPath, 'rb');
+            \stream_set_read_buffer($handle, 0);
+            $counts = \array_fill(0, $totalCells, 0);
+            $leftover = '';
+            $remaining = $splits[1];
+
+            while ($remaining > 0) {
+                $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
+                $chunk = \fread($handle, $toRead);
+                if ($chunk === false || $chunk === '') break;
+                $remaining -= \strlen($chunk);
+                $pos = 0;
+                if ($leftover !== '') {
+                    $nlPos = \strpos($chunk, "\n");
+                    if ($nlPos === false) { $leftover .= $chunk; continue; }
+                    $fullLine = $leftover . \substr($chunk, 0, $nlPos);
+                    $lineLen = \strlen($fullLine);
+                    $path = \substr($fullLine, 19, $lineLen - 45);
+                    $date = \substr($fullLine, $lineLen - 25, 10);
+                    if (isset($pathOffsets[$path]) && isset($dateIds[$date])) {
+                        $counts[$pathOffsets[$path] + $dateIds[$date]]++;
+                    }
+                    $pos = $nlPos + 1;
+                }
+                while (true) {
+                    $nlPos = \strpos($chunk, "\n", $pos);
+                    if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                    $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                    $pos = $nlPos + 1;
+                    $nlPos = \strpos($chunk, "\n", $pos);
+                    if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                    $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                    $pos = $nlPos + 1;
+                    $nlPos = \strpos($chunk, "\n", $pos);
+                    if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                    $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                    $pos = $nlPos + 1;
+                    $nlPos = \strpos($chunk, "\n", $pos);
+                    if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                    $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                    $pos = $nlPos + 1;
+                    $nlPos = \strpos($chunk, "\n", $pos);
+                    if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                    $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                    $pos = $nlPos + 1;
+                    $nlPos = \strpos($chunk, "\n", $pos);
+                    if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                    $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                    $pos = $nlPos + 1;
+                }
+            }
+            if ($leftover !== '') {
+                $lineLen = \strlen($leftover);
+                if ($lineLen >= 46) {
+                    $path = \substr($leftover, 19, $lineLen - 45);
+                    $date = \substr($leftover, $lineLen - 25, 10);
+                    if (isset($pathOffsets[$path]) && isset($dateIds[$date])) {
+                        $counts[$pathOffsets[$path] + $dateIds[$date]]++;
+                    }
+                }
+            }
+            \fclose($handle);
+
+            foreach ($childPids as $w => $pid) {
+                \pcntl_waitpid($pid, $status);
+                $raw = \file_get_contents($tmpPrefix . $w);
+                @\unlink($tmpPrefix . $w);
+                $childCounts = \unpack('V*', $raw);
+                unset($raw);
+                for ($i = 0; $i < $totalCells; $i++) {
+                    $counts[$i] += $childCounts[$i + 1];
+                }
+                unset($childCounts);
+            }
+
+            $fp = \fopen($outputPath, 'wb');
+            $buf = '{';
+            $firstPath = true;
+            for ($p = 0; $p < $pathCount; $p++) {
+                $offset = $p * $stride;
+                $hasAny = false;
+                for ($d = 0; $d < $dateCount; $d++) {
+                    if ($counts[$offset + $d] > 0) { $hasAny = true; break; }
+                }
+                if (!$hasAny) continue;
+                if (!$firstPath) $buf .= ',';
+                $firstPath = false;
+                $buf .= "\n    \"" . \str_replace('/', '\\/', $pathList[$p]) . "\": {";
+                $firstDate = true;
+                for ($d = 0; $d < $dateCount; $d++) {
+                    $count = $counts[$offset + $d];
+                    if ($count === 0) continue;
+                    if (!$firstDate) $buf .= ',';
+                    $firstDate = false;
+                    $buf .= "\n        \"" . $dateList[$d] . "\": " . $count;
+                }
+                $buf .= "\n    }";
+                if (\strlen($buf) > 65536) { \fwrite($fp, $buf); $buf = ''; }
+            }
+            $buf .= "\n}";
+            \fwrite($fp, $buf);
+            \fclose($fp);
+            return;
+        }
+
+        $handle = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($handle, 0);
+        $counts = \array_fill(0, $totalCells, 0);
+        $leftover = '';
+        $remaining = $fileSize;
+
+        while ($remaining > 0) {
+            $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
+            $chunk = \fread($handle, $toRead);
+            if ($chunk === false || $chunk === '') break;
+            $remaining -= \strlen($chunk);
+            $pos = 0;
+            if ($leftover !== '') {
+                $nlPos = \strpos($chunk, "\n");
+                if ($nlPos === false) { $leftover .= $chunk; continue; }
+                $fullLine = $leftover . \substr($chunk, 0, $nlPos);
+                $lineLen = \strlen($fullLine);
+                $path = \substr($fullLine, 19, $lineLen - 45);
+                $date = \substr($fullLine, $lineLen - 25, 10);
+                if (isset($pathOffsets[$path]) && isset($dateIds[$date])) {
+                    $counts[$pathOffsets[$path] + $dateIds[$date]]++;
+                }
+                $pos = $nlPos + 1;
+            }
+            while (true) {
+                $nlPos = \strpos($chunk, "\n", $pos);
+                if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                $pos = $nlPos + 1;
+                $nlPos = \strpos($chunk, "\n", $pos);
+                if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                $pos = $nlPos + 1;
+                $nlPos = \strpos($chunk, "\n", $pos);
+                if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                $pos = $nlPos + 1;
+                $nlPos = \strpos($chunk, "\n", $pos);
+                if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                $pos = $nlPos + 1;
+                $nlPos = \strpos($chunk, "\n", $pos);
+                if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                $pos = $nlPos + 1;
+                $nlPos = \strpos($chunk, "\n", $pos);
+                if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
+                $counts[$pathOffsets[\substr($chunk, $pos + 19, $nlPos - $pos - 45)] + $dateIds[\substr($chunk, $nlPos - 25, 10)]]++;
+                $pos = $nlPos + 1;
+            }
+        }
+        if ($leftover !== '') {
+            $lineLen = \strlen($leftover);
+            if ($lineLen >= 46) {
+                $path = \substr($leftover, 19, $lineLen - 45);
+                $date = \substr($leftover, $lineLen - 25, 10);
+                if (isset($pathOffsets[$path]) && isset($dateIds[$date])) {
+                    $counts[$pathOffsets[$path] + $dateIds[$date]]++;
+                }
+            }
+        }
+        \fclose($handle);
+
+        $fp = \fopen($outputPath, 'wb');
+        $buf = '{';
+        $firstPath = true;
+        for ($p = 0; $p < $pathCount; $p++) {
+            $offset = $p * $stride;
+            $hasAny = false;
+            for ($d = 0; $d < $dateCount; $d++) {
+                if ($counts[$offset + $d] > 0) { $hasAny = true; break; }
+            }
+            if (!$hasAny) continue;
+            if (!$firstPath) $buf .= ',';
+            $firstPath = false;
+            $buf .= "\n    \"" . \str_replace('/', '\\/', $pathList[$p]) . "\": {";
+            $firstDate = true;
+            for ($d = 0; $d < $dateCount; $d++) {
+                $count = $counts[$offset + $d];
+                if ($count === 0) continue;
+                if (!$firstDate) $buf .= ',';
+                $firstDate = false;
+                $buf .= "\n        \"" . $dateList[$d] . "\": " . $count;
+            }
+            $buf .= "\n    }";
+            if (\strlen($buf) > 65536) { \fwrite($fp, $buf); $buf = ''; }
+        }
+        $buf .= "\n}";
+        \fwrite($fp, $buf);
+        \fclose($fp);
+    }
+}
