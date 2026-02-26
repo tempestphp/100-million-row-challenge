@@ -1,6 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App;
+
+use App\Commands\Visit;
 
 final class Parser
 {
@@ -21,22 +25,33 @@ final class Parser
         $dateSet = [];
 
         $lastNl = \strrpos($discoverChunk, "\n");
-        $pos = 0;
-        while ($pos < $lastNl) {
-            $nlPos = \strpos($discoverChunk, "\n", $pos + 52);
-            if ($nlPos === false) break;
+        if ($lastNl !== false) {
+            $pos = 0;
+            while ($pos < $lastNl) {
+                $nlPos = \strpos($discoverChunk, "\n", $pos + 52);
+                if ($nlPos === false) break;
 
-            $slug = \substr($discoverChunk, $pos + 25, $nlPos - $pos - 51);
+                $slug = \substr($discoverChunk, $pos + 25, $nlPos - $pos - 51);
+                if (!isset($pathIds[$slug])) {
+                    $pathIds[$slug] = $pathCount;
+                    $paths[$pathCount] = $slug;
+                    $pathCount++;
+                }
+
+                $dateSet[\substr($discoverChunk, $nlPos - 23, 8)] = true;
+                $pos = $nlPos + 1;
+            }
+        }
+        unset($discoverChunk);
+
+        foreach (Visit::all() as $visit) {
+            $slug = \substr($visit->uri, 25);
             if (!isset($pathIds[$slug])) {
                 $pathIds[$slug] = $pathCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
-
-            $dateSet[\substr($discoverChunk, $nlPos - 23, 8)] = true;
-            $pos = $nlPos + 1;
         }
-        unset($discoverChunk);
 
         \ksort($dateSet);
         $dateIds = [];
@@ -64,7 +79,7 @@ final class Parser
         $splits[] = $fileSize;
         \fclose($handle);
 
-        $tmpDir = \is_dir('/dev/shm') ? '/dev/shm' : \sys_get_temp_dir();
+        $tmpDir = \sys_get_temp_dir();
         $tmpPrefix = $tmpDir . '/p_' . \getmypid() . '_';
 
         $childPids = [];
@@ -229,48 +244,40 @@ final class Parser
             $remainingW--;
         }
 
-        $escapedPaths = [];
-        for ($p = 0; $p < $pathCount; $p++) {
-            $escapedPaths[$p] = "\n    \"\\/blog\\/" . \str_replace('/', '\\/', $paths[$p]) . "\": {";
-        }
-
         $datePrefixes = [];
         for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = "\n        \"20" . $dates[$d] . "\": ";
+            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+        }
+
+        $escapedPaths = [];
+        for ($p = 0; $p < $pathCount; $p++) {
+            $escapedPaths[$p] = "\"\\/blog\\/" . \str_replace('/', '\\/', $paths[$p]) . "\"";
         }
 
         $fp = \fopen($outputPath, 'wb');
-        $buf = '{';
+        \stream_set_write_buffer($fp, 1_048_576);
+        \fwrite($fp, '{');
         $firstPath = true;
-        for ($p = 0; $p < $pathCount; $p++) {
-            $offset = $p * $dateCount;
-            $hasAny = false;
-            for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$offset + $d] > 0) {
-                    $hasAny = true;
-                    break;
-                }
-            }
-            if (!$hasAny) continue;
-            if (!$firstPath) $buf .= ',';
-            $firstPath = false;
-            $buf .= $escapedPaths[$p];
-            $firstDate = true;
-            for ($d = 0; $d < $dateCount; $d++) {
-                $count = $counts[$offset + $d];
+
+        foreach ($escapedPaths as $p => $escapedPath) {
+            $base = $p * $dateCount;
+            $buf = '';
+            $sep = '';
+
+            foreach ($datePrefixes as $d => $prefix) {
+                $count = $counts[$base + $d];
                 if ($count === 0) continue;
-                if (!$firstDate) $buf .= ',';
-                $firstDate = false;
-                $buf .= $datePrefixes[$d] . $count;
+                $buf .= $sep . $prefix . $count;
+                $sep = ",\n";
             }
-            $buf .= "\n    }";
-            if (\strlen($buf) > 65536) {
-                \fwrite($fp, $buf);
-                $buf = '';
-            }
+
+            if ($buf === '') continue;
+
+            \fwrite($fp, ($firstPath ? '' : ',') . "\n    " . $escapedPath . ": {\n" . $buf . "\n    }");
+            $firstPath = false;
         }
-        $buf .= "\n}";
-        \fwrite($fp, $buf);
+
+        \fwrite($fp, "\n}");
         \fclose($fp);
     }
 }
