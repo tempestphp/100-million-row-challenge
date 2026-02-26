@@ -63,18 +63,15 @@ final class Parser
         $date_list = array_flip($date_map);
         $sorted_date_ids = array_values($date_map);
 
-        $write_handle = fopen($outputPath, 'w');
+        $output = '{';
 
-        $segment = '{';
-
-        $first_url = true;
         for ($url_id = 0; $url_id < $next_url_id; $url_id++) {
             $formatted_url = str_replace('/', '\/', $url_list[$url_id]);
-            if (! $first_url) {
-                $segment .= "\n    },\n    \"\/$formatted_url\": {";
+
+            if ($url_id > 0) {
+                $output .= "\n    },\n    \"\/$formatted_url\": {";
             } else {
-                $first_url = false;
-                $segment .= "\n    \"\/$formatted_url\": {";
+                $output .= "\n    \"\/$formatted_url\": {";
             }
 
             $base = $url_id * $date_stride;
@@ -84,22 +81,17 @@ final class Parser
                 if ($count === 0) {
                     continue;
                 }
-                $date = $date_list[$date_id];
-                if (! $first_entry) {
-                    $segment .= ",\n        \"$date\": $count";
-                } else {
+                if ($first_entry) {
+                    $output .= "\n        \"{$date_list[$date_id]}\": $count";
                     $first_entry = false;
-                    $segment .= "\n        \"$date\": $count";
+                } else {
+                    $output .= ",\n        \"{$date_list[$date_id]}\": $count";
                 }
-            }
-
-            if (strlen($segment) >= 4096) {
-                fwrite($write_handle, $segment);
-                $segment = '';
             }
         }
 
-        $segment .= "\n    }\n}";
-        fwrite($write_handle, $segment);
+        $output .= "\n    }\n}";
+
+        file_put_contents($outputPath, $output);
     }
 }
