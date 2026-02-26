@@ -6,8 +6,12 @@ namespace App;
 
 final class Parser
 {
-    // 1 MB buffer fits well in L3 cache for strpos scanning
+    // 1 MB read buffer fits well in L3 cache for strpos scanning
     private const BUFFER_SIZE = 1 * 1024 * 1024;
+
+    // 8 MB discover scan covers ~109K lines, ensuring all ~1818 unique dates
+    // are found (at 1 MB only ~13.6K lines → ~1 date statistically missed)
+    private const DISCOVER_BYTES = 8 * 1024 * 1024;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -37,7 +41,7 @@ final class Parser
      *               pathNames: array<int, string>, dateNames: array<int, string>,
      *               pathCount: int, dateCount: int}
      */
-    public function discover(string $inputPath, int $scanBytes = 1048576): array
+    public function discover(string $inputPath, int $scanBytes = self::DISCOVER_BYTES): array
     {
         $fileSize = filesize($inputPath);
         $readSize = min($scanBytes, $fileSize);
