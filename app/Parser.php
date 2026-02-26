@@ -47,7 +47,7 @@ final class Parser
 
         $stride = $dateCount;
         $totalCells = $pathCount * $stride;
-        $chunkSize = 2097152;
+        $chunkSize = 262144;
 
         $dateIdChars = [];
         foreach ($dateIds as $date => $id) {
@@ -167,8 +167,8 @@ final class Parser
                     for ($p = 0; $p < $pathCount; $p++) {
                         if ($buckets[$p] === '') continue;
                         $offset = $p * $stride;
-                        foreach (\unpack('v*', $buckets[$p]) as $did) {
-                            $counts[$offset + $did]++;
+                        foreach (\array_count_values(\unpack('v*', $buckets[$p])) as $did => $cnt) {
+                            $counts[$offset + $did] += $cnt;
                         }
                     }
                     \file_put_contents($tmpPrefix . $w, \pack('V*', ...$counts));
@@ -260,8 +260,8 @@ final class Parser
             for ($p = 0; $p < $pathCount; $p++) {
                 if ($buckets[$p] === '') continue;
                 $offset = $p * $stride;
-                foreach (\unpack('v*', $buckets[$p]) as $did) {
-                    $counts[$offset + $did]++;
+                foreach (\array_count_values(\unpack('v*', $buckets[$p])) as $did => $cnt) {
+                    $counts[$offset + $did] += $cnt;
                 }
             }
             unset($buckets);
