@@ -8,11 +8,13 @@ final class Parser
     {
         $handle = fopen($inputPath, 'r');
 
-        $visits = [];
+        // Assuming that we'll only see 2048 unique dates
+        $date_stride = 2048;
         $next_url_id = 0;
         $url_map = [];
         $next_date_id = 0;
         $date_map = [];
+        $date_counts = [];
 
         $carry = '';
 
@@ -38,10 +40,17 @@ final class Parser
                 $path = substr($buffer, $pos + 20, $line_len - 46);
                 $date = substr($buffer, $pos + $line_len - 25, 10);
 
-                $url_id = $url_map[$path] ??= $next_url_id++;
+                $url_id = $url_map[$path] ?? -1;
+                if ($url_id === -1) {
+                    $url_id = $next_url_id++;
+                    $url_map[$path] = $url_id;
+                    array_push($date_counts, ...array_fill(0, $date_stride, 0));
+
+                }
+
                 $date_id = $date_map[$date] ??= $next_date_id++;
 
-                $visits[$url_id][$date_id] = ($visits[$url_id][$date_id] ?? 0) + 1;
+                $date_counts[($url_id * $date_stride) + $date_id]++;
 
                 $pos = $new_line_pos + 1;
             }
@@ -50,16 +59,16 @@ final class Parser
         fclose($handle);
 
         $url_list = array_flip($url_map);
+        ksort($date_map);
         $date_list = array_flip($date_map);
+        $sorted_date_ids = array_values($date_map);
 
         $write_handle = fopen($outputPath, 'w');
 
         $segment = '{';
 
         $first_url = true;
-        foreach ($visits as $url_id => $dates) {
-            uksort($dates, static fn ($a, $b) => $date_list[$a] <=> $date_list[$b]);
-
+        for ($url_id = 0; $url_id < $next_url_id; $url_id++) {
             $formatted_url = str_replace('/', '\/', $url_list[$url_id]);
             if (! $first_url) {
                 $segment .= "\n    },\n    \"\/$formatted_url\": {";
@@ -68,8 +77,13 @@ final class Parser
                 $segment .= "\n    \"\/$formatted_url\": {";
             }
 
+            $base = $url_id * $date_stride;
             $first_entry = true;
-            foreach ($dates as $date_id => $count) {
+            foreach ($sorted_date_ids as $date_id) {
+                $count = $date_counts[$base + $date_id];
+                if ($count === 0) {
+                    continue;
+                }
                 $date = $date_list[$date_id];
                 if (! $first_entry) {
                     $segment .= ",\n        \"$date\": $count";
