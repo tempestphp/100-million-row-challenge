@@ -8,8 +8,8 @@ use const SEEK_CUR;
 final class Parser
 {
     private const int DISCOVER_SIZE = 1_048_576;
-    private const int WORKERS = 5;
-    private const int READ_CHUNK = 1_048_576;
+    private const int WORKERS = 8;
+    private const int READ_CHUNK = 4_194_304;
 
     public function parse(string $inputPath, string $outputPath): void
     {
