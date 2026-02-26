@@ -328,8 +328,22 @@ final class Parser
         $tmpDir = sys_get_temp_dir();
         $uid = getmypid();
 
-        $chunkSize = (int) ceil($filesize / self::THREADS);
         $pids = [];
+
+        // Pre-calculate chunk boundaries aligned to line endings
+        $boundaries = [];
+        $bfp = fopen($inputPath, 'rb');
+        $approxChunkSize = (int) ceil($filesize / self::THREADS);
+        $start = 0;
+        for ($i = 0; $i < (self::THREADS - 1); $i++) {
+            fseek($bfp, $start + $approxChunkSize);
+            fgets($bfp); // advance past the partial line to the next line start
+            $end = ftell($bfp);
+            $boundaries[] = [$start, $end];
+            $start = $end;
+        }
+        $boundaries[] = [$start, $filesize];
+        fclose($bfp);
 
         // Build date map — enumerate all days in a 6-year window (~2191 dates)
         $dateMap = [];
@@ -361,18 +375,12 @@ final class Parser
             if ($pid === 0) {
                 // --- CHILD PROCESS ---
                 gc_disable();
-                $startByte = $i * $chunkSize;
-                $endByte = min(($i + 1) * $chunkSize, $filesize);
+                [$startByte, $endByte] = $boundaries[$i];
 
                 $fp = fopen($inputPath, 'rb');
                 fseek($fp, $startByte);
-                if ($i > 0) {
-                    fseek($fp, $startByte - 1);
-                    if (fread($fp, 1) !== "\n")
-                        fgets($fp); // skip partial line only if mid-line
-                }
 
-                $bytesRemaining = $endByte - ftell($fp);
+                $bytesRemaining = $endByte - $startByte;
 
                 // $dateMap, $dateRevMap, $dateCount, $slugMap, $slugCount inherited from parent via COW
                 $results = array_fill(0, $slugCount * $dateCount, 0);
@@ -411,22 +419,6 @@ final class Parser
 
                         $results[$slugMap[$slug] + $dateMap[$date]]++;
                         $pos = $commaPos + self::LINE_ADVANCE;
-                    }
-                }
-
-                // Handle remaining partial line at chunk boundary
-                if ($buffer !== '') {
-                    $rest = fgets($fp);
-                    if ($rest !== false)
-                        $buffer .= $rest;
-                    if (strlen($buffer) > self::URL_PREFIX_LEN) {
-                        $commaPos = strpos($buffer, ',', self::URL_PREFIX_LEN);
-                        if ($commaPos !== false) {
-                            $slug = substr($buffer, self::URL_PREFIX_LEN, $commaPos - self::URL_PREFIX_LEN);
-                            $date = substr($buffer, $commaPos + 1, self::DATE_LEN);
-
-                            $results[$slugMap[$slug] + $dateMap[$date]]++;
-                        }
                     }
                 }
 
