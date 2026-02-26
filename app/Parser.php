@@ -2,47 +2,48 @@
 
 namespace App;
 
-use function shell_exec;
-use function filesize;
-use function is_dir;
-use function dirname;
-use function getmypid;
 use function ceil;
-use function pcntl_fork;
-use function min;
-use function fopen;
-use function fseek;
-use function fread;
+use function dirname;
+use function fclose;
 use function fgets;
+use function file_get_contents;
+use function file_put_contents;
+use function filesize;
+use function fopen;
+use function fread;
+use function fseek;
 use function ftell;
+use function getmypid;
+use function igbinary_serialize;
+use function igbinary_unserialize;
+use function is_dir;
+use function ksort;
+use function min;
+use function pcntl_fork;
+use function pcntl_waitpid;
+use function shell_exec;
 use function strlen;
+use function strpos;
 use function strrpos;
 use function substr;
-use function strpos;
-use function fclose;
-use function file_put_contents;
-use function pcntl_waitpid;
-use function igbinary_unserialize;
-use function igbinary_serialize;
-use function file_get_contents;
 use function unlink;
-use function ksort;
 
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        $threads = (int)shell_exec('nproc 2>/dev/null');
+        $threads = (int) shell_exec('nproc 2>/dev/null');
         $filesize = filesize($inputPath);
         $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : dirname($outputPath);
         $uid = getmypid();
 
-        $chunkSize = (int)ceil($filesize / $threads);
+        $chunkSize = (int) ceil($filesize / $threads);
         $pids = [];
 
         for ($i = 0; $i < $threads; $i++) {
             $pid = pcntl_fork();
-            if ($pid === -1) exit("Fork failed");
+            if ($pid === -1)
+                exit('Fork failed');
 
             if ($pid === 0) {
                 // --- CHILD PROCESS ---
@@ -53,7 +54,8 @@ final class Parser
                 fseek($fp, $startByte);
                 if ($i > 0) {
                     fseek($fp, $startByte - 1);
-                    if (fread($fp, 1) !== "\n") fgets($fp); // skip partial line only if mid-line
+                    if (fread($fp, 1) !== "\n")
+                        fgets($fp); // skip partial line only if mid-line
                 }
 
                 $bytesRemaining = $endByte - ftell($fp);
@@ -62,11 +64,12 @@ final class Parser
 
                 while ($bytesRemaining > 0) {
                     $chunk = fread($fp, min(1048576, $bytesRemaining));
-                    if ($chunk === false || $chunk === '') break;
+                    if ($chunk === false || $chunk === '')
+                        break;
                     $bytesRemaining -= strlen($chunk);
 
                     if ($buffer !== '') {
-                        $chunk = $buffer . $chunk;
+                        $chunk = $buffer.$chunk;
                         $buffer = '';
                     }
 
@@ -76,7 +79,7 @@ final class Parser
                         continue;
                     }
 
-                    if ($lastNl < strlen($chunk) - 1) {
+                    if ($lastNl < (strlen($chunk) - 1)) {
                         $buffer = substr($chunk, $lastNl + 1);
                     }
 
@@ -99,7 +102,8 @@ final class Parser
                 // Handle remaining partial line at chunk boundary
                 if ($buffer !== '') {
                     $rest = fgets($fp);
-                    if ($rest !== false) $buffer .= $rest;
+                    if ($rest !== false)
+                        $buffer .= $rest;
                     if (strlen($buffer) > 25) {
                         $commaPos = strpos($buffer, ',', 25);
                         if ($commaPos !== false) {
@@ -159,7 +163,7 @@ final class Parser
 
         $firstPath = true;
         foreach ($results as $path => $dates) {
-            if (!$firstPath) {
+            if (! $firstPath) {
                 $output .= ",\n";
             }
             $firstPath = false;
@@ -168,7 +172,7 @@ final class Parser
 
             $firstDate = true;
             foreach ($dates as $date => $count) {
-                if (!$firstDate) {
+                if (! $firstDate) {
                     $output .= ",\n";
                 }
                 $firstDate = false;
