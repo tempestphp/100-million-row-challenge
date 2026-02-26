@@ -2,6 +2,7 @@
 
 namespace App;
 
+use function array_fill;
 use function ceil;
 use function date;
 use function fclose;
@@ -13,6 +14,7 @@ use function fopen;
 use function fread;
 use function fseek;
 use function ftell;
+use function gc_disable;
 use function getmypid;
 use function igbinary_serialize;
 use function igbinary_unserialize;
@@ -49,10 +51,6 @@ final class Parser
     // Offset from commaPos to the start of the next line:
     // comma(1) + datetime(25) + \n(1) = 27
     private const LINE_ADVANCE = 27;
-
-    // Multiplier for integer key: pathId * PATH_ID_MULTIPLIER + dateId
-    // Must exceed max pre-warmed dates; 6-year window = ~2191 days, 2200 gives headroom
-    private const PATH_ID_MULTIPLIER = 2200;
 
     private const array URLS = [
         'shorthand-comparisons-in-php',
@@ -327,6 +325,8 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
+        gc_disable();
+
         $filesize = filesize($inputPath);
         $tmpDir = sys_get_temp_dir();
         $uid = getmypid();
@@ -341,6 +341,7 @@ final class Parser
 
             if ($pid === 0) {
                 // --- CHILD PROCESS ---
+                gc_disable();
                 $startByte = $i * $chunkSize;
                 $endByte = min(($i + 1) * $chunkSize, $filesize);
 
@@ -354,16 +355,7 @@ final class Parser
 
                 $bytesRemaining = $endByte - ftell($fp);
 
-                // Pre-warm slug map from hardcoded URLS list (ordered to match expected output)
-                $slugMap = [];
-                $slugRevMap = [];
-                foreach (self::URLS as $slugId => $url) {
-                    $slugMap[$url] = $slugId;
-                    $slugRevMap[$slugId] = $url;
-                }
-
-                // Pre-warm date map by enumerating all days in a 6-year window
-                // (data generated today spans at most ~1825 days; 6 years gives a safe margin)
+                // Build date map first — needed to compute pre-multiplied slug offsets
                 $dateMap = [];
                 $dateRevMap = [];
                 $dateCount = 0;
@@ -378,15 +370,17 @@ final class Parser
                     }
                 }
 
-                // Pre-warm results with all slug×date combinations set to 0
-                // so the hot loop can use $results[$intKey]++ without any isset check
-                $results = [];
-                $slugCount = count($slugMap);
-                for ($s = 0; $s < $slugCount; $s++) {
-                    for ($d = 0; $d < $dateCount; $d++) {
-                        $results[($s * self::PATH_ID_MULTIPLIER) + $d] = 0;
-                    }
+                // Build slug map with pre-multiplied base offsets — hot loop becomes a single add
+                $slugMap = [];
+                $slugRevMap = [];
+                $slugCount = count(self::URLS);
+                foreach (self::URLS as $slugId => $url) {
+                    $slugMap[$url] = $slugId * $dateCount;
+                    $slugRevMap[$slugId] = $url;
                 }
+
+                // Pre-warm results as a flat sequential array (array_fill is a C-level memset)
+                $results = array_fill(0, $slugCount * $dateCount, 0);
 
                 $buffer = '';
 
@@ -412,7 +406,7 @@ final class Parser
                     }
 
                     // All rows: https://stitcher.io/blog/SLUG,yyyy-mm-ddT00:00:00+00:00
-                    // Skip URL_PREFIX_LEN chars; integer key = pathId * PATH_ID_MULTIPLIER + dateId
+                    // Skip URL_PREFIX_LEN chars; key = slugMap[slug] (pre-multiplied) + dateMap[date]
                     // Next line is always at commaPos + LINE_ADVANCE
                     $pos = 0;
                     while ($pos < $lastNl) {
@@ -420,7 +414,7 @@ final class Parser
                         $slug = substr($chunk, $pos + self::URL_PREFIX_LEN, $commaPos - $pos - self::URL_PREFIX_LEN);
                         $date = substr($chunk, $commaPos + 1, self::DATE_LEN);
 
-                        $results[($slugMap[$slug] * self::PATH_ID_MULTIPLIER) + $dateMap[$date]]++;
+                        $results[$slugMap[$slug] + $dateMap[$date]]++;
                         $pos = $commaPos + self::LINE_ADVANCE;
                     }
                 }
@@ -436,7 +430,7 @@ final class Parser
                             $slug = substr($buffer, self::URL_PREFIX_LEN, $commaPos - self::URL_PREFIX_LEN);
                             $date = substr($buffer, $commaPos + 1, self::DATE_LEN);
 
-                            $results[($slugMap[$slug] * self::PATH_ID_MULTIPLIER) + $dateMap[$date]]++;
+                            $results[$slugMap[$slug] + $dateMap[$date]]++;
                         }
                     }
                 }
@@ -448,8 +442,8 @@ final class Parser
                 foreach ($results as $intKey => $count) {
                     if ($count === 0)
                         continue;
-                    $slug = $slugRevMap[intdiv($intKey, self::PATH_ID_MULTIPLIER)];
-                    $date = $dateRevMap[$intKey % self::PATH_ID_MULTIPLIER];
+                    $slug = $slugRevMap[intdiv($intKey, $dateCount)];
+                    $date = $dateRevMap[$intKey % $dateCount];
                     $stringResults[$slug.','.$date] = $count;
                 }
 
