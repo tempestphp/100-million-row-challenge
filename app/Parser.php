@@ -8,7 +8,7 @@ use const SEEK_CUR;
 final class Parser
 {
     private const int DISCOVER_SIZE = 1_048_576;
-    private const int WORKERS = 8;
+    private const int WORKERS = 10;
     private const int READ_CHUNK = 4_194_304;
 
     public function parse(string $inputPath, string $outputPath): void
@@ -48,21 +48,21 @@ final class Parser
         $pathIds = [];
         $paths = [];
         $pathCount = 0;
-        $pos = 0;
         $lastNl = strrpos($raw, "\n");
 
-        while ($pos < $lastNl) {
-            $nlPos = strpos($raw, "\n", $pos + 52);
-            if ($nlPos === false) break;
+        $p = 25;
+        while ($p < $lastNl) {
+            $sep = strpos($raw, ',', $p);
+            if ($sep === false || $sep >= $lastNl) break;
 
-            $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
+            $slug = substr($raw, $p, $sep - $p);
             if (!isset($pathIds[$slug])) {
                 $pathIds[$slug] = $pathCount * $dateCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
 
-            $pos = $nlPos + 1;
+            $p = $sep + 52;
         }
         unset($raw);
 
@@ -108,13 +108,35 @@ final class Parser
             $pathIds, $dateIds, $pathCount, $dateCount
         );
 
-        foreach ($children as [$cpid, $tmpFile]) {
-            pcntl_waitpid($cpid, $status);
-            $wCounts = unpack('V*', file_get_contents($tmpFile));
-            unlink($tmpFile);
-            $j = 0;
-            foreach ($wCounts as $v) {
-                $counts[$j++] += $v;
+        $pending = $children;
+        while (!empty($pending)) {
+            $anyDone = false;
+            foreach ($pending as $key => [$cpid, $tmpFile]) {
+                $ret = pcntl_waitpid($cpid, $status, WNOHANG);
+                if ($ret > 0) {
+                    $wCounts = unpack('V*', file_get_contents($tmpFile));
+                    unlink($tmpFile);
+                    $j = 0;
+                    foreach ($wCounts as $v) {
+                        $counts[$j++] += $v;
+                    }
+                    unset($pending[$key]);
+                    $anyDone = true;
+                    break;
+                }
+            }
+            if (!$anyDone && !empty($pending)) {
+                reset($pending);
+                $key = key($pending);
+                [$cpid, $tmpFile] = $pending[$key];
+                pcntl_waitpid($cpid, $status);
+                $wCounts = unpack('V*', file_get_contents($tmpFile));
+                unlink($tmpFile);
+                $j = 0;
+                foreach ($wCounts as $v) {
+                    $counts[$j++] += $v;
+                }
+                unset($pending[$key]);
             }
         }
 
@@ -142,6 +164,7 @@ final class Parser
             $lastNl = strrpos($chunk, "\n");
             if ($lastNl === false) {
                 fseek($handle, -$chunkLen, SEEK_CUR);
+                $remaining += $chunkLen;
                 break;
             }
 
@@ -151,13 +174,32 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $pos = 0;
-            while ($pos < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $pos + 52);
+            $p = 25;
+            $fence = $lastNl - 400;
 
-                $counts[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+            while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $p = $sep + 52;
 
-                $pos = $nlPos + 1;
+                $sep = strpos($chunk, ',', $p);
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $p = $sep + 52;
+            }
+
+            while ($p < $lastNl) {
+                $sep = strpos($chunk, ',', $p);
+                if ($sep === false || $sep >= $lastNl) break;
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $p = $sep + 52;
             }
         }
 
