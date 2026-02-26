@@ -6,7 +6,7 @@ final class Parser
 {
     public function parse($inputPath, $outputPath)
     {
-        \ini_set('memory_limit', '1G');
+        \ini_set('memory_limit', '4G');
         \gc_disable();
 
         $fileSize = \filesize($inputPath);
@@ -55,7 +55,7 @@ final class Parser
         }
 
         if ($fileSize >= 10485760) {
-            $numWorkers = 4;
+            $numWorkers = PHP_OS_FAMILY === 'Darwin' ? (int)\trim(\shell_exec('sysctl -n hw.ncpu')) : (int)(\trim(\shell_exec('nproc 2>/dev/null') ?: '8'));
             $handle = \fopen($inputPath, 'rb');
             $splits = [0];
             for ($w = 1; $w < $numWorkers; $w++) {
@@ -211,11 +211,9 @@ final class Parser
                 $raw = \file_get_contents($tmpPrefix . $w);
                 @\unlink($tmpPrefix . $w);
                 $childCounts = \unpack('V*', $raw);
-                unset($raw);
                 for ($i = 0; $i < $totalCells; $i++) {
                     $counts[$i] += $childCounts[$i + 1];
                 }
-                unset($childCounts);
             }
 
             $fp = \fopen($outputPath, 'wb');
