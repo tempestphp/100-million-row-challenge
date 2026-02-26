@@ -69,9 +69,7 @@ final class Parser
             $orderOffset = $i * 1000000000;
             foreach ($workerOrder as $path => $localOrd) {
                 $globalOrd = $orderOffset + $localOrd;
-                if (!isset($finalOrder[$path]) || $globalOrd < $finalOrder[$path]) {
-                    $finalOrder[$path] = $globalOrd;
-                }
+                $finalOrder[$path] = min($finalOrder[$path] ?? PHP_INT_MAX, $globalOrd);
             }
 
             foreach ($workerResult as $path => $dates) {
@@ -79,11 +77,7 @@ final class Parser
                     $finalResult[$path] = $dates;
                 } else {
                     foreach ($dates as $date => $count) {
-                        if (isset($finalResult[$path][$date])) {
-                            $finalResult[$path][$date] += $count;
-                        } else {
-                            $finalResult[$path][$date] = $count;
-                        }
+                        $finalResult[$path][$date] = ($finalResult[$path][$date] ?? 0) + $count;
                     }
                 }
             }
@@ -105,28 +99,18 @@ final class Parser
         $pos = $start;
         $maxLineLen = 1024;
 
-        while ($pos < $end && ($line = stream_get_line($fp, $maxLineLen, "\n")) !== false) {
-            $pos += strlen($line) + 1; // +1 for the consumed newline delimiter
+        while ($pos < $end && ($line = \stream_get_line($fp, $maxLineLen, "\n")) !== false) {
+            $pos += \strlen($line) + 1;
 
-            $commaPos = strpos($line, ",", 20);
+            $commaPos = \strpos($line, ",", 20);
             if ($commaPos === false)
                 continue;
 
-            $path = substr($line, 19, $commaPos - 19);
-            $date = substr($line, $commaPos + 1, 10);
+            $path = \substr($line, 19, $commaPos - 19);
+            $date = \substr($line, $commaPos + 1, 10);
 
-            if (!isset($result[$path])) {
-                $result[$path] = [$date => 1];
-                $order[$path] = $orderCounter++;
-            } else {
-                $ref = &$result[$path];
-                if (isset($ref[$date])) {
-                    $ref[$date]++;
-                } else {
-                    $ref[$date] = 1;
-                }
-                unset($ref);
-            }
+            $order[$path] ??= $orderCounter++;
+            $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
         }
 
         fclose($fp);
@@ -148,9 +132,8 @@ final class Parser
         // Build ordered result (dates already sorted by workers)
         $ordered = [];
         foreach ($order as $path => $_) {
-            if (!isset($result[$path]))
-                continue;
-            $ordered[$path] = $result[$path];
+            if (isset($result[$path]))
+                $ordered[$path] = $result[$path];
         }
 
         file_put_contents($outputPath, json_encode($ordered, JSON_PRETTY_PRINT));
