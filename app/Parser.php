@@ -23,9 +23,9 @@ use function gc_disable;
 use function getenv;
 use function getmypid;
 use function implode;
-use function is_dir;
 use function pack;
 use function pcntl_fork;
+use function pcntl_wait;
 use function pcntl_waitpid;
 use function str_replace;
 use function stream_set_read_buffer;
@@ -42,12 +42,12 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    public function parse($inputPath, $outputPath)
     {
         gc_disable();
 
         $fileSize = filesize($inputPath);
-        $workers = (int) (getenv('WORKER_COUNT') ?: 10);
+        $workers = 10;
 
         // ─── Build date lookup (arithmetic, no mktime/date overhead) ───
 
@@ -139,7 +139,7 @@ final class Parser
 
         // ─── Fork children (0..N-2), parent takes last chunk ───
 
-        $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
+        $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
         $children = [];
 
@@ -165,15 +165,24 @@ final class Parser
             $slugIndex, $dateChars, $numSlugs, $numDates,
         );
 
-        // ─── Merge child results ───
+        // ─── Merge child results (as each finishes) ───
 
+        $childMap = [];
         foreach ($children as [$pid, $tmpFile]) {
-            pcntl_waitpid($pid, $status);
-            $j = 0;
-            foreach (unpack('V*', file_get_contents($tmpFile)) as $v) {
-                $tally[$j++] += $v;
+            $childMap[$pid] = $tmpFile;
+        }
+
+        $pending = count($childMap);
+        while ($pending > 0) {
+            $pid = pcntl_wait($status);
+            if (isset($childMap[$pid])) {
+                $j = 0;
+                foreach (unpack('V*', file_get_contents($childMap[$pid])) as $v) {
+                    $tally[$j++] += $v;
+                }
+                unlink($childMap[$pid]);
+                $pending--;
             }
-            unlink($tmpFile);
         }
 
         // ─── Emit JSON ───
