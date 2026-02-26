@@ -7,6 +7,7 @@ namespace App;
 use App\Commands\Visit;
 
 use function array_fill;
+use function chr;
 use function count;
 use function fclose;
 use function fgets;
@@ -40,7 +41,7 @@ use const SEEK_CUR;
 final class Parser
 {
     private const int WORKERS = 10;
-    private const int READ_CHUNK = 67_108_864;
+    private const int READ_CHUNK = 8_388_608;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function parse($inputPath, $outputPath)
@@ -70,6 +71,11 @@ final class Parser
             }
         }
 
+        $dateIdChars = [];
+        foreach ($dateIds as $date => $id) {
+            $dateIdChars[$date] = chr($id & 0xFF) . chr($id >> 8);
+        }
+
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         $warmUpSize = $fileSize > self::DISCOVER_SIZE ? self::DISCOVER_SIZE : $fileSize;
@@ -88,7 +94,7 @@ final class Parser
 
             $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
             if (!isset($pathIds[$slug])) {
-                $pathIds[$slug] = $pathCount * $dateCount;
+                $pathIds[$slug] = $pathCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
@@ -100,7 +106,7 @@ final class Parser
         foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, 25);
             if (!isset($pathIds[$slug])) {
-                $pathIds[$slug] = $pathCount * $dateCount;
+                $pathIds[$slug] = $pathCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
@@ -126,7 +132,7 @@ final class Parser
             if ($pid === 0) {
                 $wCounts = $this->parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $pathIds, $dateIds, $pathCount, $dateCount,
+                    $pathIds, $dateIdChars, $pathCount, $dateCount,
                 );
                 file_put_contents($tmpFile, pack('V*', ...$wCounts));
                 exit(0);
@@ -136,7 +142,7 @@ final class Parser
 
         $counts = $this->parseRange(
             $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
-            $pathIds, $dateIds, $pathCount, $dateCount,
+            $pathIds, $dateIdChars, $pathCount, $dateCount,
         );
 
         foreach ($children as [$cpid, $tmpFile]) {
@@ -154,10 +160,10 @@ final class Parser
 
     private function parseRange(
         $inputPath, $start, $end,
-        $pathIds, $dateIds,
+        $pathIds, $dateIdChars,
         $pathCount, $dateCount,
     ) {
-        $counts = array_fill(0, $pathCount * $dateCount, 0);
+        $buckets = array_fill(0, $pathCount, '');
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
@@ -171,10 +177,7 @@ final class Parser
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) {
-                fseek($handle, -$chunkLen, SEEK_CUR);
-                break;
-            }
+            if ($lastNl === false) break;
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
@@ -182,36 +185,54 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $ss = 25;
-            $limit = $lastNl + 25;
-            while ($ss < $limit) {
-                $nlPos = strpos($chunk, "\n", $ss + 27);
-                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-                $ss = $nlPos + 26;
-                if ($ss >= $limit) break;
-                $nlPos = strpos($chunk, "\n", $ss + 27);
-                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-                $ss = $nlPos + 26;
-                if ($ss >= $limit) break;
-                $nlPos = strpos($chunk, "\n", $ss + 27);
-                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-                $ss = $nlPos + 26;
-                if ($ss >= $limit) break;
-                $nlPos = strpos($chunk, "\n", $ss + 27);
-                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-                $ss = $nlPos + 26;
-                if ($ss >= $limit) break;
-                $nlPos = strpos($chunk, "\n", $ss + 27);
-                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-                $ss = $nlPos + 26;
-                if ($ss >= $limit) break;
-                $nlPos = strpos($chunk, "\n", $ss + 27);
-                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-                $ss = $nlPos + 26;
+            $pos = 0;
+            $fence = $lastNl - 720;
+
+            while ($pos < $fence) {
+                $nlPos = strpos($chunk, "\n", $pos + 52);
+                $buckets[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]] .= $dateIdChars[substr($chunk, $nlPos - 23, 8)];
+                $pos = $nlPos + 1;
+
+                $nlPos = strpos($chunk, "\n", $pos + 52);
+                $buckets[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]] .= $dateIdChars[substr($chunk, $nlPos - 23, 8)];
+                $pos = $nlPos + 1;
+
+                $nlPos = strpos($chunk, "\n", $pos + 52);
+                $buckets[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]] .= $dateIdChars[substr($chunk, $nlPos - 23, 8)];
+                $pos = $nlPos + 1;
+
+                $nlPos = strpos($chunk, "\n", $pos + 52);
+                $buckets[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]] .= $dateIdChars[substr($chunk, $nlPos - 23, 8)];
+                $pos = $nlPos + 1;
+
+                $nlPos = strpos($chunk, "\n", $pos + 52);
+                $buckets[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]] .= $dateIdChars[substr($chunk, $nlPos - 23, 8)];
+                $pos = $nlPos + 1;
+
+                $nlPos = strpos($chunk, "\n", $pos + 52);
+                $buckets[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]] .= $dateIdChars[substr($chunk, $nlPos - 23, 8)];
+                $pos = $nlPos + 1;
+            }
+
+            while ($pos < $lastNl) {
+                $nlPos = strpos($chunk, "\n", $pos + 52);
+                if ($nlPos === false) break;
+                $buckets[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)]] .= $dateIdChars[substr($chunk, $nlPos - 23, 8)];
+                $pos = $nlPos + 1;
             }
         }
 
         fclose($handle);
+
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
+        for ($p = 0; $p < $pathCount; $p++) {
+            if ($buckets[$p] === '') continue;
+            $offset = $p * $dateCount;
+            foreach (unpack('v*', $buckets[$p]) as $did) {
+                $counts[$offset + $did]++;
+            }
+        }
+
         return $counts;
     }
 
