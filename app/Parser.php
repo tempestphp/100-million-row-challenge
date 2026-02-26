@@ -107,13 +107,15 @@ final class Parser
         $counters = $results[0];
         for($i = 1; $i < self::WORKER_COUNT; $i++) {
             foreach ($results[$i] as $uri => $dates) {
+                $counter = &$counters[$uri];
                 foreach ($dates as $date => $count) {
-                    if (!isset($counters[$uri][$date])) {
-                        $counters[$uri][$date] = $count;
+                    if (!isset($counter[$date])) {
+                        $counter[$date] = $count;
                     } else {
-                        $counters[$uri][$date] += $count;
+                        $counter[$date] += $count;
                     }
                 }
+                unset($counter);
             }
         }
 
