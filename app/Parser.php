@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace App;
 
+use App\Commands\Visit;
 use function array_fill;
-use function array_keys;
-use function asort;
 use function fclose;
 use function fgets;
 use function file_get_contents;
@@ -36,14 +35,14 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int READ_CHUNK_SIZE = 1_048_576;
-    private const int WRITE_BUFFER_SIZE = 1_048_576;
+    private const int READ_CHUNK_SIZE = 163_840;
+    private const int WRITE_BUFFER_SIZE = 0;
     private const int URI_PREFIX_LENGTH = 19;
     private const int DATE_LENGTH = 10;
     private const int DATE_OFFSET_FROM_NL = 25;
     private const int MIN_LINE_LENGTH = 45;
     private const int WORKERS = 8;
-    private const int DISCOVER_SIZE = 8_388_608;
+    private const int DISCOVER_SIZE = 131_072;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -54,7 +53,10 @@ final class Parser
             $fileSize,
         );
 
-        [$pathIds, $paths, $pathCount, $dateIds, $dates, $dateCount] = $this->discover($inputPath, $fileSize);
+        [$pathIds, $paths, $pathCount] = $this->discover($inputPath, $fileSize);
+        $this->registerMissingPaths($pathIds, $paths, $pathCount);
+        [$dateIds, $dates, $dateCount] = $this->buildDates();
+        $flatCount = $pathCount * $dateCount;
 
         $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
@@ -108,9 +110,10 @@ final class Parser
             $wCounts = unpack('V*', (string) file_get_contents($tmpFile));
             unlink($tmpFile);
 
-            $j = 0;
-            foreach ($wCounts as $v) {
-                $mergedCounts[$j++] += $v;
+            $k = 1;
+
+            for ($j = 0; $j < $flatCount; $j++) {
+                $mergedCounts[$j] += $wCounts[$k++];
             }
         }
 
@@ -118,6 +121,41 @@ final class Parser
     }
 
     private function discover(string $inputPath, int $fileSize): array
+    {
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $warmUpSize = $fileSize > self::DISCOVER_SIZE ? self::DISCOVER_SIZE : $fileSize;
+        $chunk = fread($handle, $warmUpSize);
+        fclose($handle);
+
+        $lastNl = strrpos($chunk, "\n");
+        $pathIds = [];
+        $paths = [];
+        $pathCount = 0;
+        $pos = 0;
+
+        while ($pos < $lastNl) {
+            $nlPos = strpos($chunk, "\n", $pos + 50);
+
+            $path = substr(
+                $chunk,
+                $pos + self::URI_PREFIX_LENGTH,
+                $nlPos - $pos - self::MIN_LINE_LENGTH,
+            );
+
+            if (! isset($pathIds[$path])) {
+                $pathIds[$path] = $pathCount;
+                $paths[$pathCount] = $path;
+                $pathCount++;
+            }
+
+            $pos = $nlPos + 1;
+        }
+
+        return [$pathIds, $paths, $pathCount];
+    }
+
+    private function buildDates(): array
     {
         $dateIds = [];
         $dates = [];
@@ -140,37 +178,22 @@ final class Parser
             }
         }
 
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
-        $warmUpSize = $fileSize > self::DISCOVER_SIZE ? self::DISCOVER_SIZE : $fileSize;
-        $chunk = fread($handle, $warmUpSize);
-        fclose($handle);
+        return [$dateIds, $dates, $dateCount];
+    }
 
-        $lastNl = strrpos($chunk, "\n");
-        $pathIds = [];
-        $paths = [];
-        $pathCount = 0;
-        $pos = 0;
+    private function registerMissingPaths(array &$pathIds, array &$paths, int &$pathCount): void
+    {
+        foreach (Visit::all() as $visit) {
+            $path = substr($visit->uri, self::URI_PREFIX_LENGTH);
 
-        while ($pos < $lastNl) {
-            $nlPos = strpos($chunk, "\n", $pos + 50);
-
-            $path = substr(
-                $chunk,
-                $pos + self::URI_PREFIX_LENGTH,
-                $nlPos - $pos - self::MIN_LINE_LENGTH,
-            );
-
-            if (($pathIds[$path] ?? -1) === -1) {
-                $pathIds[$path] = $pathCount;
-                $paths[$pathCount] = $path;
-                $pathCount++;
+            if (isset($pathIds[$path])) {
+                continue;
             }
 
-            $pos = $nlPos + 1;
+            $pathIds[$path] = $pathCount;
+            $paths[$pathCount] = $path;
+            $pathCount++;
         }
-
-        return [$pathIds, $paths, $pathCount, $dateIds, $dates, $dateCount];
     }
 
     private function calculateBoundaries(
@@ -236,25 +259,12 @@ final class Parser
                     $pos + self::URI_PREFIX_LENGTH,
                     $nlPos - $pos - self::MIN_LINE_LENGTH,
                 );
+                $pathId = $pathIds[$path];
                 $date = substr(
                     $chunk,
                     $nlPos - self::DATE_OFFSET_FROM_NL,
                     self::DATE_LENGTH,
                 );
-
-                $pathId = $pathIds[$path] ?? -1;
-
-                if ($pathId === -1) {
-                    $pathId = $pathCount;
-                    $pathIds[$path] = $pathId;
-
-                    for ($j = 0; $j < $stride; $j++) {
-                        $counts[] = 0;
-                    }
-
-                    $pathCount++;
-                }
-
                 $dateId = $dateIds[$date];
 
                 $counts[($pathId * $stride) + $dateId]++;
@@ -275,9 +285,11 @@ final class Parser
         array $counts,
         int $dateCount,
     ): void {
-        $sortedDates = $dates;
-        asort($sortedDates);
-        $orderedDateIds = array_keys($sortedDates);
+        $datePrefixes = [];
+
+        for ($dateId = 0; $dateId < $dateCount; $dateId++) {
+            $datePrefixes[$dateId] = "        \"{$dates[$dateId]}\": ";
+        }
 
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, self::WRITE_BUFFER_SIZE);
@@ -286,23 +298,27 @@ final class Parser
         $firstPath = true;
 
         foreach ($paths as $pathId => $path) {
-            $pathBuffer = $firstPath ? '' : ',';
-            $firstPath = false;
-            $escapedPath = str_replace('/', '\\/', $path);
-            $pathBuffer .= "\n    \"{$escapedPath}\": {";
-
             $entries = [];
             $base = $pathId * $dateCount;
 
-            foreach ($orderedDateIds as $dateId) {
+            for ($dateId = 0; $dateId < $dateCount; $dateId++) {
                 $count = $counts[$base + $dateId];
 
                 if ($count === 0) {
                     continue;
                 }
 
-                $entries[] = "        \"{$dates[$dateId]}\": {$count}";
+                $entries[] = $datePrefixes[$dateId] . $count;
             }
+
+            if ($entries === []) {
+                continue;
+            }
+
+            $pathBuffer = $firstPath ? '' : ',';
+            $firstPath = false;
+            $escapedPath = str_replace('/', '\\/', $path);
+            $pathBuffer .= "\n    \"{$escapedPath}\": {";
 
             $pathBuffer .= "\n" . implode(",\n", $entries) . "\n    }";
             fwrite($out, $pathBuffer);
