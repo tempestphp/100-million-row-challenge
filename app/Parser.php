@@ -90,6 +90,7 @@ final class Parser
     private function processChunk(string $inputPath, int $start, int $end): array
     {
         $fp = fopen($inputPath, 'rb');
+        fseek($fp, $start);
 
         $result = [];
         $order = [];
