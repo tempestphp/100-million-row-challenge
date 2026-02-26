@@ -41,7 +41,7 @@ use const SEEK_CUR;
 final class Parser
 {
     private const int WORKERS = 10;
-    private const int READ_CHUNK = 4_194_304;
+    private const int READ_CHUNK = 8_388_608;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function parse($inputPath, $outputPath)
@@ -257,22 +257,22 @@ final class Parser
 
         $firstPath = true;
 
-        foreach ($escapedPaths as $p => $escapedPath) {
+        for ($p = 0; $p < $pathCount; $p++) {
             $base = $p * $dateCount;
-            $buf = '';
-            $sep = '';
+            $dateEntries = [];
 
-            foreach ($datePrefixes as $d => $prefix) {
+            for ($d = 0; $d < $dateCount; $d++) {
                 $count = $counts[$base + $d];
                 if ($count === 0) continue;
-                $buf .= $sep . $prefix . $count;
-                $sep = ",\n";
+                $dateEntries[] = $datePrefixes[$d] . $count;
             }
 
-            if ($buf === '') continue;
+            if ($dateEntries === []) continue;
 
-            fwrite($out, ($firstPath ? '' : ',') . "\n    " . $escapedPath . ": {\n" . $buf . "\n    }");
+            $buf = $firstPath ? "\n    " : ",\n    ";
             $firstPath = false;
+            $buf .= $escapedPaths[$p] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
+            fwrite($out, $buf);
         }
 
         fwrite($out, "\n}");
