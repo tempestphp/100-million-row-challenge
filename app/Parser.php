@@ -13,7 +13,6 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
-use function file_get_contents;
 use function filesize;
 use function fopen;
 use function fread;
@@ -21,22 +20,24 @@ use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
-use function getmypid;
 use function pack;
 use function pcntl_fork;
-use function pcntl_wait;
+use function pcntl_waitpid;
 use function str_replace;
+use function stream_get_contents;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
+use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function sys_get_temp_dir;
-use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
@@ -135,33 +136,34 @@ final class Parser
 
         $numChunks = count($bounds) - 1;
 
-        // ─── Fork children (0..N-2), parent takes last chunk ───
+        // ─── Fork children with socket pairs for IPC ───
 
-        $tmpDir = sys_get_temp_dir();
-        $myPid = getmypid();
-        $children = [];
+        $pipes = [];
+        $childPids = [];
 
         for ($w = 0; $w < $numChunks - 1; $w++) {
-            $tmpFile = $tmpDir . '/parse_' . $myPid . '_' . $w;
+            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             $pid = pcntl_fork();
 
             if ($pid === 0) {
+                fclose($pair[0]);
                 $result = $this->crunch(
                     $inputPath, $bounds[$w], $bounds[$w + 1],
                     $slugIndex, $dateChars, $numSlugs, $numDates,
                 );
-                $wfh = fopen($tmpFile, 'wb');
                 $v16 = max($result) <= 65535;
-                fwrite($wfh, $v16 ? "\x00" : "\x01");
+                fwrite($pair[1], $v16 ? "\x00" : "\x01");
                 $fmt = $v16 ? 'v*' : 'V*';
                 foreach (array_chunk($result, 8192) as $batch) {
-                    fwrite($wfh, pack($fmt, ...$batch));
+                    fwrite($pair[1], pack($fmt, ...$batch));
                 }
-                fclose($wfh);
+                fclose($pair[1]);
                 exit(0);
             }
 
-            $children[] = [$pid, $tmpFile];
+            fclose($pair[1]);
+            $pipes[$w] = $pair[0];
+            $childPids[] = $pid;
         }
 
         // Parent crunches last chunk (children get a head start)
@@ -170,31 +172,25 @@ final class Parser
             $slugIndex, $dateChars, $numSlugs, $numDates,
         );
 
-        // ─── Merge child results (as each finishes) ───
+        // ─── Merge child results from pipes ───
 
-        $childMap = [];
-        foreach ($children as [$pid, $tmpFile]) {
-            $childMap[$pid] = $tmpFile;
+        foreach ($pipes as $pipe) {
+            $raw = stream_get_contents($pipe);
+            fclose($pipe);
+            $rawLen = strlen($raw);
+            $isV16 = ord($raw[0]) === 0;
+            $fmt = $isV16 ? 'v*' : 'V*';
+            $step = $isV16 ? 16384 : 32768;
+            $j = 0;
+            for ($off = 1; $off < $rawLen; $off += $step) {
+                foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
+                    $tally[$j++] += $v;
+                }
+            }
         }
 
-        $pending = count($childMap);
-        while ($pending > 0) {
-            $pid = pcntl_wait($status);
-            if (isset($childMap[$pid])) {
-                $raw = file_get_contents($childMap[$pid]);
-                $rawLen = strlen($raw);
-                $isV16 = ord($raw[0]) === 0;
-                $fmt = $isV16 ? 'v*' : 'V*';
-                $step = $isV16 ? 16384 : 32768;
-                $j = 0;
-                for ($off = 1; $off < $rawLen; $off += $step) {
-                    foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
-                        $tally[$j++] += $v;
-                    }
-                }
-                unlink($childMap[$pid]);
-                $pending--;
-            }
+        foreach ($childPids as $pid) {
+            pcntl_waitpid($pid, $status);
         }
         // ─── Emit JSON ───
 
