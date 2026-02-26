@@ -15,14 +15,15 @@ final class Parser
 			$path = substr($line, 19, -27);
 			$date = substr($line, -26, 10);
 
-			if (!isset($posts[$path][$date]))
-				$posts[$path][$date] = 0;
-			$posts[$path][$date]++;
+			$posts[$path][] = $date;
 		}
-		foreach ($posts as &$dates)
-			ksort($dates);
-
 		fclose($handle);
+		foreach ($posts as &$dates)
+		{
+			$dates = array_count_values($dates);
+			ksort($dates);
+		}
+
 		file_put_contents($outputPath, json_encode($posts, JSON_PRETTY_PRINT));
 	}
 }
