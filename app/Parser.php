@@ -15,6 +15,7 @@ use function ftell;
 use function getmypid;
 use function igbinary_serialize;
 use function igbinary_unserialize;
+use function intdiv;
 use function ksort;
 use function min;
 use function pcntl_fork;
@@ -47,6 +48,10 @@ final class Parser
     // comma(1) + datetime(25) + \n(1) = 27
     private const LINE_ADVANCE = 27;
 
+    // Multiplier for integer key: pathId * PATH_ID_MULTIPLIER + dateId
+    // Must exceed the max number of unique dates (~1825); 2000 gives headroom
+    private const PATH_ID_MULTIPLIER = 2000;
+
     public function parse(string $inputPath, string $outputPath): void
     {
         $filesize = filesize($inputPath);
@@ -76,6 +81,12 @@ final class Parser
 
                 $bytesRemaining = $endByte - ftell($fp);
                 $results = [];
+                $slugMap = []; // slug string → int id
+                $dateMap = []; // date string → int id
+                $slugRevMap = []; // int id → slug string
+                $dateRevMap = []; // int id → date string
+                $slugCount = 0;
+                $dateCount = 0;
                 $buffer = '';
 
                 while ($bytesRemaining > 0) {
@@ -100,20 +111,28 @@ final class Parser
                     }
 
                     // All rows: https://stitcher.io/blog/SLUG,yyyy-mm-ddT00:00:00+00:00
-                    // Skip URL_PREFIX_LEN chars; key = "SLUG,yyyy-mm-dd"
+                    // Skip URL_PREFIX_LEN chars; integer key = pathId * PATH_ID_MULTIPLIER + dateId
                     // Next line is always at commaPos + LINE_ADVANCE
                     $pos = 0;
                     while ($pos < $lastNl) {
                         $commaPos = strpos($chunk, ',', $pos + self::URL_PREFIX_LEN);
-                        $key = substr(
-                            $chunk,
-                            $pos + self::URL_PREFIX_LEN,
-                            $commaPos - $pos - self::URL_PREFIX_LEN + self::DATE_KEY_LEN,
-                        );
-                        if (isset($results[$key])) {
-                            $results[$key]++;
+                        $slug = substr($chunk, $pos + self::URL_PREFIX_LEN, $commaPos - $pos - self::URL_PREFIX_LEN);
+                        $date = substr($chunk, $commaPos + 1, self::DATE_LEN);
+
+                        if (! isset($slugMap[$slug])) {
+                            $slugRevMap[$slugCount] = $slug;
+                            $slugMap[$slug] = $slugCount++;
+                        }
+                        if (! isset($dateMap[$date])) {
+                            $dateRevMap[$dateCount] = $date;
+                            $dateMap[$date] = $dateCount++;
+                        }
+
+                        $intKey = ($slugMap[$slug] * self::PATH_ID_MULTIPLIER) + $dateMap[$date];
+                        if (isset($results[$intKey])) {
+                            $results[$intKey]++;
                         } else {
-                            $results[$key] = 1;
+                            $results[$intKey] = 1;
                         }
                         $pos = $commaPos + self::LINE_ADVANCE;
                     }
@@ -127,22 +146,39 @@ final class Parser
                     if (strlen($buffer) > self::URL_PREFIX_LEN) {
                         $commaPos = strpos($buffer, ',', self::URL_PREFIX_LEN);
                         if ($commaPos !== false) {
-                            $key = substr(
-                                $buffer,
-                                self::URL_PREFIX_LEN,
-                                $commaPos - self::URL_PREFIX_LEN + self::DATE_KEY_LEN,
-                            );
-                            if (isset($results[$key])) {
-                                $results[$key]++;
+                            $slug = substr($buffer, self::URL_PREFIX_LEN, $commaPos - self::URL_PREFIX_LEN);
+                            $date = substr($buffer, $commaPos + 1, self::DATE_LEN);
+
+                            if (! isset($slugMap[$slug])) {
+                                $slugRevMap[$slugCount] = $slug;
+                                $slugMap[$slug] = $slugCount++;
+                            }
+                            if (! isset($dateMap[$date])) {
+                                $dateRevMap[$dateCount] = $date;
+                                $dateMap[$date] = $dateCount++;
+                            }
+
+                            $intKey = ($slugMap[$slug] * self::PATH_ID_MULTIPLIER) + $dateMap[$date];
+                            if (isset($results[$intKey])) {
+                                $results[$intKey]++;
                             } else {
-                                $results[$key] = 1;
+                                $results[$intKey] = 1;
                             }
                         }
                     }
                 }
 
                 fclose($fp);
-                file_put_contents("{$tmpDir}/csv_{$uid}_{$i}.dat", igbinary_serialize($results));
+
+                // Convert integer keys back to string keys for IPC
+                $stringResults = [];
+                foreach ($results as $intKey => $count) {
+                    $slug = $slugRevMap[intdiv($intKey, self::PATH_ID_MULTIPLIER)];
+                    $date = $dateRevMap[$intKey % self::PATH_ID_MULTIPLIER];
+                    $stringResults[$slug.','.$date] = $count;
+                }
+
+                file_put_contents("{$tmpDir}/csv_{$uid}_{$i}.dat", igbinary_serialize($stringResults));
                 exit(0);
             }
 
