@@ -5,54 +5,83 @@ namespace App;
 use App\Commands\Visit;
 use Exception;
 
-use function Tempest\Support\Str\strip_start;
-
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        $t = microtime(true);
+        $t = hrtime(true);
         $h = fopen($inputPath, 'r');
         if (!$h) {
             throw new Exception("Failed to open file: $inputPath");
         }
-        var_dump($t - microtime(true));
+        var_dump($t - hrtime(true));
 
         $res = [];
         foreach (Visit::all() as $visit) {
-            $res[substr($visit->uri, 19)] = array_fill(0, 1909, 0);
+            $res[substr($visit->uri, 19)] = array_fill_keys(
+                array_keys(self::DATES),
+                0,
+            );
         }
 
-        var_dump($t - microtime(true));
+        var_dump($t - hrtime(true));
 
-        while (($line = fgets($h)) !== false) {
+        $a = $b = $c = $d = 0;
+        while (true) {
+            $a += hrtime(true);
+            $line = fgets($h);
+            $a -= hrtime(true);
+            if (!$line ) {
+                break;
+            }
+
+            $b += hrtime(true);
             $comma = strpos($line, ',');
+            $b -= hrtime(true);
+            $c += hrtime(true);
             $u = substr($line, 19, $comma - 19);
             $dt = substr($line, $comma + 1, 10);
-            $idx = self::DATES[$dt];
-            $res[$u][$idx]++;
+            $c -= hrtime(true);
+
+            $d += hrtime(true);
+            //$res[$u][$dt] ??= 0;
+            $res[$u][$dt]++;
+            $d -= hrtime(true);
         }
 
-        var_dump($t - microtime(true));
+        var_dump([
+            'a' => $a,
+            'b' => $b,
+            'c' => $c,
+            'd' => $d,
+        ]);
+
+        var_dump($t - hrtime(true));
         fclose($h);
-        var_dump($t - microtime(true));
+        var_dump($t - hrtime(true));
 
 
         foreach ($res as $k => $indexed) {
-            ksort($indexed);
-            $res[$k] = [];
+            foreach ($indexed as $dt => $item) {
+                if ($item === 0) {
+                    unset($res[$k][$dt]);
+                }
+            }
 
-            foreach ($indexed as $i => $value) {
-                $res[$k][self::FLIP[$i]] = $value;
+            if (!$res[$k]) {
+                unset($res[$k]);
+            } else {
+                ksort($indexed);
             }
         }
 
-        var_dump($t - microtime(true));
+        var_dump($t - hrtime(true));
 
         file_put_contents(
             $outputPath,
             json_encode($res, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         );
+        var_dump($t - hrtime(true));
     }
 
     private const array DATES = [
