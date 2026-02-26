@@ -17,6 +17,7 @@ final class BenchmarkRunCommand
     private const string CACHE_KEY = 'prs';
 
     private ?string $token;
+    private bool $verify = true;
     private bool $persist = false;
 
     public function __construct(
@@ -33,6 +34,7 @@ final class BenchmarkRunCommand
         bool $daemon = false,
         bool $persist = false,
         bool $cache = false,
+        bool $verify = true,
     ): void
     {
         if (! $this->token) {
@@ -41,6 +43,7 @@ final class BenchmarkRunCommand
         }
 
         $this->persist = $persist;
+        $this->verify = $verify;
 
         if ($cache === false) {
             $this->cache->remove(self::CACHE_KEY);
@@ -148,7 +151,7 @@ final class BenchmarkRunCommand
                 }
             }
 
-            if (! $hasVerifiedLabel) {
+            if ($this->verify && ! $hasVerifiedLabel) {
                 continue;
             }
 
@@ -265,7 +268,6 @@ final class BenchmarkRunCommand
 
         $command = sprintf(
             "hyperfine --warmup 0 --runs 1 --export-json %s 'cd %s && %s'",
-//            "hyperfine --warmup 2 --runs 5 --export-json %s 'cd %s && %s'",
             escapeshellarg($resultFile),
             escapeshellarg($benchmarkDir),
             $parseCommand,
@@ -291,7 +293,7 @@ final class BenchmarkRunCommand
             return null;
         }
 
-        if ($meanTime < 30) {
+        if ($meanTime < 10) {
             // Second run for fast PRs
             $command = sprintf(
                 "hyperfine --warmup 2 --runs 5 --export-json %s 'cd %s && %s'",
@@ -335,31 +337,6 @@ final class BenchmarkRunCommand
         exec("rm -rf " . escapeshellarg($benchmarkDir));
 
         return $meanTime;
-    }
-
-    private function prLine(int $prNumber, string $message): void
-    {
-        $this->writeln("<style=\"fg-blue\">[#$prNumber]</style> $message");
-    }
-
-    private function prInfo(int $prNumber, string $message): void
-    {
-        $this->writeln("<style=\"bold fg-blue\">[#$prNumber] $message</style>");
-    }
-
-    private function prSuccess(int $prNumber, string $message): void
-    {
-        $this->writeln("<style=\"bold fg-green\">[#$prNumber] $message</style>");
-    }
-
-    private function prError(int $prNumber, string $message): void
-    {
-        $this->writeln("<style=\"bold fg-red\">[#$prNumber] $message</style>");
-    }
-
-    private function prWarning(int $prNumber, string $message): void
-    {
-        $this->writeln("<style=\"bold fg-yellow\">[#$prNumber] $message</style>");
     }
 
     private function addLeaderboardResult(int $prNumber, string $branch, ?float $newTime): void
@@ -434,6 +411,14 @@ final class BenchmarkRunCommand
             }
         }
 
+        if (!isset($data[$branch])) {
+            $data[$branch] = [
+                'submissionTime' => time(),
+                'branch' => $branch,
+                'benchmarkTime' => $newTime,
+            ];
+        }
+
         fclose($handle);
 
         usort($data, fn ($a, $b) => $a['benchmarkTime'] <=> $b['benchmarkTime']);
@@ -480,5 +465,30 @@ final class BenchmarkRunCommand
         }
 
         $this->prSuccess($prNumber, "Leaderboard updated!");
+    }
+
+    private function prLine(int $prNumber, string $message): void
+    {
+        $this->writeln("<style=\"fg-blue\">[#$prNumber]</style> $message");
+    }
+
+    private function prInfo(int $prNumber, string $message): void
+    {
+        $this->writeln("<style=\"bold fg-blue\">[#$prNumber] $message</style>");
+    }
+
+    private function prSuccess(int $prNumber, string $message): void
+    {
+        $this->writeln("<style=\"bold fg-green\">[#$prNumber] $message</style>");
+    }
+
+    private function prError(int $prNumber, string $message): void
+    {
+        $this->writeln("<style=\"bold fg-red\">[#$prNumber] $message</style>");
+    }
+
+    private function prWarning(int $prNumber, string $message): void
+    {
+        $this->writeln("<style=\"bold fg-yellow\">[#$prNumber] $message</style>");
     }
 }
