@@ -1,13 +1,38 @@
 <?php
 
-namespace App;
+declare(strict_types=1);
 
-use Exception;
+namespace App;
 
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        throw new Exception('TODO');
+        gc_disable();
+
+        $stream = fopen($inputPath, 'r');
+        $data = [];
+
+        while ($line = fgets($stream)) {
+            [$uri, $datetime] = explode(',', $line);
+
+            $path = substr($uri, 19);
+            $date = substr($datetime, 0, 10);
+
+            if (!isset($data[$path])) {
+                $data[$path] = [$date => 1];
+                continue;
+            }
+
+            $visits = &$data[$path];
+            $visits[$date] = ($visits[$date] ?? 0) + 1;
+            // $data[$path][$date] = ($data[$path][$date] ?? 0) + 1;
+        }
+
+        foreach ($data as $uri => &$dates) {
+            ksort($dates);
+        }
+
+        file_put_contents($outputPath, json_encode($data, JSON_PRETTY_PRINT, 2));
     }
 }
