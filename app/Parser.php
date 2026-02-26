@@ -34,6 +34,7 @@ use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
+use const WNOHANG;
 
 final class Parser
 {
@@ -99,7 +100,7 @@ final class Parser
             }
         }
 
-        $numWorkers = 10;
+        $numWorkers = 12;
         $chunkSize = 4_194_304;
 
         $splits = [0];
@@ -190,7 +191,19 @@ final class Parser
                 }
 
                 $fh = fopen($tmpPrefix . $w, 'wb');
-                fwrite($fh, pack('V*', ...$counts));
+                $batch = [];
+                $batchCount = 0;
+                foreach ($counts as $value) {
+                    $batch[] = $value;
+                    if (++$batchCount === 8192) {
+                        fwrite($fh, pack('V*', ...$batch));
+                        $batch = [];
+                        $batchCount = 0;
+                    }
+                }
+                if ($batchCount > 0) {
+                    fwrite($fh, pack('V*', ...$batch));
+                }
                 fclose($fh);
                 exit(0);
             }
@@ -267,7 +280,10 @@ final class Parser
 
         $pendingW = count($children);
         while ($pendingW > 0) {
-            $pid = pcntl_waitpid(-1, $status);
+            $pid = pcntl_waitpid(-1, $status, WNOHANG);
+            if ($pid <= 0) {
+                $pid = pcntl_waitpid(-1, $status);
+            }
             $w = $children[$pid];
             $j = 0;
             foreach (unpack('V*', file_get_contents($tmpPrefix . $w)) as $v) {
