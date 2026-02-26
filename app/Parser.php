@@ -42,7 +42,7 @@ final class Parser
     private const int DATE_LENGTH = 10;
     private const int DATE_OFFSET_FROM_NL = 25;
     private const int MIN_LINE_LENGTH = 45;
-    private const int WORKERS = 4;
+    private const int WORKERS = 8;
     private const int DISCOVER_SIZE = 8_388_608;
 
     public function parse(string $inputPath, string $outputPath): void
