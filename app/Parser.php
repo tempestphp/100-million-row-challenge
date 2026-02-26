@@ -37,13 +37,11 @@ use const SEEK_CUR;
 final class Parser
 {
     private const int WORKERS = 10;
-    private const int READ_CHUNK = 8_388_608;
+    private const int READ_CHUNK = 1_048_576;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function parse(string $inputPath, string $outputPath): void
     {
-        gc_disable();
-
         $fileSize = filesize($inputPath);
 
         $dateIds = [];
