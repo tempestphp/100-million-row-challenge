@@ -28,17 +28,35 @@ use function unlink;
 
 final class Parser
 {
+    // Number of parallel worker processes (one per core on M1)
+    private const THREADS = 8;
+
+    // strlen('https://stitcher.io/blog/') — fixed URL prefix skipped in hot loop
+    private const URL_PREFIX_LEN = 25;
+
+    // fread chunk size in bytes — tune this for M1 memory bandwidth
+    private const BUFFER_SIZE = 2_097_152;
+
+    // strlen('yyyy-mm-dd') — date portion of the flat key
+    private const DATE_LEN = 10;
+
+    // strlen(',yyyy-mm-dd') — key suffix: comma + date appended to slug in hot loop
+    private const DATE_KEY_LEN = 11;
+
+    // Offset from commaPos to the start of the next line:
+    // comma(1) + datetime(25) + \n(1) = 27
+    private const LINE_ADVANCE = 27;
+
     public function parse(string $inputPath, string $outputPath): void
     {
-        $threads = 8;
         $filesize = filesize($inputPath);
         $tmpDir = sys_get_temp_dir();
         $uid = getmypid();
 
-        $chunkSize = (int) ceil($filesize / $threads);
+        $chunkSize = (int) ceil($filesize / self::THREADS);
         $pids = [];
 
-        for ($i = 0; $i < $threads; $i++) {
+        for ($i = 0; $i < self::THREADS; $i++) {
             $pid = pcntl_fork();
             if ($pid === -1)
                 exit('Fork failed');
@@ -61,7 +79,7 @@ final class Parser
                 $buffer = '';
 
                 while ($bytesRemaining > 0) {
-                    $chunk = fread($fp, min(1048576, $bytesRemaining));
+                    $chunk = fread($fp, min(self::BUFFER_SIZE, $bytesRemaining));
                     if ($chunk === false || $chunk === '')
                         break;
                     $bytesRemaining -= strlen($chunk);
@@ -82,18 +100,22 @@ final class Parser
                     }
 
                     // All rows: https://stitcher.io/blog/SLUG,yyyy-mm-ddT00:00:00+00:00
-                    // Skip https://stitcher.io/blog/ (25 chars); key = "SLUG,yyyy-mm-dd"
-                    // Datetime suffix is always exactly 25 chars + \n = next line at commaPos+27
+                    // Skip URL_PREFIX_LEN chars; key = "SLUG,yyyy-mm-dd"
+                    // Next line is always at commaPos + LINE_ADVANCE
                     $pos = 0;
                     while ($pos < $lastNl) {
-                        $commaPos = strpos($chunk, ',', $pos + 25);
-                        $key = substr($chunk, $pos + 25, $commaPos - $pos - 14);
+                        $commaPos = strpos($chunk, ',', $pos + self::URL_PREFIX_LEN);
+                        $key = substr(
+                            $chunk,
+                            $pos + self::URL_PREFIX_LEN,
+                            $commaPos - $pos - self::URL_PREFIX_LEN + self::DATE_KEY_LEN,
+                        );
                         if (isset($results[$key])) {
                             $results[$key]++;
                         } else {
                             $results[$key] = 1;
                         }
-                        $pos = $commaPos + 27;
+                        $pos = $commaPos + self::LINE_ADVANCE;
                     }
                 }
 
@@ -102,10 +124,14 @@ final class Parser
                     $rest = fgets($fp);
                     if ($rest !== false)
                         $buffer .= $rest;
-                    if (strlen($buffer) > 25) {
-                        $commaPos = strpos($buffer, ',', 25);
+                    if (strlen($buffer) > self::URL_PREFIX_LEN) {
+                        $commaPos = strpos($buffer, ',', self::URL_PREFIX_LEN);
                         if ($commaPos !== false) {
-                            $key = substr($buffer, 25, $commaPos - 14);
+                            $key = substr(
+                                $buffer,
+                                self::URL_PREFIX_LEN,
+                                $commaPos - self::URL_PREFIX_LEN + self::DATE_KEY_LEN,
+                            );
                             if (isset($results[$key])) {
                                 $results[$key]++;
                             } else {
@@ -128,7 +154,7 @@ final class Parser
         }
 
         $merged = [];
-        for ($i = 0; $i < $threads; $i++) {
+        for ($i = 0; $i < self::THREADS; $i++) {
             $tempFile = "{$tmpDir}/csv_{$uid}_{$i}.dat";
             /** @var array<string, int> $partial */
             $partial = igbinary_unserialize(file_get_contents($tempFile));
@@ -145,7 +171,7 @@ final class Parser
 
         $output = [];
         foreach ($merged as $key => $count) {
-            $output[substr($key, 0, -11)][substr($key, -10)] = $count;
+            $output[substr($key, 0, -self::DATE_KEY_LEN)][substr($key, -self::DATE_LEN)] = $count;
         }
 
         foreach ($output as &$dates) {
