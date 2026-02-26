@@ -23,8 +23,12 @@ use function gc_disable;
 use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
+use function array_search;
+use function array_values;
+use function feof;
 use function str_replace;
-use function stream_get_contents;
+use function stream_select;
+use function stream_set_blocking;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function stream_socket_pair;
@@ -172,19 +176,56 @@ final class Parser
             $slugIndex, $dateChars, $numSlugs, $numDates,
         );
 
-        // ─── Merge child results from pipes ───
+        // ─── Merge child results via stream_select (concurrent drain) ───
 
-        foreach ($pipes as $pipe) {
-            $raw = stream_get_contents($pipe);
-            fclose($pipe);
-            $rawLen = strlen($raw);
-            $isV16 = ord($raw[0]) === 0;
-            $fmt = $isV16 ? 'v*' : 'V*';
-            $step = $isV16 ? 16384 : 32768;
-            $j = 0;
-            for ($off = 1; $off < $rawLen; $off += $step) {
-                foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
-                    $tally[$j++] += $v;
+        $buffers = [];
+        $open = [];
+        foreach ($pipes as $k => $pipe) {
+            stream_set_blocking($pipe, false);
+            $buffers[$k] = '';
+            $open[$k] = $pipe;
+        }
+
+        $stallCount = 0;
+        while ($open) {
+            $read = array_values($open);
+            $w = null;
+            $e = null;
+            $ready = stream_select($read, $w, $e, 5);
+
+            if ($ready === 0) {
+                if (++$stallCount > 6) {
+                    break; // 30s with no progress — fail fast
+                }
+                continue;
+            }
+            $stallCount = 0;
+
+            foreach ($read as $pipe) {
+                $k = array_search($pipe, $open, true);
+                $data = fread($pipe, 131072);
+                if ($data !== '' && $data !== false) {
+                    $buffers[$k] .= $data;
+                }
+                if (feof($pipe)) {
+                    $raw = $buffers[$k];
+                    fclose($pipe);
+                    unset($open[$k], $buffers[$k]);
+
+                    if ($raw === '') {
+                        continue;
+                    }
+
+                    $rawLen = strlen($raw);
+                    $isV16 = ord($raw[0]) === 0;
+                    $fmt = $isV16 ? 'v*' : 'V*';
+                    $step = $isV16 ? 16384 : 32768;
+                    $j = 0;
+                    for ($off = 1; $off < $rawLen; $off += $step) {
+                        foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
+                            $tally[$j++] += $v;
+                        }
+                    }
                 }
             }
         }
@@ -192,6 +233,7 @@ final class Parser
         foreach ($childPids as $pid) {
             pcntl_waitpid($pid, $status);
         }
+
         // ─── Emit JSON ───
 
         // Pre-compute formatted date prefixes and escaped paths
