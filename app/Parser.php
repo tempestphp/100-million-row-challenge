@@ -11,21 +11,20 @@ final class Parser
         $fileSize = filesize($inputPath);
 
         if ($fileSize < 1024 * 1024 * 2 || !function_exists('pcntl_fork')) {
-            $resultWithOrder = $this->processChunk($inputPath, 0, $fileSize, 0);
-            $this->saveResult($resultWithOrder, $outputPath);
+            [$result, $order] = $this->processChunk($inputPath, 0, $fileSize);
+            $this->writeOutput($result, $order, $outputPath);
             return;
         }
 
         $chunkSize = (int) ceil($fileSize / self::NUM_WORKERS);
         $chunks = [];
-        $fp = fopen($inputPath, 'r');
+        $fp = fopen($inputPath, 'rb');
         $start = 0;
 
         for ($i = 0; $i < self::NUM_WORKERS; $i++) {
             $end = $start + $chunkSize;
             if ($end >= $fileSize) {
-                $end = $fileSize;
-                $chunks[] = [$start, $end];
+                $chunks[] = [$start, $fileSize];
                 break;
             }
             fseek($fp, $end);
@@ -36,10 +35,8 @@ final class Parser
         }
         fclose($fp);
 
-        $tempDir = __DIR__ . '/../var/tmp_parser';
-        if (!is_dir($tempDir)) {
-            @mkdir($tempDir, 0777, true);
-        }
+        $tempDir = sys_get_temp_dir() . '/php_parser_' . getmypid();
+        @mkdir($tempDir, 0777, true);
 
         $pids = [];
         foreach ($chunks as $index => $chunk) {
@@ -47,10 +44,8 @@ final class Parser
             if ($pid === -1) {
                 die("Could not fork");
             } elseif ($pid === 0) {
-                // To maintain global ordering, we pass a large base order for each chunk
-                $resultWithOrder = $this->processChunk($inputPath, $chunk[0], $chunk[1], $index * 1000000000);
-                $tempFile = $tempDir . '/worker_' . $index . '.json';
-                file_put_contents($tempFile, json_encode($resultWithOrder));
+                [$result, $order] = $this->processChunk($inputPath, $chunk[0], $chunk[1]);
+                file_put_contents($tempDir . '/w' . $index, serialize([$result, $order]));
                 exit(0);
             } else {
                 $pids[] = $pid;
@@ -61,120 +56,151 @@ final class Parser
             pcntl_waitpid($pid, $status);
         }
 
+        // Merge
         $finalResult = [];
-        for ($i = 0; $i < count($chunks); $i++) {
-            $tempFile = $tempDir . '/worker_' . $i . '.json';
-            if (file_exists($tempFile)) {
-                $workerData = json_decode(file_get_contents($tempFile), true);
+        $finalOrder = [];
 
-                foreach ($workerData as $path => $data) {
-                    $order = $data['order'];
-                    $counts = $data['counts'];
+        $numChunks = count($chunks);
+        for ($i = 0; $i < $numChunks; $i++) {
+            $tempFile = $tempDir . '/w' . $i;
+            [$workerResult, $workerOrder] = unserialize(file_get_contents($tempFile));
+            unlink($tempFile);
 
-                    if (!isset($finalResult[$path])) {
-                        $finalResult[$path] = ['order' => $order, 'counts' => $counts];
-                    } else {
-                        if ($order < $finalResult[$path]['order']) {
-                            $finalResult[$path]['order'] = $order;
-                        }
-                        foreach ($counts as $date => $count) {
-                            if (!isset($finalResult[$path]['counts'][$date])) {
-                                $finalResult[$path]['counts'][$date] = $count;
-                            } else {
-                                $finalResult[$path]['counts'][$date] += $count;
-                            }
+            $orderOffset = $i * 1000000000;
+            foreach ($workerOrder as $path => $localOrd) {
+                $globalOrd = $orderOffset + $localOrd;
+                if (!isset($finalOrder[$path]) || $globalOrd < $finalOrder[$path]) {
+                    $finalOrder[$path] = $globalOrd;
+                }
+            }
+
+            foreach ($workerResult as $path => $dates) {
+                if (!isset($finalResult[$path])) {
+                    $finalResult[$path] = $dates;
+                } else {
+                    foreach ($dates as $date => $count) {
+                        if (isset($finalResult[$path][$date])) {
+                            $finalResult[$path][$date] += $count;
+                        } else {
+                            $finalResult[$path][$date] = $count;
                         }
                     }
                 }
-                unlink($tempFile);
             }
         }
 
-        $this->saveResult($finalResult, $outputPath);
+        @rmdir($tempDir);
+        $this->writeOutput($finalResult, $finalOrder, $outputPath);
     }
 
-    private function processChunk(string $inputPath, int $start, int $end, int $orderBase): array
+    private function processChunk(string $inputPath, int $start, int $end): array
     {
         $fp = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fp, 65536);
         fseek($fp, $start);
-        $result = [];
-        $domainLen = 19; // "https://stitcher.io" length
-        $orderCounter = 0;
 
-        $bufferSize = 4 * 1024 * 1024; // 4MB
+        $result = [];
+        $order = [];
+        $orderCounter = 0;
+        $pos = $start;
+        $bufferSize = 4194304; // 4MB
         $tail = '';
 
-        while (ftell($fp) < $end && !feof($fp)) {
-            $bytesToRead = min($bufferSize, $end - ftell($fp));
-            $chunk = $tail . fread($fp, $bytesToRead);
+        while ($pos < $end) {
+            $bytesToRead = $end - $pos;
+            if ($bytesToRead > $bufferSize)
+                $bytesToRead = $bufferSize;
+            $raw = fread($fp, $bytesToRead);
+            $pos += $bytesToRead;
+
+            if ($tail !== '') {
+                $chunk = $tail . $raw;
+            } else {
+                $chunk = $raw;
+            }
             $offset = 0;
-            $chunkLen = strlen($chunk);
 
             while (($nlPos = strpos($chunk, "\n", $offset)) !== false) {
-                $lineLen = $nlPos - $offset;
-                if ($lineLen > $domainLen) {
-                    $commaPos = strpos($chunk, ",", $offset);
-                    if ($commaPos !== false && $commaPos < $nlPos) {
-                        $pathLen = $commaPos - ($offset + $domainLen);
-                        $path = substr($chunk, $offset + $domainLen, $pathLen);
-                        $date = substr($chunk, $commaPos + 1, 10);
+                // Line: https://stitcher.io/path/here,2026-01-24T01:16:58+00:00
+                // Domain prefix is always 19 chars: "https://stitcher.io"
+                $commaPos = strpos($chunk, ",", $offset + 20);
+                if ($commaPos !== false && $commaPos < $nlPos) {
+                    $path = substr($chunk, $offset + 19, $commaPos - $offset - 19);
+                    $date = substr($chunk, $commaPos + 1, 10);
 
-                        if (!isset($result[$path])) {
-                            $result[$path] = ['order' => $orderBase + $orderCounter, 'counts' => [$date => 1]];
-                            $orderCounter++;
+                    if (isset($result[$path])) {
+                        if (isset($result[$path][$date])) {
+                            $result[$path][$date]++;
                         } else {
-                            if (!isset($result[$path]['counts'][$date])) {
-                                $result[$path]['counts'][$date] = 1;
-                            } else {
-                                $result[$path]['counts'][$date]++;
-                            }
+                            $result[$path][$date] = 1;
                         }
+                    } else {
+                        $result[$path] = [$date => 1];
+                        $order[$path] = $orderCounter++;
                     }
                 }
                 $offset = $nlPos + 1;
             }
-            $tail = substr($chunk, $offset);
+            $tail = ($offset < strlen($chunk)) ? substr($chunk, $offset) : '';
         }
 
-        // Handle any remaining tail (if the chunk didn't end with a newline)
+        // Handle remaining tail
         if ($tail !== '') {
-            $commaPos = strpos($tail, ",");
+            $commaPos = strpos($tail, ",", 19);
             if ($commaPos !== false) {
-                $pathLen = $commaPos - $domainLen;
-                $path = substr($tail, $domainLen, $pathLen);
+                $path = substr($tail, 19, $commaPos - 19);
                 $date = substr($tail, $commaPos + 1, 10);
-
-                if (!isset($result[$path])) {
-                    $result[$path] = ['order' => $orderBase + $orderCounter, 'counts' => [$date => 1]];
-                    $orderCounter++;
-                } else {
-                    if (!isset($result[$path]['counts'][$date])) {
-                        $result[$path]['counts'][$date] = 1;
+                if (isset($result[$path])) {
+                    if (isset($result[$path][$date])) {
+                        $result[$path][$date]++;
                     } else {
-                        $result[$path]['counts'][$date]++;
+                        $result[$path][$date] = 1;
                     }
+                } else {
+                    $result[$path] = [$date => 1];
+                    $order[$path] = $orderCounter++;
                 }
             }
         }
 
         fclose($fp);
-        return $result;
+        return [$result, $order];
     }
 
-    private function saveResult(array $resultWithOrder, string $outputPath): void
+    private function writeOutput(array $result, array $order, string $outputPath): void
     {
-        // Sort paths by original appearance order
-        uasort($resultWithOrder, function ($a, $b) {
-            return $a['order'] <=> $b['order'];
-        });
+        // Sort paths by first-appearance order
+        asort($order);
 
-        $finalResult = [];
-        foreach ($resultWithOrder as $path => $data) {
-            $dates = $data['counts'];
+        // Sort dates within each path
+        foreach ($result as &$dates) {
             ksort($dates);
-            $finalResult[$path] = $dates;
         }
+        unset($dates);
 
-        file_put_contents($outputPath, json_encode($finalResult, JSON_PRETTY_PRINT));
+        // Build JSON output in memory, write once
+        $out = "{\n";
+        $first = true;
+        foreach ($order as $path => $_) {
+            if (!isset($result[$path]))
+                continue;
+            if (!$first) {
+                $out .= ",\n";
+            }
+            $first = false;
+            $escapedPath = str_replace('/', '\\/', $path);
+            $out .= '    "' . $escapedPath . '": {' . "\n";
+            $firstDate = true;
+            foreach ($result[$path] as $date => $count) {
+                if (!$firstDate) {
+                    $out .= ",\n";
+                }
+                $firstDate = false;
+                $out .= '        "' . $date . '": ' . $count;
+            }
+            $out .= "\n    }";
+        }
+        $out .= "\n}";
+        file_put_contents($outputPath, $out);
     }
 }
