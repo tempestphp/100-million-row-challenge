@@ -16,11 +16,10 @@ use function fseek;
 use function ftell;
 use function gc_disable;
 use function getmypid;
-use function igbinary_serialize;
-use function igbinary_unserialize;
 use function intdiv;
 use function ksort;
 use function min;
+use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
 use function strlen;
@@ -30,6 +29,7 @@ use function substr;
 use function sys_get_temp_dir;
 use function time;
 use function unlink;
+use function unpack;
 
 final class Parser
 {
@@ -44,9 +44,6 @@ final class Parser
 
     // strlen('yyyy-mm-dd') — date portion of the flat key
     private const DATE_LEN = 10;
-
-    // strlen(',yyyy-mm-dd') — key suffix: comma + date appended to slug in hot loop
-    private const DATE_KEY_LEN = 11;
 
     // Offset from commaPos to the start of the next line:
     // comma(1) + datetime(25) + \n(1) = 27
@@ -334,6 +331,28 @@ final class Parser
         $chunkSize = (int) ceil($filesize / self::THREADS);
         $pids = [];
 
+        // Build date map — enumerate all days in a 6-year window (~2191 dates)
+        $dateMap = [];
+        $dateRevMap = [];
+        $dateCount = 0;
+        $rangeStart = time() - (6 * 365 * 86400);
+        $rangeEnd = time() + 86400;
+        for ($ts = $rangeStart; $ts <= $rangeEnd; $ts += 86400) {
+            $d = date('Y-m-d', $ts);
+            if (! isset($dateMap[$d])) {
+                $dateMap[$d] = $dateCount;
+                $dateRevMap[$dateCount] = $d;
+                $dateCount++;
+            }
+        }
+
+        // Build slug map with pre-multiplied base offsets
+        $slugMap = [];
+        $slugCount = count(self::URLS);
+        foreach (self::URLS as $slugId => $url) {
+            $slugMap[$url] = $slugId * $dateCount;
+        }
+
         for ($i = 0; $i < self::THREADS; $i++) {
             $pid = pcntl_fork();
             if ($pid === -1)
@@ -355,31 +374,7 @@ final class Parser
 
                 $bytesRemaining = $endByte - ftell($fp);
 
-                // Build date map first — needed to compute pre-multiplied slug offsets
-                $dateMap = [];
-                $dateRevMap = [];
-                $dateCount = 0;
-                $rangeStart = time() - (6 * 365 * 86400);
-                $rangeEnd = time() + 86400;
-                for ($ts = $rangeStart; $ts <= $rangeEnd; $ts += 86400) {
-                    $d = date('Y-m-d', $ts);
-                    if (! isset($dateMap[$d])) {
-                        $dateMap[$d] = $dateCount;
-                        $dateRevMap[$dateCount] = $d;
-                        $dateCount++;
-                    }
-                }
-
-                // Build slug map with pre-multiplied base offsets — hot loop becomes a single add
-                $slugMap = [];
-                $slugRevMap = [];
-                $slugCount = count(self::URLS);
-                foreach (self::URLS as $slugId => $url) {
-                    $slugMap[$url] = $slugId * $dateCount;
-                    $slugRevMap[$slugId] = $url;
-                }
-
-                // Pre-warm results as a flat sequential array (array_fill is a C-level memset)
+                // $dateMap, $dateRevMap, $dateCount, $slugMap, $slugCount inherited from parent via COW
                 $results = array_fill(0, $slugCount * $dateCount, 0);
 
                 $buffer = '';
@@ -437,17 +432,7 @@ final class Parser
 
                 fclose($fp);
 
-                // Convert integer keys back to string keys for IPC, skipping pre-warmed zeros
-                $stringResults = [];
-                foreach ($results as $intKey => $count) {
-                    if ($count === 0)
-                        continue;
-                    $slug = $slugRevMap[intdiv($intKey, $dateCount)];
-                    $date = $dateRevMap[$intKey % $dateCount];
-                    $stringResults[$slug.','.$date] = $count;
-                }
-
-                file_put_contents("{$tmpDir}/csv_{$uid}_{$i}.dat", igbinary_serialize($stringResults));
+                file_put_contents("{$tmpDir}/csv_{$uid}_{$i}.dat", pack('V*', ...$results));
                 exit(0);
             }
 
@@ -458,29 +443,30 @@ final class Parser
             pcntl_waitpid($pid, $status);
         }
 
-        $merged = [];
+        $merged = array_fill(0, $slugCount * $dateCount, 0);
         for ($i = 0; $i < self::THREADS; $i++) {
             $tempFile = "{$tmpDir}/csv_{$uid}_{$i}.dat";
-            /** @var array<string, int> $partial */
-            $partial = igbinary_unserialize(file_get_contents($tempFile));
+            $partial = unpack('V*', file_get_contents($tempFile));
             unlink($tempFile);
-
-            foreach ($partial as $key => $count) {
-                if (isset($merged[$key])) {
-                    $merged[$key] += $count;
-                } else {
-                    $merged[$key] = $count;
-                }
+            foreach ($partial as $j => $count) {
+                $merged[$j - 1] += $count;
             }
         }
 
         $output = [];
-        foreach ($merged as $key => $count) {
-            $output[substr($key, 0, -self::DATE_KEY_LEN)][substr($key, -self::DATE_LEN)] = $count;
-        }
-
-        foreach ($output as &$dates) {
-            ksort($dates);
+        foreach (self::URLS as $slugId => $slug) {
+            $base = $slugId * $dateCount;
+            $slugDates = [];
+            for ($d = 0; $d < $dateCount; $d++) {
+                $count = $merged[$base + $d];
+                if ($count > 0) {
+                    $slugDates[$dateRevMap[$d]] = $count;
+                }
+            }
+            if ($slugDates !== []) {
+                ksort($slugDates);
+                $output[$slug] = $slugDates;
+            }
         }
 
         $this->jsonOutput($outputPath, $output);
