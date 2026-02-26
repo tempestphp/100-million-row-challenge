@@ -151,13 +151,11 @@ final class Parser
                     break;
                 }
 
-                // Use ?? null to avoid crash on unknown paths, keep fast path tight
-                $off = $pathOffsets[substr($chunk, $pos + self::URI_PREFIX_LEN, $nlPos - $pos - 45)] ?? null;
+                $path = substr($chunk, $pos + self::URI_PREFIX_LEN, $nlPos - $pos - 45);
 
-                if ($off !== null) {
-                    $counts[$off + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                if (isset($pathOffsets[$path])) {
+                    $counts[$pathOffsets[$path] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
                 } else {
-                    $path = substr($chunk, $pos + self::URI_PREFIX_LEN, $nlPos - $pos - 45);
                     $date = substr($chunk, $nlPos - 25, 10);
                     $overflow[$path][$date] = ($overflow[$path][$date] ?? 0) + 1;
 
