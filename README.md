@@ -1,10 +1,7 @@
 > [!IMPORTANT]
 > The 100-million-row challenge is now **live**. You have until March 15, 11:59PM CET to submit your entry!
-
-> [!CAUTION]
-> Because of the huge number of participants, we're currently in the process of automating the benchmark further and running it in a more consistent environment. This may cause some delays in your PRs being benchmarked.
     
-Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize! 
+Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize; there's also a dedicated prize for a single-core solution, and a participation prize that everyone can win! 
 
 ## Getting started
 
@@ -77,6 +74,10 @@ Your parser should store the following output in `$outputPath` as a JSON file:
 ## Submitting your solution
 
 Send a pull request to this repository with your solution. The title of your pull request should simply be your GitHub's username. If your solution validates, we'll run it on the benchmark server and store your time in [leaderboard.csv](./leaderboard.csv). You can continue to improve your solution, but keep in mind that benchmarks are manually triggered, and you might need to wait a while before your results are published.
+
+> [!IMPORTANT]
+> You can request a re-run by writing a comment on your PR saying `/bench`. We'll still manually verify whether your submission can be run.
+
 
 ## A note on copying other branches
 

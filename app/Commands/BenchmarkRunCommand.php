@@ -86,6 +86,7 @@ final class BenchmarkRunCommand
             try {
                 $result = $this->processPR($prData);
                 $this->addLeaderboardResult($prNumber, $prTitle, $result);
+                $this->githubRemoveLabel($prNumber, 'bench_needed');
             } finally {
                 // Always remove the verified label
                 $this->githubRemoveLabel($prNumber, 'verified');
@@ -360,7 +361,7 @@ final class BenchmarkRunCommand
         $handle = fopen($path, 'r');
         $data = [];
 
-        while ($line = fgetcsv($handle, escape: ',')) {
+        while ($line = fgetcsv($handle, escape: '\\')) {
             if ($line[0] === 'entry_date') {
                 continue;
             }
@@ -389,6 +390,8 @@ final class BenchmarkRunCommand
                 ];
             }
         }
+
+        fclose($handle);
 
         usort($data, fn ($a, $b) => $a['benchmarkTime'] <=> $b['benchmarkTime']);
 
