@@ -43,7 +43,7 @@ final class Parser
     private const int READ_CHUNK = 33_554_432;
     private const int DISCOVER_SIZE = 2_097_152;
 
-    public function parse(string $inputPath, string $outputPath): void
+    public function parse($inputPath, $outputPath)
     {
         gc_disable();
 
@@ -153,10 +153,10 @@ final class Parser
     }
 
     private function parseRange(
-        string $inputPath, int $start, int $end,
-        array $pathIds, array $dateIds,
-        int $pathCount, int $dateCount,
-    ): array {
+        $inputPath, $start, $end,
+        $pathIds, $dateIds,
+        $pathCount, $dateCount,
+    ) {
         $counts = array_fill(0, $pathCount * $dateCount, 0);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -186,9 +186,27 @@ final class Parser
             $limit = $lastNl + 25;
             while ($ss < $limit) {
                 $nlPos = strpos($chunk, "\n", $ss + 27);
-
                 $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
-
+                $ss = $nlPos + 26;
+                if ($ss >= $limit) break;
+                $nlPos = strpos($chunk, "\n", $ss + 27);
+                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                $ss = $nlPos + 26;
+                if ($ss >= $limit) break;
+                $nlPos = strpos($chunk, "\n", $ss + 27);
+                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                $ss = $nlPos + 26;
+                if ($ss >= $limit) break;
+                $nlPos = strpos($chunk, "\n", $ss + 27);
+                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                $ss = $nlPos + 26;
+                if ($ss >= $limit) break;
+                $nlPos = strpos($chunk, "\n", $ss + 27);
+                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                $ss = $nlPos + 26;
+                if ($ss >= $limit) break;
+                $nlPos = strpos($chunk, "\n", $ss + 27);
+                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
                 $ss = $nlPos + 26;
             }
         }
@@ -198,9 +216,9 @@ final class Parser
     }
 
     private function writeJson(
-        string $outputPath, array $counts, array $paths,
-        array $dates, int $dateCount,
-    ): void {
+        $outputPath, $counts, $paths,
+        $dates, $dateCount,
+    ) {
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, 1_048_576);
         fwrite($out, '{');
