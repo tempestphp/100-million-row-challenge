@@ -12,8 +12,7 @@ final class Parser
         $fileSize = \filesize($inputPath);
 
         $handle = \fopen($inputPath, 'rb');
-        $discoverSize = \min($fileSize, 16_777_216);
-        $discoverChunk = \fread($handle, $discoverSize);
+        $discoverChunk = \fread($handle, \min($fileSize, 16_777_216));
         \fclose($handle);
 
         $pathIds = [];
@@ -56,11 +55,8 @@ final class Parser
             $pathIds[$slug] = $id * $dateCount;
         }
 
-        if (PHP_OS_FAMILY === 'Darwin') {
-            $numWorkers = (int) \trim(\shell_exec('sysctl -n hw.ncpu'));
-        } else {
-            $numWorkers = (int) (\trim(\shell_exec('nproc 2>/dev/null') ?: '8'));
-        }
+        $numWorkers = 10;
+        $chunkSize = 4_194_304;
 
         $handle = \fopen($inputPath, 'rb');
         $splits = [0];
@@ -74,7 +70,6 @@ final class Parser
 
         $tmpDir = \is_dir('/dev/shm') ? '/dev/shm' : \sys_get_temp_dir();
         $tmpPrefix = $tmpDir . '/p_' . \getmypid() . '_';
-        $chunkSize = 4_194_304;
 
         $childPids = [];
         for ($w = 1; $w < $numWorkers; $w++) {
@@ -250,34 +245,18 @@ final class Parser
         }
         \fclose($handle);
 
-        $pending = $childPids;
-        while (!empty($pending)) {
-            $merged = false;
-            foreach ($pending as $w => $pid) {
-                $ret = \pcntl_waitpid($pid, $status, WNOHANG);
-                if ($ret > 0) {
-                    $raw = \file_get_contents($tmpPrefix . $w);
-                    @\unlink($tmpPrefix . $w);
-                    $childCounts = \unpack('V*', $raw);
-                    for ($i = 0; $i < $totalCells; $i++) {
-                        $counts[$i] += $childCounts[$i + 1];
-                    }
-                    unset($pending[$w]);
-                    $merged = true;
-                    break;
-                }
+        $pidToWorker = \array_flip($childPids);
+        $remaining = \count($childPids);
+        while ($remaining > 0) {
+            $pid = \pcntl_wait($status);
+            $w = $pidToWorker[$pid];
+            $raw = \file_get_contents($tmpPrefix . $w);
+            @\unlink($tmpPrefix . $w);
+            $childCounts = \unpack('V*', $raw);
+            for ($i = 0; $i < $totalCells; $i++) {
+                $counts[$i] += $childCounts[$i + 1];
             }
-            if (!$merged && !empty($pending)) {
-                $w = \array_key_first($pending);
-                \pcntl_waitpid($pending[$w], $status);
-                $raw = \file_get_contents($tmpPrefix . $w);
-                @\unlink($tmpPrefix . $w);
-                $childCounts = \unpack('V*', $raw);
-                for ($i = 0; $i < $totalCells; $i++) {
-                    $counts[$i] += $childCounts[$i + 1];
-                }
-                unset($pending[$w]);
-            }
+            $remaining--;
         }
 
         $fp = \fopen($outputPath, 'wb');
