@@ -1,7 +1,5 @@
 <?php
 
-declare(strict_types=1);
-
 namespace App;
 
 use App\Commands\Visit;
@@ -40,7 +38,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int WORKERS = 10;
+    private const int WORKERS = 11;
     private const int READ_CHUNK = 8_388_608;
     private const int DISCOVER_SIZE = 2_097_152;
 
