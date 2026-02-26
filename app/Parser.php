@@ -19,7 +19,7 @@ final class Parser
         $carry = '';
 
         while (true) {
-            $chunk = fread($handle, 1048576);
+            $chunk = fread($handle, 131072);
 
             if ($chunk === '' || $chunk === false) {
                 break;
