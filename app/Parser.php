@@ -17,7 +17,6 @@ use function ftell;
 use function fwrite;
 use function gc_disable;
 use function getmypid;
-use function intdiv;
 use function ksort;
 use function min;
 use function pack;
@@ -327,161 +326,198 @@ final class Parser
     {
         gc_disable();
 
-        $filesize = filesize($inputPath);
-        $tmpDir = sys_get_temp_dir();
-        $uid = getmypid();
-
-        $pids = [];
-
-        // Pre-calculate chunk boundaries aligned to line endings
-        $boundaries = [];
-        $bfp = fopen($inputPath, 'rb');
-        stream_set_read_buffer($bfp, 0);
-        $approxChunkSize = (int) ceil($filesize / self::THREADS);
-        $start = 0;
-        for ($i = 0; $i < (self::THREADS - 1); $i++) {
-            fseek($bfp, $start + $approxChunkSize);
-            fgets($bfp); // advance past the partial line to the next line start
-            $end = ftell($bfp);
-            $boundaries[] = [$start, $end];
-            $start = $end;
-        }
-        $boundaries[] = [$start, $filesize];
-        fclose($bfp);
-
-        // Build date map — enumerate all days in a 6-year window (~2191 dates)
-        $dateMap = [];
-        $dateRevMap = [];
-        $dateCount = 0;
-        $rangeStart = time() - (6 * 365 * 86400);
-        $rangeEnd = time() + 86400;
-        for ($ts = $rangeStart; $ts <= $rangeEnd; $ts += 86400) {
-            $d = date('Y-m-d', $ts);
-            if (! isset($dateMap[$d])) {
-                $dateMap[$d] = $dateCount;
-                $dateRevMap[$dateCount] = $d;
-                $dateCount++;
-            }
-        }
-
-        // Build slug map with pre-multiplied base offsets
-        $slugMap = [];
-        $slugCount = count(self::URLS);
-        foreach (self::URLS as $slugId => $url) {
-            $slugMap[$url] = $slugId * $dateCount;
-        }
+        $boundaries = $this->calculateBoundaries($inputPath);
+        [$dateMap, $dateIndex, $dateCount] = $this->buildDateMap();
+        $pathMap = $this->buildPathMap($dateCount);
+        $pathCount = count(self::URLS);
+        $parentPid = getmypid();
+        $childPids = [];
 
         for ($i = 0; $i < self::THREADS; $i++) {
-            $pid = pcntl_fork();
-            if ($pid === -1)
+            $childPid = pcntl_fork();
+            if ($childPid === -1)
                 exit('Fork failed');
 
-            if ($pid === 0) {
-                // --- CHILD PROCESS ---
+            if ($childPid === 0) {
                 gc_disable();
-                [$startByte, $endByte] = $boundaries[$i];
-
-                $fp = fopen($inputPath, 'rb');
-                stream_set_read_buffer($fp, 0);
-                fseek($fp, $startByte);
-
-                $bytesRemaining = $endByte - $startByte;
-
-                // $dateMap, $dateRevMap, $dateCount, $slugMap, $slugCount inherited from parent via COW
-                $results = array_fill(0, $slugCount * $dateCount, 0);
-
-                while ($bytesRemaining > 0) {
-                    $chunk = fread($fp, min(self::BUFFER_SIZE, $bytesRemaining));
-                    if ($chunk === false || $chunk === '')
-                        break;
-
-                    $lastNl = strrpos($chunk, "\n");
-
-                    // Seek back over any partial tail so next fread starts at a line boundary
-                    $tail = strlen($chunk) - $lastNl - 1;
-                    if ($tail > 0)
-                        fseek($fp, -$tail, SEEK_CUR);
-                    $bytesRemaining -= $lastNl + 1;
-
-                    // All rows: https://stitcher.io/blog/SLUG,yyyy-mm-ddT00:00:00+00:00
-                    // Skip URL_PREFIX_LEN chars; key = slugMap[slug] (pre-multiplied) + dateMap[date]
-                    // Next line is always at commaPos + LINE_ADVANCE
-                    $pos = 0;
-                    while ($pos < $lastNl) {
-                        $commaPos = strpos($chunk, ',', $pos + self::URL_PREFIX_LEN);
-                        $slug = substr($chunk, $pos + self::URL_PREFIX_LEN, $commaPos - $pos - self::URL_PREFIX_LEN);
-                        $date = substr($chunk, $commaPos + 1, self::DATE_LEN);
-
-                        $results[$slugMap[$slug] + $dateMap[$date]]++;
-                        $pos = $commaPos + self::LINE_ADVANCE;
-                    }
-                }
-
-                fclose($fp);
-
-                file_put_contents("{$tmpDir}/csv_{$uid}_{$i}.dat", pack('V*', ...$results));
+                [$start, $end] = $boundaries[$i];
+                $counts = $this->processChunk($inputPath, $start, $end, $pathMap, $dateMap, $pathCount, $dateCount);
+                file_put_contents(sys_get_temp_dir()."/csv_{$parentPid}_{$i}.dat", pack('V*', ...$counts));
                 exit(0);
             }
 
-            $pids[] = $pid;
+            $childPids[] = $childPid;
         }
 
-        foreach ($pids as $pid) {
-            pcntl_waitpid($pid, $status);
+        foreach ($childPids as $childPid) {
+            pcntl_waitpid($childPid, $status);
         }
 
-        $merged = array_fill(0, $slugCount * $dateCount, 0);
-        for ($i = 0; $i < self::THREADS; $i++) {
-            $tempFile = "{$tmpDir}/csv_{$uid}_{$i}.dat";
-            $partial = unpack('V*', file_get_contents($tempFile));
-            unlink($tempFile);
-            foreach ($partial as $j => $count) {
-                $merged[$j - 1] += $count;
-            }
-        }
-
-        $output = [];
-        foreach (self::URLS as $slugId => $slug) {
-            $base = $slugId * $dateCount;
-            $slugDates = [];
-            for ($d = 0; $d < $dateCount; $d++) {
-                $count = $merged[$base + $d];
-                if ($count > 0) {
-                    $slugDates[$dateRevMap[$d]] = $count;
-                }
-            }
-            if ($slugDates !== []) {
-                ksort($slugDates);
-                $output[$slug] = $slugDates;
-            }
-        }
-
-        $this->jsonOutput($outputPath, $output);
+        $totals = $this->mergePartials($parentPid, $pathCount, $dateCount);
+        $result = $this->buildOutput($totals, $dateIndex, $dateCount);
+        $this->writeJson($outputPath, $result);
     }
 
-    private function jsonOutput(string $outputPath, array $results): void
+    private function calculateBoundaries(string $inputPath): array
+    {
+        $filesize = filesize($inputPath);
+        $chunkSize = (int) ceil($filesize / self::THREADS);
+        $boundaries = [];
+        $start = 0;
+
+        $fp = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fp, 0);
+
+        for ($i = 0; $i < (self::THREADS - 1); $i++) {
+            fseek($fp, $start + $chunkSize);
+            fgets($fp);
+            $end = ftell($fp);
+            $boundaries[] = [$start, $end];
+            $start = $end;
+        }
+
+        $boundaries[] = [$start, $filesize];
+        fclose($fp);
+
+        return $boundaries;
+    }
+
+    private function buildDateMap(): array
+    {
+        $dateMap = [];
+        $dateIndex = [];
+        $count = 0;
+
+        $from = time() - (6 * 365 * 86400);
+        $to = time() + 86400;
+
+        for ($ts = $from; $ts <= $to; $ts += 86400) {
+            $date = date('Y-m-d', $ts);
+            if (isset($dateMap[$date]))
+                continue;
+
+            $dateMap[$date] = $count;
+            $dateIndex[$count] = $date;
+            $count++;
+        }
+
+        return [$dateMap, $dateIndex, $count];
+    }
+
+    private function buildPathMap(int $dateCount): array
+    {
+        $pathMap = [];
+        foreach (self::URLS as $id => $slug) {
+            $pathMap[$slug] = $id * $dateCount;
+        }
+
+        return $pathMap;
+    }
+
+    private function processChunk(
+        string $inputPath,
+        int $start,
+        int $end,
+        array $pathMap,
+        array $dateMap,
+        int $pathCount,
+        int $dateCount,
+    ): array {
+        $fp = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fp, 0);
+        fseek($fp, $start);
+
+        $remaining = $end - $start;
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
+
+        while ($remaining > 0) {
+            $chunk = fread($fp, min(self::BUFFER_SIZE, $remaining));
+            if ($chunk === false || $chunk === '')
+                break;
+
+            $lastNewline = strrpos($chunk, "\n");
+            $tail = strlen($chunk) - $lastNewline - 1;
+            if ($tail > 0)
+                fseek($fp, -$tail, SEEK_CUR);
+            $remaining -= $lastNewline + 1;
+
+            $pos = 0;
+            while ($pos < $lastNewline) {
+                $comma = strpos($chunk, ',', $pos + self::URL_PREFIX_LEN);
+                $slug = substr($chunk, $pos + self::URL_PREFIX_LEN, $comma - $pos - self::URL_PREFIX_LEN);
+                $date = substr($chunk, $comma + 1, self::DATE_LEN);
+                $counts[$pathMap[$slug] + $dateMap[$date]]++;
+                $pos = $comma + self::LINE_ADVANCE;
+            }
+        }
+
+        fclose($fp);
+
+        return $counts;
+    }
+
+    private function mergePartials(int $parentPid, int $pathCount, int $dateCount): array
+    {
+        $totals = array_fill(0, $pathCount * $dateCount, 0);
+        $tmpDir = sys_get_temp_dir();
+
+        for ($i = 0; $i < self::THREADS; $i++) {
+            $file = "{$tmpDir}/csv_{$parentPid}_{$i}.dat";
+            $partial = unpack('V*', file_get_contents($file));
+            unlink($file);
+            foreach ($partial as $j => $count) {
+                $totals[$j - 1] += $count;
+            }
+        }
+
+        return $totals;
+    }
+
+    private function buildOutput(array $totals, array $dateIndex, int $dateCount): array
+    {
+        $result = [];
+
+        foreach (self::URLS as $pathId => $slug) {
+            $base = $pathId * $dateCount;
+            $dates = [];
+
+            for ($d = 0; $d < $dateCount; $d++) {
+                if ($totals[$base + $d] > 0) {
+                    $dates[$dateIndex[$d]] = $totals[$base + $d];
+                }
+            }
+
+            if ($dates !== []) {
+                ksort($dates);
+                $result[$slug] = $dates;
+            }
+        }
+
+        return $result;
+    }
+
+    private function writeJson(string $outputPath, array $result): void
     {
         $fh = fopen($outputPath, 'wb');
         stream_set_write_buffer($fh, 0);
         $buf = "{\n";
-
         $firstPath = true;
-        foreach ($results as $path => $dates) {
-            if (! $firstPath) {
+
+        foreach ($result as $path => $dates) {
+            if (! $firstPath)
                 $buf .= ",\n";
-            }
             $firstPath = false;
 
             $buf .= "    \"\/blog\/$path\": {\n";
-
             $firstDate = true;
+
             foreach ($dates as $date => $count) {
-                if (! $firstDate) {
+                if (! $firstDate)
                     $buf .= ",\n";
-                }
                 $firstDate = false;
                 $buf .= "        \"$date\": $count";
             }
+
             $buf .= "\n    }";
 
             if (strlen($buf) > 65536) {
