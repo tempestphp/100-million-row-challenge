@@ -14,10 +14,9 @@ final class Parser
         $data = [];
 
         while ($line = fgets($stream)) {
-            [$uri, $datetime] = explode(',', $line);
-
-            $path = substr($uri, 19);
-            $date = substr($datetime, 0, 10);
+            $comma = strpos($line, ',');
+            $path = substr($line, 19, $comma - 19);
+            $date = substr($line, $comma + 1, 10);
 
             if (!isset($data[$path])) {
                 $data[$path] = [$date => 1];
