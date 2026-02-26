@@ -1,5 +1,8 @@
 > [!IMPORTANT]
 > The 100-million-row challenge is now **live**. You have until March 15, 11:59PM CET to submit your entry!
+
+> [!CAUTION]
+> Because of the huge number of participants, we're currently in the process of automating the benchmark further and running it in a more consistent environment. This may cause some delays in your PRs being benchmarked.
     
 Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize! 
 
@@ -119,10 +122,10 @@ The benchmark results of each run are stored in [leaderboard.csv](./leaderboard.
 
 #### What kind of server is used for the benchmark?
 
-The benchmark runs on a Premium Intel Digital Ocean Droplet with 2vCPUs and 1.5GB of available memory. We deliberately chose not to use a more powerful server because we like to test in a somewhat "standard" environment for PHP. These PHP extensions are available:
+The benchmark runs on a Mac Mini M1 with 12GB of RAM of available memory. These PHP extensions are available:
 
 ```txt
-bcmath, calendar, Core, ctype, curl, date, dom, exif, fileinfo, filter, ftp, gd, gettext, gmp, hash, iconv, igbinary, imagick, imap, intl, json, lexbor, libxml, mbstring, memcached, msgpack, mysqli, mysqlnd, openssl, pcntl, pcre, PDO, pdo_mysql, pdo_pgsql, pdo_sqlite, pgsql, Phar, posix, random, readline, redis, Reflection, session, shmop, SimpleXML, soap, sockets, sodium, SPL, sqlite3, standard, sysvmsg, sysvsem, sysvshm, tokenizer, uri, xml, xmlreader, xmlwriter, xsl, Zend OPcache, zip, zlib, Zend OPcache
+bcmath, bz2, calendar, Core, ctype, curl, date, dba, dom, exif, fileinfo, filter, ftp, gd, gettext, gmp, hash, iconv, igbinary, intl, json, ldap, lexbor, libxml, mbstring, mysqli, mysqlnd, odbc, openssl, pcntl, pcre, PDO, pdo_dblib, pdo_mysql, PDO_ODBC, pdo_pgsql, pdo_sqlite, pgsql, Phar, posix, random, readline, Reflection, session, shmop, SimpleXML, snmp, soap, sockets, sodium, SPL, sqlite3, standard, sysvmsg, sysvsem, sysvshm, tidy, tokenizer, uri, xml, xmlreader, xmlwriter, xsl, Zend OPcache, zip, zlib, Zend OPcache
 ```
 
 #### How to ensure fair results?

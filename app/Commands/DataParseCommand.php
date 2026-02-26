@@ -14,9 +14,9 @@ final class DataParseCommand
     public function __invoke(
         string $inputPath = __DIR__ . '/../../data/data.csv',
         string $outputPath = __DIR__ . '/../../data/data.json',
-        bool $store = false,
-        ?string $name = null,
     ): void {
+        ini_set('max_execution_time', 60 * 5);
+
         $startTime = microtime(true);
 
         new Parser()->parse($inputPath, $outputPath);
@@ -24,17 +24,6 @@ final class DataParseCommand
         $endTime = microtime(true);
         $executionTime = $endTime - $startTime;
 
-        $name ??= exec('git branch --show-current');
-
-        $leaderBoardEntry = time() . ',' . $name . ',' . $executionTime;
-
-        if ($store) {
-            $leaderBoardFile = fopen(__DIR__ . '/../../leaderboard.csv', 'a');
-            fwrite($leaderBoardFile, $leaderBoardEntry . PHP_EOL);
-            fclose($leaderBoardFile);
-            $this->success('Written to leaderboard.csv');
-        }
-
-        $this->success($leaderBoardEntry);
+        $this->success($executionTime);
     }
 }
