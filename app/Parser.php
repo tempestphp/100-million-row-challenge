@@ -90,7 +90,6 @@ final class Parser
     private function processChunk(string $inputPath, int $start, int $end): array
     {
         $fp = fopen($inputPath, 'rb');
-        stream_set_read_buffer($fp, 65536);
         fseek($fp, $start);
 
         $result = [];
@@ -107,7 +106,8 @@ final class Parser
                 continue;
 
             $path = \substr($line, 19, $commaPos - 19);
-            $date = \substr($line, $commaPos + 1, 10);
+            $c1 = $commaPos + 1;
+            $date = $line[$c1] . $line[$c1 + 1] . $line[$c1 + 2] . $line[$c1 + 3] . $line[$c1 + 4] . $line[$c1 + 5] . $line[$c1 + 6] . $line[$c1 + 7] . $line[$c1 + 8] . $line[$c1 + 9];
 
             $order[$path] ??= $orderCounter++;
             $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
