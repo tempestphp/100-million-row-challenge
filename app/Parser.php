@@ -7,6 +7,7 @@ namespace App;
 use App\Commands\Visit;
 
 use function array_fill;
+use function count;
 use function fclose;
 use function fgets;
 use function file_get_contents;
@@ -17,7 +18,9 @@ use function fread;
 use function fseek;
 use function ftell;
 use function fwrite;
+use function gc_disable;
 use function getmypid;
+use function implode;
 use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
@@ -37,7 +40,7 @@ use const SEEK_CUR;
 final class Parser
 {
     private const int WORKERS = 10;
-    private const int READ_CHUNK = 8_388_608;
+    private const int READ_CHUNK = 33_554_432;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function parse(string $inputPath, string $outputPath): void
@@ -179,13 +182,14 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $pos = 0;
-            while ($pos < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $pos + 52);
+            $ss = 25;
+            $limit = $lastNl + 25;
+            while ($ss < $limit) {
+                $nlPos = strpos($chunk, "\n", $ss + 27);
 
-                $counts[$pathIds[substr($chunk, $pos + 25, $nlPos - $pos - 51)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
+                $counts[$pathIds[substr($chunk, $ss, $nlPos - $ss - 26)] + $dateIds[substr($chunk, $nlPos - 23, 8)]]++;
 
-                $pos = $nlPos + 1;
+                $ss = $nlPos + 26;
             }
         }
 
@@ -201,30 +205,34 @@ final class Parser
         stream_set_write_buffer($out, 1_048_576);
         fwrite($out, '{');
 
-        $firstPath = true;
+        $datePrefixes = [];
+        for ($d = 0; $d < $dateCount; $d++) {
+            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+        }
+
         $pathCount = count($paths);
+        $escapedPaths = [];
+        for ($p = 0; $p < $pathCount; $p++) {
+            $escapedPaths[$p] = "\"\\/blog\\/" . str_replace('/', '\\/', $paths[$p]) . "\"";
+        }
+
+        $firstPath = true;
 
         for ($p = 0; $p < $pathCount; $p++) {
             $base = $p * $dateCount;
-            $firstDate = true;
-            $dateBuf = '';
+            $dateEntries = [];
 
             for ($d = 0; $d < $dateCount; $d++) {
                 $count = $counts[$base + $d];
                 if ($count === 0) continue;
-
-                if (!$firstDate) {
-                    $dateBuf .= ",\n";
-                }
-                $firstDate = false;
-                $dateBuf .= '        "20' . $dates[$d] . '": ' . $count;
+                $dateEntries[] = $datePrefixes[$d] . $count;
             }
 
-            if ($firstDate) continue;
+            if ($dateEntries === []) continue;
 
-            $buf = $firstPath ? '' : ',';
+            $buf = $firstPath ? "\n    " : ",\n    ";
             $firstPath = false;
-            $buf .= "\n    \"\\/blog\\/" . str_replace('/', '\\/', $paths[$p]) . "\": {\n" . $dateBuf . "\n    }";
+            $buf .= $escapedPaths[$p] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
             fwrite($out, $buf);
         }
 
