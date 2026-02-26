@@ -189,7 +189,7 @@ final class Parser
         // ─── Emit JSON ───
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
+        stream_set_write_buffer($out, 524_288);
 
         // Pre-compute formatted date prefixes and escaped paths
         $datePrefixes = [];
@@ -244,7 +244,7 @@ final class Parser
         fseek($fh, $from);
 
         $remaining = $until - $from;
-        $bufSize = 2_097_152;
+        $bufSize = 4_194_304;
 
         while ($remaining > 0) {
             $raw = fread($fh, $remaining > $bufSize ? $bufSize : $remaining);
