@@ -34,20 +34,20 @@ use function unpack;
 final class Parser
 {
     // Number of parallel worker processes (one per core on M1)
-    private const THREADS = 8;
+    private const int THREADS = 8;
 
     // strlen('https://stitcher.io/blog/') — fixed URL prefix skipped in hot loop
-    private const URL_PREFIX_LEN = 25;
+    private const int URL_PREFIX_LEN = 25;
 
     // fread chunk size in bytes — tune this for M1 memory bandwidth
-    private const BUFFER_SIZE = 2_097_152;
+    private const int BUFFER_SIZE = 2_097_152;
 
     // strlen('yyyy-mm-dd') — date portion of the flat key
-    private const DATE_LEN = 10;
+    private const int DATE_LEN = 10;
 
     // Offset from commaPos to the start of the next line:
     // comma(1) + datetime(25) + \n(1) = 27
-    private const LINE_ADVANCE = 27;
+    private const int LINE_ADVANCE = 27;
 
     private const array URLS = [
         'shorthand-comparisons-in-php',
@@ -385,28 +385,18 @@ final class Parser
                 // $dateMap, $dateRevMap, $dateCount, $slugMap, $slugCount inherited from parent via COW
                 $results = array_fill(0, $slugCount * $dateCount, 0);
 
-                $buffer = '';
-
                 while ($bytesRemaining > 0) {
                     $chunk = fread($fp, min(self::BUFFER_SIZE, $bytesRemaining));
                     if ($chunk === false || $chunk === '')
                         break;
-                    $bytesRemaining -= strlen($chunk);
-
-                    if ($buffer !== '') {
-                        $chunk = $buffer.$chunk;
-                        $buffer = '';
-                    }
 
                     $lastNl = strrpos($chunk, "\n");
-                    if ($lastNl === false) {
-                        $buffer = $chunk;
-                        continue;
-                    }
 
-                    if ($lastNl < (strlen($chunk) - 1)) {
-                        $buffer = substr($chunk, $lastNl + 1);
-                    }
+                    // Seek back over any partial tail so next fread starts at a line boundary
+                    $tail = strlen($chunk) - $lastNl - 1;
+                    if ($tail > 0)
+                        fseek($fp, -$tail, SEEK_CUR);
+                    $bytesRemaining -= $lastNl + 1;
 
                     // All rows: https://stitcher.io/blog/SLUG,yyyy-mm-ddT00:00:00+00:00
                     // Skip URL_PREFIX_LEN chars; key = slugMap[slug] (pre-multiplied) + dateMap[date]
