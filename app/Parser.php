@@ -35,10 +35,10 @@ final class Parser
 
                 $line_len = $new_line_pos - $pos;
 
-                $url = substr($buffer, $pos, $line_len - 26);
+                $path = substr($buffer, $pos + 20, $line_len - 46);
                 $date = substr($buffer, $pos + $line_len - 25, 10);
 
-                $url_id = $url_map[$url] ??= $next_url_id++;
+                $url_id = $url_map[$path] ??= $next_url_id++;
                 $date_id = $date_map[$date] ??= $next_date_id++;
 
                 $visits[$url_id][$date_id] = ($visits[$url_id][$date_id] ?? 0) + 1;
@@ -60,8 +60,7 @@ final class Parser
         foreach ($visits as $url_id => $dates) {
             uksort($dates, static fn ($a, $b) => $date_list[$a] <=> $date_list[$b]);
 
-            $url = $url_list[$url_id];
-            [, $formatted_url] = explode('.io\/', str_replace('/', '\/', $url), 2);
+            $formatted_url = str_replace('/', '\/', $url_list[$url_id]);
             if (! $first_url) {
                 $segment .= "\n    },\n    \"\/$formatted_url\": {";
             } else {
