@@ -7,9 +7,11 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         $handle = fopen($inputPath, 'r');
+        stream_set_read_buffer($handle, 0);
 
         // Assuming that we'll only see 2048 unique dates
         $date_stride = 2048;
+        $read_chunk_size = 262144;
         $next_url_id = 0;
         $url_map = [];
         $next_date_id = 0;
@@ -19,7 +21,7 @@ final class Parser
         $carry = '';
 
         while (true) {
-            $chunk = fread($handle, 131072);
+            $chunk = fread($handle, $read_chunk_size);
 
             if ($chunk === '' || $chunk === false) {
                 break;
