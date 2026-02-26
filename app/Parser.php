@@ -1,15 +1,11 @@
 <?php
 
-declare(strict_types=1);
-
 namespace App;
 
 use App\Commands\Visit;
 
-use function array_chunk;
 use function array_count_values;
 use function array_fill;
-use function array_flip;
 use function chr;
 use function count;
 use function fclose;
@@ -25,7 +21,7 @@ use function gc_disable;
 use function getmypid;
 use function pack;
 use function pcntl_fork;
-use function pcntl_wait;
+use function pcntl_waitpid;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -41,7 +37,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    public function parse($inputPath, $outputPath)
     {
         gc_disable();
 
@@ -103,7 +99,7 @@ final class Parser
             }
         }
 
-        $numWorkers = 13;
+        $numWorkers = 10;
         $chunkSize = 4_194_304;
 
         $splits = [0];
@@ -118,9 +114,10 @@ final class Parser
 
         $tmpDir = sys_get_temp_dir();
         $tmpPrefix = $tmpDir . '/p_' . getmypid() . '_';
+        $totalCells = $pathCount * $dateCount;
 
-        $childPids = [];
-        for ($w = 1; $w < $numWorkers; $w++) {
+        $children = [];
+        for ($w = 0; $w < $numWorkers - 1; $w++) {
             $pid = pcntl_fork();
             if ($pid === -1) continue;
             if ($pid === 0) {
@@ -183,7 +180,6 @@ final class Parser
 
                 fclose($handle);
 
-                $totalCells = $pathCount * $dateCount;
                 $counts = array_fill(0, $totalCells, 0);
                 for ($p = 0; $p < $pathCount; $p++) {
                     if ($buckets[$p] === '') continue;
@@ -194,19 +190,18 @@ final class Parser
                 }
 
                 $fh = fopen($tmpPrefix . $w, 'wb');
-                foreach (array_chunk($counts, 8192) as $batch) {
-                    fwrite($fh, pack('V*', ...$batch));
-                }
+                fwrite($fh, pack('V*', ...$counts));
                 fclose($fh);
                 exit(0);
             }
-            $childPids[$w] = $pid;
+            $children[$pid] = $w;
         }
 
         $buckets = array_fill(0, $pathCount, '');
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $remaining = $splits[1];
+        fseek($handle, $splits[$numWorkers - 1]);
+        $remaining = $splits[$numWorkers] - $splits[$numWorkers - 1];
 
         while ($remaining > 0) {
             $chunk = fread($handle, $remaining > $chunkSize ? $chunkSize : $remaining);
@@ -260,7 +255,6 @@ final class Parser
         }
         fclose($handle);
 
-        $totalCells = $pathCount * $dateCount;
         $counts = array_fill(0, $totalCells, 0);
         for ($p = 0; $p < $pathCount; $p++) {
             if ($buckets[$p] === '') continue;
@@ -271,17 +265,16 @@ final class Parser
         }
         unset($buckets);
 
-        $pidToWorker = array_flip($childPids);
-        $remainingW = count($childPids);
-        while ($remainingW > 0) {
-            $pid = pcntl_wait($status);
-            $w = $pidToWorker[$pid];
+        $pendingW = count($children);
+        while ($pendingW > 0) {
+            $pid = pcntl_waitpid(-1, $status);
+            $w = $children[$pid];
             $j = 0;
             foreach (unpack('V*', file_get_contents($tmpPrefix . $w)) as $v) {
                 $counts[$j++] += $v;
             }
             unlink($tmpPrefix . $w);
-            $remainingW--;
+            $pendingW--;
         }
 
         $datePrefixes = [];
