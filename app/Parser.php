@@ -6,11 +6,10 @@ namespace App;
 
 use App\Commands\Visit;
 
-use function array_fill, count, fgets, file_get_contents, file_put_contents,
-    filesize, fopen, fread, fseek, ftell, fwrite, gc_disable, getmypid,
-    pack, pcntl_fork, pcntl_waitpid, str_replace, stream_set_read_buffer,
-    stream_set_write_buffer, strlen, strpos, strrpos, substr, sys_get_temp_dir,
-    unpack, shmop_open, shmop_write, shmop_read, shmop_delete, ftok, chr, unlink, file_exists;
+use function array_fill, count, fgets, filesize, fopen, fread, fseek, ftell,
+    fwrite, gc_disable, pack, pcntl_fork, pcntl_waitpid, str_replace,
+    stream_set_read_buffer, stream_set_write_buffer, strlen, strpos, strrpos,
+    substr, unpack, shmop_open, shmop_write, shmop_read, shmop_delete, ftok, chr;
 
 final class Parser
 {
@@ -84,7 +83,6 @@ final class Parser
 
         for ($w = 0; $w < 3; $w++) {
             $token = ftok(__FILE__, chr($w + 1));
-            $cacheFile = sys_get_temp_dir() . "/p100m_" . getmypid() . "_" . $w;
             $child = pcntl_fork();
 
             if ($child === 0) {
@@ -132,11 +130,11 @@ final class Parser
                     }
                 }
 
-                $shm = @shmop_open($token, "c", 0644, $ramAlloc);
+                $shm = shmop_open($token, "c", 0644, $ramAlloc);
                 shmop_write($shm, pack("V*", ...$grid), 0);
                 exit(0);
             }
-            $pids[] = [$child, $token, $cacheFile];
+            $pids[] = [$child, $token];
         }
 
         $masterGrid = array_fill(0, $urlIdx * $dayIdx, 0);
@@ -182,27 +180,19 @@ final class Parser
             }
         }
 
-        foreach ($pids as [$child, $token, $cacheFile]) {
+        foreach ($pids as [$child, $token]) {
             pcntl_waitpid($child, $status);
 
-            $payload = "";
-            $shm = @shmop_open($token, "a", 0, 0);
+            $shm = shmop_open($token, "a", 0, 0);
             $payload = shmop_read($shm, 0, $ramAlloc);
             shmop_delete($shm);
 
-            if ($payload === "" && file_exists($cacheFile)) {
-                $payload = file_get_contents($cacheFile);
-                unlink($cacheFile);
-            }
-
-            if ($payload !== "") {
-                $i = 0;
-                foreach (unpack("V*", $payload) as $val) {
-                    if ($val !== 0) {
-                        $masterGrid[$i] += $val;
-                    }
-                    ++$i;
+            $i = 0;
+            foreach (unpack("V*", $payload) as $val) {
+                if ($val !== 0) {
+                    $masterGrid[$i] += $val;
                 }
+                ++$i;
             }
         }
 
