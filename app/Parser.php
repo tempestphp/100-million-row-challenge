@@ -27,7 +27,6 @@ use function igbinary_serialize;
 use function file_get_contents;
 use function unlink;
 use function ksort;
-use function json_encode;
 
 final class Parser
 {
@@ -81,20 +80,18 @@ final class Parser
                         $buffer = substr($chunk, $lastNl + 1);
                     }
 
-                    // All rows: https://stitcher.io/blog/PATH,yyyy-mm-ddT00:00:00+00:00
+                    // All rows: https://stitcher.io/blog/SLUG,yyyy-mm-ddT00:00:00+00:00
+                    // Skip https://stitcher.io/blog/ (25 chars); key = "SLUG,yyyy-mm-dd"
                     // Datetime suffix is always exactly 25 chars + \n = next line at commaPos+27
                     $pos = 0;
                     while ($pos < $lastNl) {
                         $commaPos = strpos($chunk, ',', $pos + 25);
-
-                        $key = substr($chunk, $pos + 19, $commaPos - $pos - 8);
-
+                        $key = substr($chunk, $pos + 25, $commaPos - $pos - 14);
                         if (isset($results[$key])) {
                             $results[$key]++;
                         } else {
                             $results[$key] = 1;
                         }
-
                         $pos = $commaPos + 27;
                     }
                 }
@@ -106,7 +103,7 @@ final class Parser
                     if (strlen($buffer) > 25) {
                         $commaPos = strpos($buffer, ',', 25);
                         if ($commaPos !== false) {
-                            $key = substr($buffer, 19, $commaPos - 8);
+                            $key = substr($buffer, 25, $commaPos - 14);
                             if (isset($results[$key])) {
                                 $results[$key]++;
                             } else {
@@ -153,6 +150,33 @@ final class Parser
             ksort($dates);
         }
 
-        file_put_contents($outputPath, json_encode($output, JSON_PRETTY_PRINT));
+        $this->jsonOutput($outputPath, $output);
+    }
+
+    private function jsonOutput(string $outputPath, array $results): void
+    {
+        $output = "{\n";
+
+        $firstPath = true;
+        foreach ($results as $path => $dates) {
+            if (!$firstPath) {
+                $output .= ",\n";
+            }
+            $firstPath = false;
+
+            $output .= "    \"\/blog\/$path\": {\n";
+
+            $firstDate = true;
+            foreach ($dates as $date => $count) {
+                if (!$firstDate) {
+                    $output .= ",\n";
+                }
+                $firstDate = false;
+                $output .= "        \"$date\": $count";
+            }
+            $output .= "\n    }";
+        }
+        $output .= "\n}";
+        file_put_contents($outputPath, $output);
     }
 }
