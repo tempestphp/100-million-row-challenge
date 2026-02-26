@@ -151,8 +151,11 @@ final class Parser
                     $slugIndex, $dateChars, $numSlugs, $numDates,
                 );
                 $wfh = fopen($tmpFile, 'wb');
+                $v16 = max($result) <= 65535;
+                fwrite($wfh, $v16 ? "\x00" : "\x01");
+                $fmt = $v16 ? 'v*' : 'V*';
                 foreach (array_chunk($result, 8192) as $batch) {
-                    fwrite($wfh, pack('V*', ...$batch));
+                    fwrite($wfh, pack($fmt, ...$batch));
                 }
                 fclose($wfh);
                 exit(0);
@@ -178,18 +181,22 @@ final class Parser
         while ($pending > 0) {
             $pid = pcntl_wait($status);
             if (isset($childMap[$pid])) {
+                $raw = file_get_contents($childMap[$pid]);
+                $rawLen = strlen($raw);
+                $isV16 = ord($raw[0]) === 0;
+                $fmt = $isV16 ? 'v*' : 'V*';
+                $step = $isV16 ? 16384 : 32768;
                 $j = 0;
-                foreach (unpack('V*', file_get_contents($childMap[$pid])) as $v) {
-                    $tally[$j++] += $v;
+                for ($off = 1; $off < $rawLen; $off += $step) {
+                    foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
+                        $tally[$j++] += $v;
+                    }
                 }
                 unlink($childMap[$pid]);
                 $pending--;
             }
         }
         // ─── Emit JSON ───
-
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 524_288);
 
         // Pre-compute formatted date prefixes and escaped paths
         $datePrefixes = [];
@@ -201,6 +208,9 @@ final class Parser
         for ($s = 0; $s < $numSlugs; $s++) {
             $escapedPaths[$s] = '"\\/blog\\/' . str_replace('/', '\\/', $slugLabels[$s]) . '"';
         }
+
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 524_288);
 
         fwrite($out, '{');
         $firstSlug = true;
