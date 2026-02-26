@@ -108,8 +108,6 @@ final class Parser
         while ($pos < $end && ($line = stream_get_line($fp, $maxLineLen, "\n")) !== false) {
             $pos += strlen($line) + 1; // +1 for the consumed newline delimiter
 
-            // Line: https://stitcher.io/path/here,2026-01-24T01:16:58+00:00
-            // Domain prefix is always 19 chars: "https://stitcher.io"
             $commaPos = strpos($line, ",", 20);
             if ($commaPos === false)
                 continue;
@@ -117,19 +115,28 @@ final class Parser
             $path = substr($line, 19, $commaPos - 19);
             $date = substr($line, $commaPos + 1, 10);
 
-            if (isset($result[$path])) {
-                if (isset($result[$path][$date])) {
-                    $result[$path][$date]++;
-                } else {
-                    $result[$path][$date] = 1;
-                }
-            } else {
+            if (!isset($result[$path])) {
                 $result[$path] = [$date => 1];
                 $order[$path] = $orderCounter++;
+            } else {
+                $ref = &$result[$path];
+                if (isset($ref[$date])) {
+                    $ref[$date]++;
+                } else {
+                    $ref[$date] = 1;
+                }
+                unset($ref);
             }
         }
 
         fclose($fp);
+
+        // Pre-sort dates in worker so parent doesn't have to
+        foreach ($result as &$dates) {
+            ksort($dates);
+        }
+        unset($dates);
+
         return [$result, $order];
     }
 
@@ -138,14 +145,12 @@ final class Parser
         // Sort paths by first-appearance order
         asort($order);
 
-        // Sort dates within each path and build ordered result
+        // Build ordered result (dates already sorted by workers)
         $ordered = [];
         foreach ($order as $path => $_) {
             if (!isset($result[$path]))
                 continue;
-            $dates = $result[$path];
-            ksort($dates);
-            $ordered[$path] = $dates;
+            $ordered[$path] = $result[$path];
         }
 
         file_put_contents($outputPath, json_encode($ordered, JSON_PRETTY_PRINT));
