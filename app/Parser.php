@@ -138,35 +138,16 @@ final class Parser
         // Sort paths by first-appearance order
         asort($order);
 
-        // Sort dates within each path
-        foreach ($result as &$dates) {
-            ksort($dates);
-        }
-        unset($dates);
-
-        // Build JSON output in memory, write once
-        $out = "{\n";
-        $first = true;
+        // Sort dates within each path and build ordered result
+        $ordered = [];
         foreach ($order as $path => $_) {
             if (!isset($result[$path]))
                 continue;
-            if (!$first) {
-                $out .= ",\n";
-            }
-            $first = false;
-            $escapedPath = str_replace('/', '\\/', $path);
-            $out .= '    "' . $escapedPath . '": {' . "\n";
-            $firstDate = true;
-            foreach ($result[$path] as $date => $count) {
-                if (!$firstDate) {
-                    $out .= ",\n";
-                }
-                $firstDate = false;
-                $out .= '        "' . $date . '": ' . $count;
-            }
-            $out .= "\n    }";
+            $dates = $result[$path];
+            ksort($dates);
+            $ordered[$path] = $dates;
         }
-        $out .= "\n}";
-        file_put_contents($outputPath, $out);
+
+        file_put_contents($outputPath, json_encode($ordered, JSON_PRETTY_PRINT));
     }
 }
