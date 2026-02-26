@@ -10,7 +10,8 @@ final class Parser
     // likely available on the 12GB benchmark machine.
     const MEMORY_LIMIT = '8192M';
 
-    // Most URLs are less than 100 characters, so 256 is a safe buffer size to find at least one newline.
+    // Most URLs are less than 100 characters, so 256 is a safe buffer size to find at least one
+    // newline.
     const NEWLINE_SEARCH_SIZE = 256;
 
     // 16MB read/write buffers.
@@ -46,13 +47,12 @@ final class Parser
         // Don't bother with garbage collection, to avoid any random slowdowns.
         \gc_disable();
 
-        // Memory usage is expected to be high, but limited by the chunk size, so limit it to less than the 1.5GB that the test machine has.
         \ini_set('memory_limit', self::MEMORY_LIMIT);
-
 
         $fileSize = \filesize($inputPath);
         $splitSize = (int)($fileSize / self::WORKER_COUNT);
-        // The first worker will always start at the beginning of the file, so start with that split point.
+        // The first worker will always start at the beginning of the file, so start with that
+        // split point.
         $splits = [0];
 
         // Calculate split points for the remaining workers by finding the first newline after
@@ -67,7 +67,8 @@ final class Parser
             // Find the first newline in the after the split point.
             $nl = \strpos($data, "\n");
 
-            // Bail if the newline is not found, so an error is thrown instead of silently producing incorrect output.
+            // Bail if the newline is not found, so an error is thrown instead of silently producing
+            // incorrect output.
             if ($nl === false) {
                 throw new Exception("Failed to find newline after split point for worker $i");
             }
@@ -103,7 +104,8 @@ final class Parser
 
         $this->logTime('Parsed');
 
-        // Take the first worker results as the starting point, and merge the results of the other workers into it.
+        // Take the first worker results as the starting point, and merge the results of the other
+        // workers into it.
         $counters = $results[0];
         for($i = 1; $i < self::WORKER_COUNT; $i++) {
             foreach ($results[$i] as $uri => $dates) {
@@ -126,7 +128,8 @@ final class Parser
         $buffer = "{";
         $lines = 0;
         $firstUri = true;
-        // Output validation requires that the URIs are the order they were first encountered in the input.
+        // Output validation requires that the URIs are the order they were first encountered in the
+        // input.
         foreach ($counters as $uri => $dates) {
             if (!$firstUri) {
                 $buffer .= ",";
@@ -192,7 +195,8 @@ final class Parser
                 $lineEnd = \strpos($chunk, "\n", $chunkStart);
             }
 
-            // When at the end of the file, there may not be a line ending, so set the line end to the end of the chunk.
+            // When at the end of the file, there may not be a line ending, so set the line end to
+            // the end of the chunk.
             if ($lineEnd === false) {
                 $lineEnd = $chunkLen;
             }
