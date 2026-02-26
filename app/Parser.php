@@ -4,8 +4,6 @@ namespace App;
 
 use Exception;
 
-use function Tempest\Support\Arr\push;
-
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
