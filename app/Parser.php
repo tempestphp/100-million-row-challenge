@@ -2,10 +2,6 @@
 
 namespace App;
 
-use DateTime;
-
-use function Tempest\Clock\now;
-
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
