@@ -23,7 +23,7 @@ use function getmypid;
 use function implode;
 use function pack;
 use function pcntl_fork;
-use function pcntl_waitpid;
+use function pcntl_wait;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -36,6 +36,7 @@ use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
+use const WNOHANG;
 
 final class Parser
 {
@@ -123,7 +124,7 @@ final class Parser
 
         $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
-        $children = [];
+        $childMap = [];
 
         for ($w = 0; $w < self::WORKERS - 1; $w++) {
             $tmpFile = $tmpDir . '/p100m_' . $myPid . '_' . $w;
@@ -136,7 +137,7 @@ final class Parser
                 file_put_contents($tmpFile, pack('v*', ...$wCounts));
                 exit(0);
             }
-            $children[] = [$pid, $tmpFile];
+            $childMap[$pid] = $tmpFile;
         }
 
         $counts = $this->parseRange(
@@ -144,14 +145,21 @@ final class Parser
             $pathIds, $dateIdChars, $pathCount, $dateCount,
         );
 
-        foreach ($children as [$cpid, $tmpFile]) {
-            pcntl_waitpid($cpid, $status);
+        $pending = count($childMap);
+        while ($pending > 0) {
+            $pid = pcntl_wait($status, WNOHANG);
+            if ($pid <= 0) {
+                $pid = pcntl_wait($status);
+            }
+            if (!isset($childMap[$pid])) continue;
+            $tmpFile = $childMap[$pid];
             $wCounts = unpack('v*', file_get_contents($tmpFile));
             unlink($tmpFile);
             $j = 0;
             foreach ($wCounts as $v) {
                 $counts[$j++] += $v;
             }
+            $pending--;
         }
 
         $this->writeJson($outputPath, $counts, $paths, $dates, $dateCount);
