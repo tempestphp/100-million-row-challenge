@@ -9,6 +9,8 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         ini_set('memory_limit', '-1');
+        gc_disable();
+
         $fileSize = filesize($inputPath);
 
         if ($fileSize < 1024 * 1024 * 2 || !function_exists('pcntl_fork') || self::NUM_WORKERS === 1) {
