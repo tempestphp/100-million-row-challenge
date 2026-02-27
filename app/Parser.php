@@ -5,6 +5,7 @@ namespace App;
 use App\Commands\Visit;
 
 use function array_chunk;
+use function array_count_values;
 use function array_fill;
 use function chr;
 use function count;
@@ -43,8 +44,8 @@ final class Parser
 {
     private const URL_PREFIX_LENGTH = 25; // https://stitcher.io/blog/
     private const SAMPLE_BYTES = 2_097_152; // 2 MB probe
-    private const READ_CHUNK_BYTES = 4_194_304; // 4 MB chunks
-    private const DEFAULT_WORKERS = 10;
+    private const READ_CHUNK_BYTES = 2_097_152; // 2 MB chunks
+    private const DEFAULT_WORKERS = 12;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -174,7 +175,7 @@ final class Parser
             if (function_exists('posix_sysconf')) {
                 $cpuCount = (int) posix_sysconf(POSIX_SC_NPROCESSORS_ONLN);
                 if ($cpuCount > 0) {
-                    $workers = min(10, $cpuCount + 2);
+                    $workers = min(12, $cpuCount + 4);
                 }
             }
         }
@@ -388,8 +389,8 @@ final class Parser
 
             $offset = $slug * $dateCount;
 
-            foreach (unpack('v*', $buckets[$slug]) as $dateId) {
-                $counts[$offset + $dateId]++;
+            foreach (array_count_values(unpack('v*', $buckets[$slug])) as $dateId => $visits) {
+                $counts[$offset + $dateId] = $visits;
             }
         }
 
