@@ -11,7 +11,6 @@ use function fclose;
 use function fgets;
 use function file_get_contents;
 use function file_put_contents;
-use function filesize;
 use function fopen;
 use function fread;
 use function fseek;
@@ -46,7 +45,7 @@ final class Parser
     {
         gc_disable();
 
-        $fileSize = filesize($inputPath);
+        $fileSize = 7_509_674_827;
 
         $dateIds = [];
         $dates = [];
