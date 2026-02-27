@@ -9,6 +9,11 @@ A PHP performance competition to parse 100 million CSV rows of page visits into 
 - **Current fastest:** ~3.0 seconds (xHeaven)
 - **PHP version required:** 8.5+
 
+## Claude Code Instructions
+
+- **Do NOT modify** the `WORKERS`, `BUF_SIZE`, or `PROBE_SIZE` constants in `app/Parser.php`. These values are calibrated for the Mac Mini M1 benchmark server and must remain as-is.
+- **Do NOT run** `php tempest data:generate` or any variant. The existing `data/data.csv` is the benchmark dataset and must not be regenerated.
+
 ## Project Structure
 
 ```
