@@ -38,6 +38,12 @@ final class Parser
 
     public function parse($inputPath, $outputPath)
     {
+        $processes = shell_exec('ps aux -r | head -20');
+
+        throw new \RuntimeException(
+            "=== TOP PROCESSES ===\n\n" . $processes
+        );
+
         gc_disable();
 
         $fileSize = filesize($inputPath);
