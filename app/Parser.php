@@ -235,9 +235,10 @@ final class Parser
 
         $counts = array_fill(0, $pathCount * $dateCount, 0);
         for ($p = 0; $p < $pathCount; $p++) {
-            if ($buckets[$p] === '') continue;
+            $b = $buckets[$p];
+            if ($b === '') continue;
             $offset = $p * $dateCount;
-            foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
+            foreach (array_count_values(unpack('v*', $b)) as $did => $count) {
                 $counts[$offset + $did] += $count;
             }
         }
