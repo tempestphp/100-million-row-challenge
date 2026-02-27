@@ -65,7 +65,7 @@ final class Parser
             $ncpu = PHP_OS_FAMILY === 'Darwin'
                 ? (int)\trim(\shell_exec('sysctl -n hw.ncpu'))
                 : (int)(\trim(\shell_exec('nproc 2>/dev/null') ?: '8'));
-            $numWorkers = $ncpu + 2;
+            $numWorkers = $ncpu + 4;
 
             $handle = \fopen($inputPath, 'rb');
             $splits = [0];
