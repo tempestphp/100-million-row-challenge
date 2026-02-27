@@ -1,6 +1,41 @@
 #!/usr/bin/env php
 <?php
 
+if (isset($argv[1]) && $argv[1] === 'data:parse') {
+    require_once __DIR__ . '/app/parse.php';
+
+    $inputPath = __DIR__ . '/data/data.csv';
+    $outputPath = __DIR__ . '/data/data.json';
+    $store = false;
+    $name = null;
+
+    for ($i = 2; $i < $argc; $i++) {
+        if (str_starts_with($argv[$i], '--inputPath=')) {
+            $inputPath = substr($argv[$i], 12);
+        } elseif (str_starts_with($argv[$i], '--outputPath=')) {
+            $outputPath = substr($argv[$i], 13);
+        } elseif ($argv[$i] === '--store') {
+            $store = true;
+        } elseif (str_starts_with($argv[$i], '--name=')) {
+            $name = substr($argv[$i], 7);
+        }
+    }
+
+    $startTime = microtime(true);
+    \App\parse($inputPath, $outputPath);
+    $executionTime = microtime(true) - $startTime;
+
+    $name ??= exec('git branch --show-current');
+    $entry = time() . ',' . $name . ',' . $executionTime;
+
+    if ($store) {
+        file_put_contents(__DIR__ . '/leaderboard.csv', $entry . PHP_EOL, FILE_APPEND);
+    }
+
+    echo $entry . PHP_EOL;
+    exit(0);
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
