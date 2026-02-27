@@ -4,6 +4,8 @@ namespace App;
 
 use function ksort;
 use function substr;
+use function strpos;
+use function stream_set_read_buffer;
 use function file_put_contents;
 use function fclose;
 use function fopen;
@@ -12,7 +14,6 @@ use function count;
 use function gc_disable;
 use function gc_enable;
 use function fgets;
-use function explode;
 use const SORT_STRING;
 use const FALSE;
 use const JSON_PRETTY_PRINT;
@@ -23,19 +24,23 @@ final class Parser
     {
         $keyedData = [];
         $handle = fopen($inputPath, 'r');
+        stream_set_read_buffer($handle, 1048576);
         gc_disable();
-        while (($data = fgets($handle)) !== FALSE) {
-            $data = explode(',', $data);
-            $key = substr($data[0], 19);
-            $value = substr($data[1], 0, 10);
 
-            $keyedData[$key][$value] = ($keyedData[$key][$value] ?? 0) + 1;
+        while (($data = fgets($handle)) !== FALSE) {
+            $firstComma = strpos($data, ',');
+            $key = substr($data, 19, $firstComma - 19);
+            $value = substr($data, $firstComma + 1, 10);
+
+            if (isset($keyedData[$key][$value])) {
+                $keyedData[$key][$value]++;
+            } else {
+                $keyedData[$key][$value] = 1;
+            }
         }
 
         fclose($handle);
-        gc_enable();
-        unset($handle);
-        unset($data);
+        unset($handle, $data);
 
         foreach ($keyedData as &$value) {
             if (count($value) > 1) {
@@ -43,6 +48,7 @@ final class Parser
             }
         }
         unset($value);
+        gc_enable();
 
         file_put_contents($outputPath, json_encode($keyedData, JSON_PRETTY_PRINT));
     }
