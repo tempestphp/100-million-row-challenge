@@ -39,7 +39,7 @@ final class Parser
     private const int URL_PREFIX_LEN = 25;
 
     // fread chunk size in bytes — tune this for M1 memory bandwidth
-    private const int BUFFER_SIZE = 2_097_152;
+    private const int BUFFER_SIZE = 4_194_304;
 
     // From comma position to start of slug on next line:
     // comma(1) + datetime(25) + \n(1) + prefix(25) = 52
