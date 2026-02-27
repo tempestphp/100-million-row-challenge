@@ -33,7 +33,7 @@ docker run --rm -v $(pwd)/data:/app/data php-100m-challenge data:generate 100_00
 To run the actual parsing process of the `data/data.csv` file and get the execution time:
 
 ```bash
-docker run --rm -v $(pwd)/data:/app/data php-100m-challenge data:parse
+docker run --rm -v $(pwd)/data:/app/data -v $(pwd)/app:/app/app php-100m-challenge data:parse
 ```
 
 ## 5. Technical Notes
