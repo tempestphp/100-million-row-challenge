@@ -101,8 +101,7 @@ final class Parser
             }
         }
 
-        $numWorkers = 12;
-        $chunkSize = 163_840;
+        $numWorkers = 10;
 
         $splits = [0];
         $handle = fopen($inputPath, 'rb');
@@ -115,93 +114,93 @@ final class Parser
         fclose($handle);
 
         $tmpDir = sys_get_temp_dir();
-        $tmpPrefix = $tmpDir . '/p_' . getmypid() . '_';
-        $totalCells = $pathCount * $dateCount;
+        $myPid = getmypid();
 
-        $children = [];
+        $childMap = [];
         for ($w = 0; $w < $numWorkers - 1; $w++) {
+            $tmpFile = $tmpDir . '/p_' . $myPid . '_' . $w;
             $pid = pcntl_fork();
             if ($pid === -1) continue;
             if ($pid === 0) {
-                $buckets = array_fill(0, $pathCount, '');
-                $handle = fopen($inputPath, 'rb');
-                stream_set_read_buffer($handle, 0);
-                fseek($handle, $splits[$w]);
-                $remaining = $splits[$w + 1] - $splits[$w];
-
-                while ($remaining > 0) {
-                    $chunk = fread($handle, $remaining > $chunkSize ? $chunkSize : $remaining);
-                    $chunkLen = strlen($chunk);
-                    if ($chunkLen === 0) break;
-                    $remaining -= $chunkLen;
-
-                    $lastNl = strrpos($chunk, "\n");
-                    if ($lastNl === false) break;
-
-                    $tail = $chunkLen - $lastNl - 1;
-                    if ($tail > 0) {
-                        fseek($handle, -$tail, SEEK_CUR);
-                        $remaining += $tail;
-                    }
-
-                    $p = 25;
-                    $fence = $lastNl - 720;
-
-                    while ($p < $fence) {
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-                    }
-                    while ($p < $lastNl) {
-                        $sep = strpos($chunk, ',', $p);
-                        if ($sep === false || $sep >= $lastNl) break;
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-                    }
-                }
-
-                fclose($handle);
-
-                $counts = array_fill(0, $totalCells, 0);
-                for ($p = 0; $p < $pathCount; $p++) {
-                    if ($buckets[$p] === '') continue;
-                    $offset = $p * $dateCount;
-                    foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $cnt) {
-                        $counts[$offset + $did] += $cnt;
-                    }
-                }
-
-                file_put_contents($tmpPrefix . $w, pack('V*', ...$counts));
+                $wCounts = $this->parseRange(
+                    $inputPath, $splits[$w], $splits[$w + 1],
+                    $pathIds, $dateChars, $pathCount, $dateCount,
+                );
+                file_put_contents($tmpFile, pack('v*', ...$wCounts));
                 exit(0);
             }
-            $children[$pid] = $w;
+            $childMap[$pid] = $tmpFile;
         }
 
+        $counts = $this->parseRange(
+            $inputPath, $splits[$numWorkers - 1], $splits[$numWorkers],
+            $pathIds, $dateChars, $pathCount, $dateCount,
+        );
+
+        $pending = count($childMap);
+        while ($pending > 0) {
+            $pid = pcntl_waitpid(-1, $status, WNOHANG);
+            if ($pid <= 0) {
+                $pid = pcntl_waitpid(-1, $status);
+            }
+            if (!isset($childMap[$pid])) continue;
+            $tmpFile = $childMap[$pid];
+            $wCounts = unpack('v*', file_get_contents($tmpFile));
+            unlink($tmpFile);
+            $j = 0;
+            foreach ($wCounts as $v) {
+                $counts[$j++] += $v;
+            }
+            $pending--;
+        }
+
+        $datePrefixes = [];
+        for ($d = 0; $d < $dateCount; $d++) {
+            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+        }
+
+        $escapedPaths = [];
+        for ($p = 0; $p < $pathCount; $p++) {
+            $escapedPaths[$p] = '"\\/blog\\/' . str_replace('/', '\\/', $paths[$p]) . '"';
+        }
+
+        $fp = fopen($outputPath, 'wb');
+        stream_set_write_buffer($fp, 1_048_576);
+        fwrite($fp, '{');
+        $firstPath = true;
+
+        for ($p = 0; $p < $pathCount; $p++) {
+            $base = $p * $dateCount;
+            $buf = '';
+            $sep = '';
+
+            for ($d = 0; $d < $dateCount; $d++) {
+                $n = $counts[$base + $d];
+                if ($n === 0) continue;
+                $buf .= $sep . $datePrefixes[$d] . $n;
+                $sep = ",\n";
+            }
+
+            if ($buf === '') continue;
+
+            fwrite($fp, ($firstPath ? '' : ',') . "\n    " . $escapedPaths[$p] . ": {\n" . $buf . "\n    }");
+            $firstPath = false;
+        }
+
+        fwrite($fp, "\n}");
+        fclose($fp);
+    }
+
+    private function parseRange(
+        $inputPath, $start, $end,
+        $pathIds, $dateChars, $pathCount, $dateCount,
+    ) {
+        $chunkSize = 163_840;
         $buckets = array_fill(0, $pathCount, '');
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        fseek($handle, $splits[$numWorkers - 1]);
-        $remaining = $splits[$numWorkers] - $splits[$numWorkers - 1];
+        fseek($handle, $start);
+        $remaining = $end - $start;
 
         while ($remaining > 0) {
             $chunk = fread($handle, $remaining > $chunkSize ? $chunkSize : $remaining);
@@ -253,9 +252,10 @@ final class Parser
                 $p = $sep + 52;
             }
         }
+
         fclose($handle);
 
-        $counts = array_fill(0, $totalCells, 0);
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
         for ($p = 0; $p < $pathCount; $p++) {
             if ($buckets[$p] === '') continue;
             $offset = $p * $dateCount;
@@ -263,57 +263,7 @@ final class Parser
                 $counts[$offset + $did] += $cnt;
             }
         }
-        unset($buckets);
 
-        $pendingW = count($children);
-        while ($pendingW > 0) {
-            $pid = pcntl_waitpid(-1, $status, WNOHANG);
-            if ($pid <= 0) {
-                $pid = pcntl_waitpid(-1, $status);
-            }
-            $w = $children[$pid];
-            $j = 0;
-            foreach (unpack('V*', file_get_contents($tmpPrefix . $w)) as $v) {
-                $counts[$j++] += $v;
-            }
-            unlink($tmpPrefix . $w);
-            $pendingW--;
-        }
-
-        $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
-        }
-
-        $escapedPaths = [];
-        for ($p = 0; $p < $pathCount; $p++) {
-            $escapedPaths[$p] = '"\\/blog\\/' . str_replace('/', '\\/', $paths[$p]) . '"';
-        }
-
-        $fp = fopen($outputPath, 'wb');
-        stream_set_write_buffer($fp, 1_048_576);
-        fwrite($fp, '{');
-        $firstPath = true;
-
-        for ($p = 0; $p < $pathCount; $p++) {
-            $base = $p * $dateCount;
-            $buf = '';
-            $sep = '';
-
-            for ($d = 0; $d < $dateCount; $d++) {
-                $n = $counts[$base + $d];
-                if ($n === 0) continue;
-                $buf .= $sep . $datePrefixes[$d] . $n;
-                $sep = ",\n";
-            }
-
-            if ($buf === '') continue;
-
-            fwrite($fp, ($firstPath ? '' : ',') . "\n    " . $escapedPaths[$p] . ": {\n" . $buf . "\n    }");
-            $firstPath = false;
-        }
-
-        fwrite($fp, "\n}");
-        fclose($fp);
+        return $counts;
     }
 }
