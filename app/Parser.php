@@ -34,8 +34,8 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int WORKERS = 10;
-    private const int READ_CHUNK = 163_840; // 160KB
+    private const int WORKERS = 8;
+    private const int READ_CHUNK = 1_048_576; // 1MB
     private const int DISCOVER_SIZE = 2_097_152; // 2MB
     private const int URI_PREFIX_LENGTH = 25; // Length of "https://stitcher.io"
     private const int DATE_LENGTH = 8; // Length of "26-01-24" (two-digit year)
@@ -48,10 +48,16 @@ final class Parser
         $fileSize = filesize($inputPath);
 
         // 1. Generate date mappings
-        [$dateIds, $dates, $dateCount, $dateIdChars] = $this->generateDateMappings();
+        [$dateIds, $dates, $dateCount] = $this->generateDateMappings();
 
         // 2. Discover all paths
         [$pathIds, $paths, $pathCount] = $this->discoverPaths($inputPath, $fileSize);
+
+        // Precompute path offsets to avoid multiplication in hot loop
+        $pathOffsets = [];
+        for ($i = 0; $i < $pathCount; $i++) {
+            $pathOffsets[$i] = $i * $dateCount;
+        }
 
         // 3. Determine parallel strategy
         $parallelType = $this->getParallelType();
@@ -62,9 +68,10 @@ final class Parser
             $inputPath,
             $fileSize,
             $pathIds,
-            $dateIdChars,
+            $dateIds,
             $pathCount,
-            $dateCount
+            $dateCount,
+            $pathOffsets
         );
 
         // 5. Write output
@@ -96,14 +103,10 @@ final class Parser
             }
         }
 
-        // Create 2-byte character representations for fast concatenation
-        $dateIdChars = [];
-        foreach ($dateIds as $date => $id) {
-            $dateIdChars[$date] = chr($id & 0xFF) . chr($id >> 8);
-        }
-
-        return [$dateIds, $dates, $dateCount, $dateIdChars];
+        return [$dateIds, $dates, $dateCount];
     }
+
+
 
     private function discoverPaths(string $inputPath, int $fileSize): array
     {
@@ -178,9 +181,10 @@ final class Parser
         string $inputPath,
         int $fileSize,
         array $pathIds,
-        array $dateIdChars,
+        array $dateIds,
         int $pathCount,
-        int $dateCount
+        int $dateCount,
+        array $pathOffsets
     ): array {
         switch ($parallelType) {
             case 'parallel':
@@ -188,18 +192,20 @@ final class Parser
                     $inputPath,
                     $fileSize,
                     $pathIds,
-                    $dateIdChars,
+                    $dateIds,
                     $pathCount,
-                    $dateCount
+                    $dateCount,
+                    $pathOffsets
                 );
             case 'pcntl':
                 return $this->executePcntl(
                     $inputPath,
                     $fileSize,
                     $pathIds,
-                    $dateIdChars,
+                    $dateIds,
                     $pathCount,
-                    $dateCount
+                    $dateCount,
+                    $pathOffsets
                 );
             default:
                 return $this->parseRange(
@@ -207,9 +213,10 @@ final class Parser
                     0,
                     $fileSize,
                     $pathIds,
-                    $dateIdChars,
+                    $dateIds,
                     $pathCount,
-                    $dateCount
+                    $dateCount,
+                    $pathOffsets
                 );
         }
     }
@@ -218,9 +225,10 @@ final class Parser
         string $inputPath,
         int $fileSize,
         array $pathIds,
-        array $dateIdChars,
+        array $dateIds,
         int $pathCount,
-        int $dateCount
+        int $dateCount,
+        array $pathOffsets
     ): array {
         // Calculate boundaries at line boundaries
         $boundaries = $this->calculateBoundaries($inputPath, $fileSize, self::WORKERS);
@@ -238,12 +246,13 @@ final class Parser
                     int $start,
                     int $end,
                     array $pathIds,
-                    array $dateIdChars,
+                    array $dateIds,
                     int $pathCount,
                     int $dateCount,
+                    array $pathOffsets,
                     int $readChunk
                 ): array {
-                    $buckets = array_fill(0, $pathCount, '');
+                    $counts = array_fill(0, $pathCount * $dateCount, 0);
                     $handle = fopen($inputPath, 'rb');
                     stream_set_read_buffer($handle, 0);
                     fseek($handle, $start);
@@ -278,38 +287,44 @@ final class Parser
                         while ($p < $fence) {
                             // Line 1
                             $sep = strpos($chunk, ',', $p);
-                            $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                                .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                            $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                            $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                            $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                             $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                             // Line 2
                             $sep = strpos($chunk, ',', $p);
-                            $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                                .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                            $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                            $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                            $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                             $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                             // Line 3
                             $sep = strpos($chunk, ',', $p);
-                            $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                                .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                            $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                            $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                            $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                             $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                             // Line 4
                             $sep = strpos($chunk, ',', $p);
-                            $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                                .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                            $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                            $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                            $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                             $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                             // Line 5
                             $sep = strpos($chunk, ',', $p);
-                            $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                                .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                            $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                            $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                            $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                             $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                             // Line 6
                             $sep = strpos($chunk, ',', $p);
-                            $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                                .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                            $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                            $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                            $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                             $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
                         }
 
@@ -319,25 +334,14 @@ final class Parser
                             if ($sep === false || $sep >= $lastNl) {
                                 break;
                             }
-                            $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                                .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                            $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                            $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                            $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                             $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
                         }
                     }
 
                     fclose($handle);
-
-                    // Convert buckets to counts
-                    $counts = array_fill(0, $pathCount * $dateCount, 0);
-                    for ($p = 0; $p < $pathCount; $p++) {
-                        if ($buckets[$p] === '') {
-                            continue;
-                        }
-                        $offset = $p * $dateCount;
-                        foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
-                            $counts[$offset + $did] += $count;
-                        }
-                    }
 
                     return $counts;
                 },
@@ -346,9 +350,10 @@ final class Parser
                     $wStart,
                     $wEnd,
                     $pathIds,
-                    $dateIdChars,
+                    $dateIds,
                     $pathCount,
                     $dateCount,
+                    $pathOffsets,
                     self::READ_CHUNK
                 ]
             );
@@ -360,9 +365,10 @@ final class Parser
             $boundaries[self::WORKERS - 1],
             $boundaries[self::WORKERS],
             $pathIds,
-            $dateIdChars,
+            $dateIds,
             $pathCount,
-            $dateCount
+            $dateCount,
+            $pathOffsets
         );
 
         // Merge results from workers
@@ -381,7 +387,7 @@ final class Parser
         string $inputPath,
         int $fileSize,
         array $pathIds,
-        array $dateIdChars,
+        array $dateIds,
         int $pathCount,
         int $dateCount
     ): array {
@@ -406,7 +412,7 @@ final class Parser
                         $boundaries[$i],
                         $boundaries[$i + 1],
                         $pathIds,
-                        $dateIdChars,
+                        $dateIds,
                         $pathCount,
                         $dateCount
                     );
@@ -421,7 +427,7 @@ final class Parser
                     $boundaries[$i],
                     $boundaries[$i + 1],
                     $pathIds,
-                    $dateIdChars,
+                    $dateIds,
                     $pathCount,
                     $dateCount
                 );
@@ -474,11 +480,12 @@ final class Parser
         int $start,
         int $end,
         array $pathIds,
-        array $dateIdChars,
+        array $dateIds,
         int $pathCount,
-        int $dateCount
+        int $dateCount,
+        array $pathOffsets
     ): array {
-        $buckets = array_fill(0, $pathCount, '');
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
@@ -513,38 +520,44 @@ final class Parser
             while ($p < $fence) {
                 // Line 1
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                    .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                 $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                 // Line 2
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                    .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                 $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                 // Line 3
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                    .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                 $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                 // Line 4
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                    .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                 $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                 // Line 5
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                    .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                 $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
 
                 // Line 6
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                    .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                 $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
             }
 
@@ -554,25 +567,14 @@ final class Parser
                 if ($sep === false || $sep >= $lastNl) {
                     break;
                 }
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] 
-                    .= $dateIdChars[substr($chunk, $sep + 3, self::DATE_LENGTH)];
+                $pathId = $pathIds[substr($chunk, $p, $sep - $p)];
+                $dateKey = substr($chunk, $sep + 3, self::DATE_LENGTH);
+                $counts[$pathOffsets[$pathId] + $dateIds[$dateKey]]++;
                 $p = $sep + self::LINE_SUFFIX_LENGTH + self::URI_PREFIX_LENGTH + 1;
             }
         }
 
         fclose($handle);
-
-        // Convert buckets to counts
-        $counts = array_fill(0, $pathCount * $dateCount, 0);
-        for ($p = 0; $p < $pathCount; $p++) {
-            if ($buckets[$p] === '') {
-                continue;
-            }
-            $offset = $p * $dateCount;
-            foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
-                $counts[$offset + $did] += $count;
-            }
-        }
 
         return $counts;
     }
@@ -584,10 +586,6 @@ final class Parser
         array $dates,
         int $dateCount
     ): void {
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576); // 1MB write buffer
-        fwrite($out, '{');
-
         // Pre-compute date prefixes for faster output
         $datePrefixes = [];
         for ($d = 0; $d < $dateCount; $d++) {
@@ -600,6 +598,8 @@ final class Parser
             $escapedPaths[$p] = '"\\/blog\\/' . str_replace('/', '\/', $paths[$p]) . '"';
         }
 
+        // Build output in memory for faster writing
+        $output = "{";
         $firstPath = true;
         for ($p = 0; $p < $pathCount; $p++) {
             $base = $p * $dateCount;
@@ -617,13 +617,17 @@ final class Parser
                 continue;
             }
 
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= $escapedPaths[$p] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
-            fwrite($out, $buf);
+            if ($firstPath) {
+                $output .= "\n    ";
+                $firstPath = false;
+            } else {
+                $output .= ",\n    ";
+            }
+            $output .= $escapedPaths[$p] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
         }
 
-        fwrite($out, "\n}");
-        fclose($out);
+        $output .= "\n}";
+        
+        file_put_contents($outputPath, $output);
     }
 }
