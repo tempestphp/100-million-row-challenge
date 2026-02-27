@@ -147,7 +147,12 @@ final class Parser
             if (function_exists('posix_sysconf')) {
                 $cpuCount = (int) posix_sysconf(POSIX_SC_NPROCESSORS_ONLN);
                 if ($cpuCount > 0) {
-                    $workers = min(16, $cpuCount + 4);
+                    // The challenge runner is an M1 host (8 cores); 10 workers performs better there.
+                    if ($cpuCount <= 8) {
+                        $workers = 10;
+                    } else {
+                        $workers = min(16, $cpuCount + 4);
+                    }
                 }
             }
         }
