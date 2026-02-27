@@ -9,9 +9,9 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
 
-        $inFile = "/mnt/d/php/million-row-challenge/100-million-row-challenge/data/test-data.csv";
+        //$inFile = "/mnt/d/php/million-row-challenge/100-million-row-challenge/data/test-data.csv";
         // $opFile = "/mnt/d/php/million-row-challenge/100-million-row-challenge/data/test-data-op.json";
-        // $inFile = $inputPath;
+        $inFile = $inputPath;
         $opFile = $outputPath;
 
         //$file = new \SplFileObject($inFile, 'r');
