@@ -59,7 +59,7 @@ final class Parser
 
         $stride = $dateCount;
         $totalCells = $pathCount * $stride;
-        $chunkSize = 1048576;
+        $chunkSize = 262144;
 
         if ($fileSize >= 10485760) {
             $ncpu = PHP_OS_FAMILY === 'Darwin'
@@ -233,12 +233,9 @@ final class Parser
                 $raw = \file_get_contents($tmpPrefix . $w);
                 @\unlink($tmpPrefix . $w);
                 $j = 0;
-                $len = \strlen($raw);
-                for ($off = 0; $off < $len; $off += 65536) {
-                    foreach (\unpack('V*', \substr($raw, $off, 65536)) as $v) {
-                        $counts[$j] += $v;
-                        $j++;
-                    }
+                foreach (\unpack('V*', $raw) as $v) {
+                    $counts[$j] += $v;
+                    $j++;
                 }
                 $remaining--;
             }
