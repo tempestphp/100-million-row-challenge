@@ -44,8 +44,10 @@ final class Parser
 {
     private const URL_PREFIX_LENGTH = 25; // https://stitcher.io/blog/
     private const SAMPLE_BYTES = 2_097_152; // 2 MB probe
-    private const READ_CHUNK_BYTES = 2_097_152; // 2 MB chunks
-    private const DEFAULT_WORKERS = 12;
+    private const READ_CHUNK_BYTES = 98_304; // tuned chunk size
+    private const DEFAULT_WORKERS = 14;
+    private const DATE_START_YEAR = 21;
+    private const DATE_END_YEAR = 26;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -175,7 +177,7 @@ final class Parser
             if (function_exists('posix_sysconf')) {
                 $cpuCount = (int) posix_sysconf(POSIX_SC_NPROCESSORS_ONLN);
                 if ($cpuCount > 0) {
-                    $workers = min(12, $cpuCount + 4);
+                    $workers = min(14, $cpuCount + 4);
                 }
             }
         }
@@ -192,7 +194,7 @@ final class Parser
         $override = getenv('PARSER_CHUNK_BYTES');
         if ($override !== false && $override !== '') {
             $bytes = (int) $override;
-            if ($bytes >= 1_048_576) {
+            if ($bytes >= 65_536) {
                 return $bytes;
             }
         }
@@ -206,7 +208,7 @@ final class Parser
         $dateLabels = [];
         $dateCount = 0;
 
-        for ($year = 20; $year <= 26; $year++) {
+        for ($year = self::DATE_START_YEAR; $year <= self::DATE_END_YEAR; $year++) {
             for ($month = 1; $month <= 12; $month++) {
                 $maxDay = match ($month) {
                     2 => ($year % 4 === 0) ? 29 : 28,
@@ -341,40 +343,50 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $position = 0;
-            $fence = $lastNewline - 384;
+            $slugPosition = self::URL_PREFIX_LENGTH;
+            $fence = $lastNewline - 720;
 
-            while ($position < $fence) {
-                $newline = strpos($chunk, "\n", $position + 52);
-                $buckets[$slugIds[substr($chunk, $position + self::URL_PREFIX_LENGTH, $newline - $position - 51)]]
-                    .= $datePacked[substr($chunk, $newline - 23, 8)];
-                $position = $newline + 1;
+            while ($slugPosition < $fence) {
+                $separator = strpos($chunk, ',', $slugPosition);
+                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
+                    .= $datePacked[substr($chunk, $separator + 3, 8)];
+                $slugPosition = $separator + 52;
 
-                $newline = strpos($chunk, "\n", $position + 52);
-                $buckets[$slugIds[substr($chunk, $position + self::URL_PREFIX_LENGTH, $newline - $position - 51)]]
-                    .= $datePacked[substr($chunk, $newline - 23, 8)];
-                $position = $newline + 1;
+                $separator = strpos($chunk, ',', $slugPosition);
+                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
+                    .= $datePacked[substr($chunk, $separator + 3, 8)];
+                $slugPosition = $separator + 52;
 
-                $newline = strpos($chunk, "\n", $position + 52);
-                $buckets[$slugIds[substr($chunk, $position + self::URL_PREFIX_LENGTH, $newline - $position - 51)]]
-                    .= $datePacked[substr($chunk, $newline - 23, 8)];
-                $position = $newline + 1;
+                $separator = strpos($chunk, ',', $slugPosition);
+                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
+                    .= $datePacked[substr($chunk, $separator + 3, 8)];
+                $slugPosition = $separator + 52;
 
-                $newline = strpos($chunk, "\n", $position + 52);
-                $buckets[$slugIds[substr($chunk, $position + self::URL_PREFIX_LENGTH, $newline - $position - 51)]]
-                    .= $datePacked[substr($chunk, $newline - 23, 8)];
-                $position = $newline + 1;
+                $separator = strpos($chunk, ',', $slugPosition);
+                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
+                    .= $datePacked[substr($chunk, $separator + 3, 8)];
+                $slugPosition = $separator + 52;
+
+                $separator = strpos($chunk, ',', $slugPosition);
+                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
+                    .= $datePacked[substr($chunk, $separator + 3, 8)];
+                $slugPosition = $separator + 52;
+
+                $separator = strpos($chunk, ',', $slugPosition);
+                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
+                    .= $datePacked[substr($chunk, $separator + 3, 8)];
+                $slugPosition = $separator + 52;
             }
 
-            while ($position < $lastNewline) {
-                $newline = strpos($chunk, "\n", $position + 52);
-                if ($newline === false) {
+            while ($slugPosition < $lastNewline) {
+                $separator = strpos($chunk, ',', $slugPosition);
+                if ($separator === false) {
                     break;
                 }
 
-                $buckets[$slugIds[substr($chunk, $position + self::URL_PREFIX_LENGTH, $newline - $position - 51)]]
-                    .= $datePacked[substr($chunk, $newline - 23, 8)];
-                $position = $newline + 1;
+                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
+                    .= $datePacked[substr($chunk, $separator + 3, 8)];
+                $slugPosition = $separator + 52;
             }
         }
 
