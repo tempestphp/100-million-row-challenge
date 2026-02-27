@@ -98,18 +98,38 @@ final class Parser
         $order = [];
         $orderCounter = 0;
         $pos = $start;
+        $chunkSize = 16 * 1024 * 1024; // 16MB
 
-        while ($pos < $end && ($line = \stream_get_line($fp, 0, "\n")) !== false) {
-            $pos += \strlen($line) + 1;
-
-            if (!\preg_match('/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/', $line, $matches)) {
-                continue;
+        while ($pos < $end) {
+            $readTo = min($pos + $chunkSize, $end);
+            $bytesToRead = $readTo - $pos;
+            $buffer = fread($fp, $bytesToRead);
+            if ($buffer === false || $buffer === '') {
+                break;
             }
-            $path = $matches[1];
-            $date = $matches[2];
 
-            $order[$path] ??= ++$orderCounter;
-            $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
+            if ($readTo < $end) {
+                $extra = fgets($fp);
+                if ($extra !== false) {
+                    $buffer .= $extra;
+                }
+            }
+
+            $pos += \strlen($buffer);
+
+            if (\preg_match_all('/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/m', $buffer, $matches)) {
+                $paths = $matches[1];
+                $dates = $matches[2];
+                $count = \count($paths);
+
+                for ($i = 0; $i < $count; ++$i) {
+                    $path = $paths[$i];
+                    $date = $dates[$i];
+
+                    $order[$path] ??= ++$orderCounter;
+                    $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
+                }
+            }
         }
 
         fclose($fp);
