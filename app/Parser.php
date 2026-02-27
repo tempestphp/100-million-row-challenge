@@ -50,7 +50,7 @@ final class Parser
         $dateIds = [];
         $dates = [];
         $dateCount = 0;
-        for ($y = 20; $y <= 26; $y++) {
+        for ($y = 21; $y <= 26; $y++) {
             for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
                     2 => $y === 24 ? 29 : 28,
