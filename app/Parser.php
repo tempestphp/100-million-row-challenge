@@ -8,11 +8,13 @@ final class Parser
 {
     private const DEFAULT_READ_CHUNK_SIZE = 262_144;
 
-    private ?int $readChunkSize = null;
+    private ?int $workers = 12;
     private ?array $pathIdByPath = null;
     private ?array $pathLinePrefix = null;
     private ?array $generatedDateKeyByString = null;
     private ?array $generatedDateLinePrefix = null;
+    private ?array $tmpFiles = [];
+    private ?array $tmpHandles = [];
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -20,14 +22,14 @@ final class Parser
         $this->initializePathCache();
         $this->initializeGeneratedDateCache();
 
-        $workers = max(2, (int) (getenv('PARSER_WORKERS') ?: '10'));
+        $this->workers = max(2, (int) (getenv('PARSER_WORKERS') ?: '12'));
 
-        $this->parseParallel($inputPath, $outputPath, $workers);
+        $this->parseParallel($inputPath, $outputPath);
     }
 
-    private function parseParallel(string $inputPath, string $outputPath, int $workers): void
+    private function parseParallel(string $inputPath, string $outputPath): void
     {
-        $ranges = $this->splitInputRanges($inputPath, $workers);
+        $ranges = $this->splitInputRanges($inputPath, $this->workers);
 
         if (count($ranges) <= 1) {
             $this->parseSingleRange($inputPath, $outputPath);
@@ -35,14 +37,14 @@ final class Parser
             return;
         }
 
-        $tmpFiles = [];
-        $tmpHandles = [];
+        // $tmpFiles = [];
+        // $tmpHandles = [];
         $pids = [];
 
         foreach ($ranges as $index => &$range) {
             $tmpFile = tempnam(sys_get_temp_dir(), "parser_worker_{$index}_");
-            $tmpFiles[] = $tmpFile;
-            $tmpHandles[] = fopen($tmpFile, 'w+');
+            $this->tmpFiles[] = $tmpFile;
+            $this->tmpHandles[] = fopen($tmpFile, 'w+');
         }
 
         foreach ($ranges as $index => &$range) {
@@ -50,7 +52,7 @@ final class Parser
 
             if ($pid === 0) {
                 try {
-                    $this->parseRange($inputPath, $range['start'], $range['end'], $tmpHandles[$index]);
+                    $this->parseRange($inputPath, $range['start'], $range['end'], $index);
                     exit(0);
                 } catch (\Throwable $e) {
                     fwrite(STDERR, "[parser-worker-error] {$e->getMessage()}\n");
@@ -65,14 +67,14 @@ final class Parser
             pcntl_waitpid($pid, $status);
         }
 
-        $this->mergeAndWriteOutput($tmpHandles, $outputPath);
+        $this->mergeAndWriteOutput($outputPath);
     }
 
     private function parseSingleRange(string $inputPath, string $outputPath): void
     {
         $fileSize = filesize($inputPath);
 
-        $countsByPath = $this->parseRange($inputPath, 0, $fileSize);
+        $countsByPath = $this->parseRange($inputPath, 0, $fileSize, $this->tmpHandles[0]);
 
         $this->buildVisitsAndWriteOutput($countsByPath, $outputPath);
     }
@@ -165,121 +167,73 @@ final class Parser
     /**
      * @return ($tmpFile is null ? array<int, array<int, int>> : void)
      */
-    private function parseRange(string $inputPath, int $start, int $end, $tmpHandle): void
+    private function parseRange(string $inputPath, int $start, int $end, $index): void
     {
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 0);
         fseek($input, $start);
 
-        $countsByPath = [];
+
         $pathIdByPath = &$this->pathIdByPath;
+        $countsByPath = [];
         $dateKeyByString = &$this->generatedDateKeyByString;
         $buffer = '';
-        $bufferOffset = 0;
+        $lineStart = $bufferOffset = 0;
         $chunkSize = max(65_536, min(16_777_216, (int) (getenv('PARSER_READ_CHUNK_SIZE') ?: self::DEFAULT_READ_CHUNK_SIZE)));
         $remaining = $end - $start;
 
         while ($remaining > 0) {
+            $bufferOffset = $lineStart;
             if ($bufferOffset > 0) {
                 $buffer = substr($buffer, $bufferOffset);
                 $bufferOffset = 0;
             }
 
-            $chunk = fread($input, $remaining > $chunkSize ? $chunkSize : $remaining);
+            $buffer .= $chunk = fread($input, $remaining > $chunkSize ? $chunkSize : $remaining);
 
-            if ($chunk === '' || $chunk === false) {
+            if ($chunk === false) {
+
                 break;
             }
 
             $remaining -= $chunkSize;
-            $buffer .= $chunk;
             $lineStart = 0;
 
             while (($newlinePos = strpos($buffer, "\n", $lineStart)) !== false) {
                 $row = &$countsByPath[$pathIdByPath[substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51)]];
                 $dateKey = $dateKeyByString[substr($buffer, $newlinePos - 22, 7)];
-
-                $row[$dateKey] = ($row[$dateKey] ?? 0) + 1;
-
                 $lineStart = $newlinePos + 1;
+                $row[$dateKey] = ($row[$dateKey] ?? 0) + 1;
             }
-
-            $bufferOffset = $lineStart;
         }
 
         fclose($input);
-        fwrite($tmpHandle, serialize($countsByPath));
-        fclose($tmpHandle);
+        fwrite($this->tmpHandles[$index], serialize($countsByPath));
+        fclose($this->tmpHandles[$index]);
+
     }
 
-    private function mergeAndWriteOutput(array $tmpFiles, string $outputPath): void
+    private function mergeAndWriteOutput(string $outputPath): void
     {
+        $startTime = microtime(true);
         set_error_handler(fn () => true);
         $file = fopen($outputPath, 'w');
         stream_set_write_buffer($file, 0);
 
-        // $f0 = fopen($tmpFiles[0], 'r');
-        // $f1 = fopen($tmpFiles[1], 'r');
-        // $f2 = fopen($tmpFiles[2], 'r');
-        // $f3 = fopen($tmpFiles[3], 'r');
-        // $f4 = fopen($tmpFiles[4], 'r');
-        // $f5 = fopen($tmpFiles[5], 'r');
-        // $f6 = fopen($tmpFiles[6], 'r');
-        // $f7 = fopen($tmpFiles[7], 'r');
-        // $f8 = fopen($tmpFiles[8], 'r');
-        // $f9 = fopen($tmpFiles[9], 'r');
-        // // Load all worker results upfront
-        // $allWorkerResults = [
-        //     unserialize(fread($f0, filesize($tmpFiles[0]))),
-        //     unserialize(fread($f1, filesize($tmpFiles[1]))),
-        //     unserialize(fread($f2, filesize($tmpFiles[2]))),
-        //     unserialize(fread($f3, filesize($tmpFiles[3]))),
-        //     unserialize(fread($f4, filesize($tmpFiles[4]))),
-        //     unserialize(fread($f5, filesize($tmpFiles[5]))),
-        //     unserialize(fread($f6, filesize($tmpFiles[6]))),
-        //     unserialize(fread($f7, filesize($tmpFiles[7]))),
-        //     unserialize(fread($f8, filesize($tmpFiles[8]))),
-        //     unserialize(fread($f9, filesize($tmpFiles[9]))),
-        // ];
-        // fclose($f0);
-        // fclose($f1);
-        // fclose($f2);
-        // fclose($f3);
-        // fclose($f4);
-        // fclose($f5);
-        // fclose($f6);
-        // fclose($f7);
-        // fclose($f8);
-        // fclose($f9);
-        for($i = 0; $i < 10; $i++) {
-            $tmpFile = $tmpFiles[$i];
-            $f = fopen($tmpFile, 'r');
-            $allWorkerResults[] = unserialize(fread($f, filesize($tmpFile)));
-            fclose($f);
-            // unlink($tmpFile);
+        $pathIds = [];
+        for($i = 0; $i < $this->workers; $i++) {
+            $pathIds += $allWorkerResults[] = unserialize(file_get_contents($this->tmpFiles[$i]));
+            unlink($this->tmpFiles[$i]);
         }
-        // foreach ($tmpFiles as $tmpFile) {
-        //     $allWorkerResults[] = unserialize(file_get_contents($tmpFile));
-        // //     // unlink($tmpFile);
-        // }
 
         // Collect all unique pathIds — array + union on pathId-keyed arrays
-        $pathIds = $allWorkerResults[0] + $allWorkerResults[1] + $allWorkerResults[2] + $allWorkerResults[3] + $allWorkerResults[4] + $allWorkerResults[5] + $allWorkerResults[6] + $allWorkerResults[7] + $allWorkerResults[8] + $allWorkerResults[9];
+        // $pathIds = $allWorkerResults[0] + $allWorkerResults[1] + $allWorkerResults[2] + $allWorkerResults[3] + $allWorkerResults[4] + $allWorkerResults[5] + $allWorkerResults[6] + $allWorkerResults[7] + $allWorkerResults[8] + $allWorkerResults[9];
 
         $dateLinePrefix = &$this->generatedDateLinePrefix;
         $pathLinePrefix = &$this->pathLinePrefix;
         $pathCount = count($pathIds);
 
         $w0_results = &$allWorkerResults[0];
-        // $w1_results = &$allWorkerResults[1];
-        // $w2_results = &$allWorkerResults[2];
-        // $w3_results = &$allWorkerResults[3];
-        // $w4_results = &$allWorkerResults[4];
-        // $w5_results = &$allWorkerResults[5];
-        // $w6_results = &$allWorkerResults[6];
-        // $w7_results = &$allWorkerResults[7];
-        // $w8_results = &$allWorkerResults[8];
-        // $w9_results = &$allWorkerResults[9];
         fwrite($file, '{' . PHP_EOL);
         // $buffer = '{' . PHP_EOL;
         // Single loop: for each path, merge all workers, sort, write
@@ -291,33 +245,6 @@ final class Parser
                     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
                 }
             }
-            // foreach ($w1_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w2_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w3_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w4_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w5_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w6_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w7_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w8_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
-            // foreach ($w9_results[$pathId] as $dateKey => $count) {
-            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-            // }
 
             ksort($dateCounts, SORT_NUMERIC);
 
@@ -336,6 +263,9 @@ final class Parser
 
         fwrite($file, '}');
         fclose($file);
+        $endTime = microtime(true);
+        $executionTime = $endTime - $startTime;
+        echo "mergeAndWriteOutput time: $executionTime seconds" . PHP_EOL;
     }
 
     private function buildVisitsAndWriteOutput(array $countsByPath, string $outputPath): void
@@ -412,7 +342,7 @@ final class Parser
             );
 
             $dateKeyByString[$shortDate] = $dateKey;
-            $dateLinePrefix[$dateKey] = '        "202' . $shortDate . '": ';
+            $dateLinePrefix[$dateKey] = '        "20' . $dateString . '": ';
         }
 
         $this->generatedDateKeyByString = $dateKeyByString;
