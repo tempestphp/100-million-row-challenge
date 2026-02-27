@@ -4,7 +4,7 @@ namespace App;
 
 final class Parser
 {
-    private const int NUM_WORKERS = 1;
+    private const int NUM_WORKERS = 8;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -36,7 +36,7 @@ final class Parser
         }
         fclose($fp);
 
-        $tempDir = sys_get_temp_dir() . '/php_parser_' . getmypid();
+        $tempDir = (is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir()) . '/php_parser_' . getmypid();
         @mkdir($tempDir, 0777, true);
 
         $pids = [];
@@ -101,14 +101,13 @@ final class Parser
         while ($pos < $end && ($line = \stream_get_line($fp, 0, "\n")) !== false) {
             $pos += \strlen($line) + 1;
 
-            $commaPos = \strpos($line, ",", 20);
-            if ($commaPos === false)
+            if (!\preg_match('/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/', $line, $matches)) {
                 continue;
+            }
+            $path = $matches[1];
+            $date = $matches[2];
 
-            $path = \substr($line, 19, $commaPos - 19);
-            $date = \substr($line, $commaPos + 1, 10);
-
-            $order[$path] ??= $orderCounter++;
+            $order[$path] ??= ++$orderCounter;
             $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
         }
 
@@ -116,7 +115,7 @@ final class Parser
 
         // Pre-sort dates in worker so parent doesn't have to
         foreach ($result as &$dates) {
-            ksort($dates);
+            ksort($dates, SORT_STRING);
         }
         unset($dates);
 
@@ -126,11 +125,11 @@ final class Parser
     private function writeOutput(array $result, array $order, string $outputPath): void
     {
         // Sort paths by first-appearance order
-        asort($order);
+        asort($order, SORT_NUMERIC);
 
         // Build ordered result (dates already sorted by workers)
         $ordered = [];
-        foreach ($order as $path => $_) {
+        foreach (array_keys($order) as $path) {
             if (isset($result[$path]))
                 $ordered[$path] = $result[$path];
         }
