@@ -1,25 +1,5 @@
 # 100-Million-Row Challenge — Project Guide
 
-# Important!
-
-When implementing changes or presenting a finalized plan for implementation, do not edit files directly. Instead, generate a single `changeset.yml` changeset file using the PXP format.
-
-Format:
-  name: Changeset short description
-  steps:
-    - name: Step short description
-      run: shell commands for dependencies, tooling, verification
-    - name: Step short description
-      patch: | unified diffs for code changes
-
-Rules:
-- Steps execute sequentially: `run` for shell commands, `patch` for unified diffs
-- Patches use standard unified diff format, paths relative to project root
-- Minimum 3 context lines per hunk
-- Multiple files can be included in a single patch step
-- The changeset is applied with: ./pxp.sh changeset.yml
-- Avoid blank context lines: anchor hunks on non-blank lines only. Represent blank lines in the diff as explicit `+` additions, never as context.
-
 ## Overview
 
 A PHP performance competition to parse 100 million CSV rows of page visits into a JSON file as fast as possible.
