@@ -12,6 +12,7 @@ use function array_fill;
 use function array_search;
 use function array_values;
 use function chr;
+use function class_exists;
 use function count;
 use function fclose;
 use function feof;
@@ -140,95 +141,216 @@ final class Parser
 
         $numChunks = count($bounds) - 1;
 
-        // ─── Fork children with socket pairs for IPC ───
+        // ─── Dispatch workers ───
 
-        $pipes = [];
-        $childPids = [];
+        if (class_exists('parallel\\Runtime')) {
+            // ═══ ext-parallel path (thread-based, zero-copy IPC) ═══
+            $futures = [];
 
-        for ($w = 0; $w < $numChunks; $w++) {
-            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            $pid = pcntl_fork();
+            for ($w = 0; $w < $numChunks - 1; $w++) {
+                $runtime = new \parallel\Runtime();
+                $futures[] = $runtime->run(static function (
+                    string $path, int $from, int $until,
+                    array $slugIndex, array $dateChars, int $numSlugs, int $numDates,
+                ): string {
+                    $buckets = array_fill(0, $numSlugs, '');
+                    $fh = fopen($path, 'rb');
+                    stream_set_read_buffer($fh, 0);
+                    fseek($fh, $from);
 
-            if ($pid === 0) {
-                fclose($pair[0]);
-                $result = $this->crunch(
-                    $inputPath, $bounds[$w], $bounds[$w + 1],
-                    $slugIndex, $dateChars, $numSlugs, $numDates,
-                );
-                $v16 = max($result) <= 65535;
-                fwrite($pair[1], $v16 ? "\x00" : "\x01");
-                $fmt = $v16 ? 'v*' : 'V*';
-                foreach (array_chunk($result, 8192) as $batch) {
-                    fwrite($pair[1], pack($fmt, ...$batch));
-                }
-                fclose($pair[1]);
-                exit(0);
-            }
+                    $remaining = $until - $from;
+                    $bufSize = 163_840;
 
-            fclose($pair[1]);
-            $pipes[$w] = $pair[0];
-            $childPids[] = $pid;
-        }
+                    while ($remaining > 0) {
+                        $raw = fread($fh, $remaining > $bufSize ? $bufSize : $remaining);
+                        $len = strlen($raw);
+                        if ($len === 0) {
+                            break;
+                        }
+                        $remaining -= $len;
 
-        // Parent only merges — all chunks handled by children
-        $tally = array_fill(0, $numSlugs * $numDates, 0);
+                        $end = strrpos($raw, "\n");
+                        if ($end === false) {
+                            break;
+                        }
 
-        // ─── Merge child results via stream_select (concurrent drain) ───
+                        $tail = $len - $end - 1;
+                        if ($tail > 0) {
+                            fseek($fh, -$tail, SEEK_CUR);
+                            $remaining += $tail;
+                        }
 
-        $buffers = [];
-        $open = [];
-        foreach ($pipes as $k => $pipe) {
-            stream_set_blocking($pipe, false);
-            $buffers[$k] = '';
-            $open[$k] = $pipe;
-        }
+                        $p = 25;
+                        $fence = $end - 720;
 
-        $stallCount = 0;
-        while ($open) {
-            $read = array_values($open);
-            $w = null;
-            $e = null;
-            $ready = stream_select($read, $w, $e, 5);
+                        while ($p < $fence) {
+                            $sep = strpos($raw, ',', $p);
+                            $buckets[$slugIndex[substr($raw, $p, $sep - $p)]] .= $dateChars[substr($raw, $sep + 3, 8)];
+                            $p = $sep + 52;
 
-            if ($ready === 0) {
-                if (++$stallCount > 6) {
-                    break;
-                }
-                continue;
-            }
-            $stallCount = 0;
+                            $sep = strpos($raw, ',', $p);
+                            $buckets[$slugIndex[substr($raw, $p, $sep - $p)]] .= $dateChars[substr($raw, $sep + 3, 8)];
+                            $p = $sep + 52;
 
-            foreach ($read as $pipe) {
-                $k = array_search($pipe, $open, true);
-                $data = fread($pipe, 131072);
-                if ($data !== '' && $data !== false) {
-                    $buffers[$k] .= $data;
-                }
-                if (feof($pipe)) {
-                    $raw = $buffers[$k];
-                    fclose($pipe);
-                    unset($open[$k], $buffers[$k]);
+                            $sep = strpos($raw, ',', $p);
+                            $buckets[$slugIndex[substr($raw, $p, $sep - $p)]] .= $dateChars[substr($raw, $sep + 3, 8)];
+                            $p = $sep + 52;
 
-                    if ($raw === '') {
-                        continue;
+                            $sep = strpos($raw, ',', $p);
+                            $buckets[$slugIndex[substr($raw, $p, $sep - $p)]] .= $dateChars[substr($raw, $sep + 3, 8)];
+                            $p = $sep + 52;
+
+                            $sep = strpos($raw, ',', $p);
+                            $buckets[$slugIndex[substr($raw, $p, $sep - $p)]] .= $dateChars[substr($raw, $sep + 3, 8)];
+                            $p = $sep + 52;
+
+                            $sep = strpos($raw, ',', $p);
+                            $buckets[$slugIndex[substr($raw, $p, $sep - $p)]] .= $dateChars[substr($raw, $sep + 3, 8)];
+                            $p = $sep + 52;
+                        }
+
+                        while ($p < $end) {
+                            $sep = strpos($raw, ',', $p);
+                            if ($sep === false || $sep >= $end) {
+                                break;
+                            }
+                            $buckets[$slugIndex[substr($raw, $p, $sep - $p)]] .= $dateChars[substr($raw, $sep + 3, 8)];
+                            $p = $sep + 52;
+                        }
                     }
 
-                    $rawLen = strlen($raw);
-                    $isV16 = ord($raw[0]) === 0;
-                    $fmt = $isV16 ? 'v*' : 'V*';
-                    $step = $isV16 ? 16384 : 32768;
-                    $j = 0;
-                    for ($off = 1; $off < $rawLen; $off += $step) {
-                        foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
-                            $tally[$j++] += $v;
+                    fclose($fh);
+
+                    $counts = array_fill(0, $numSlugs * $numDates, 0);
+                    for ($s = 0; $s < $numSlugs; $s++) {
+                        if ($buckets[$s] === '') {
+                            continue;
+                        }
+                        $base = $s * $numDates;
+                        foreach (array_count_values(unpack('v*', $buckets[$s])) as $dateId => $count) {
+                            $counts[$base + $dateId] += $count;
+                        }
+                    }
+
+                    return pack('V*', ...$counts);
+                }, [$inputPath, $bounds[$w], $bounds[$w + 1], $slugIndex, $dateChars, $numSlugs, $numDates]);
+            }
+
+            // Parent crunches last chunk
+            $tally = $this->crunch(
+                $inputPath, $bounds[$numChunks - 1], $bounds[$numChunks],
+                $slugIndex, $dateChars, $numSlugs, $numDates,
+            );
+
+            // Collect futures
+            $totalElements = $numSlugs * $numDates;
+            $step = 32768;
+            foreach ($futures as $future) {
+                $raw = $future->value();
+                $rawLen = strlen($raw);
+                $j = 0;
+                for ($off = 0; $off < $rawLen; $off += $step) {
+                    foreach (unpack('V*', substr($raw, $off, $step)) as $v) {
+                        $tally[$j++] += $v;
+                    }
+                }
+            }
+        } else {
+            // ═══ pcntl_fork fallback (pipe + stream_select) ═══
+            $pipes = [];
+            $childPids = [];
+
+            for ($w = 0; $w < $numChunks - 1; $w++) {
+                $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+                $pid = pcntl_fork();
+
+                if ($pid === 0) {
+                    fclose($pair[0]);
+                    $result = $this->crunch(
+                        $inputPath, $bounds[$w], $bounds[$w + 1],
+                        $slugIndex, $dateChars, $numSlugs, $numDates,
+                    );
+                    $v16 = max($result) <= 65535;
+                    fwrite($pair[1], $v16 ? "\x00" : "\x01");
+                    $fmt = $v16 ? 'v*' : 'V*';
+                    foreach (array_chunk($result, 8192) as $batch) {
+                        fwrite($pair[1], pack($fmt, ...$batch));
+                    }
+                    fclose($pair[1]);
+                    exit(0);
+                }
+
+                fclose($pair[1]);
+                $pipes[$w] = $pair[0];
+                $childPids[] = $pid;
+            }
+
+            // Parent crunches last chunk (children get a head start)
+            $tally = $this->crunch(
+                $inputPath, $bounds[$numChunks - 1], $bounds[$numChunks],
+                $slugIndex, $dateChars, $numSlugs, $numDates,
+            );
+
+            // Merge child results via stream_select (concurrent drain)
+            $buffers = [];
+            $open = [];
+            $pipeIndex = [];
+            foreach ($pipes as $k => $pipe) {
+                stream_set_blocking($pipe, false);
+                $buffers[$k] = '';
+                $rid = (int) $pipe;
+                $open[$rid] = $pipe;
+                $pipeIndex[$rid] = $k;
+            }
+
+            $stallCount = 0;
+            while ($open) {
+                $read = array_values($open);
+                $w = null;
+                $e = null;
+                $ready = stream_select($read, $w, $e, 5);
+
+                if ($ready === 0) {
+                    if (++$stallCount > 6) {
+                        break;
+                    }
+                    continue;
+                }
+                $stallCount = 0;
+
+                foreach ($read as $pipe) {
+                    $rid = (int) $pipe;
+                    $k = $pipeIndex[$rid];
+                    $data = fread($pipe, 131072);
+                    if ($data !== '' && $data !== false) {
+                        $buffers[$k] .= $data;
+                    }
+                    if (feof($pipe)) {
+                        $raw = $buffers[$k];
+                        fclose($pipe);
+                        unset($open[$rid], $pipeIndex[$rid], $buffers[$k]);
+
+                        if ($raw === '') {
+                            continue;
+                        }
+
+                        $rawLen = strlen($raw);
+                        $isV16 = ord($raw[0]) === 0;
+                        $fmt = $isV16 ? 'v*' : 'V*';
+                        $step = $isV16 ? 16384 : 32768;
+                        $j = 0;
+                        for ($off = 1; $off < $rawLen; $off += $step) {
+                            foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
+                                $tally[$j++] += $v;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        foreach ($childPids as $pid) {
-            pcntl_waitpid($pid, $status);
+            foreach ($childPids as $pid) {
+                pcntl_waitpid($pid, $status);
+            }
         }
 
         // ─── Emit JSON ───
