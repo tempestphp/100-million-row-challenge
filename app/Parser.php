@@ -10,6 +10,8 @@ final class Parser
 
         $handle = fopen($inputPath, 'r');
         $outputData = [];
+
+        // tried various alternatives to reading from the file, but none were any faster
         while ($row = fgets($handle)) {
             $rowLen = strlen($row);
 
@@ -25,6 +27,9 @@ final class Parser
             // variously attempted to pre-sort on insertion but not worth the time spent when the arrays are small, and ksort has some clear optimisations built in I can't improve on
             ksort($data);
         }
+
+//        $mem = round(memory_get_peak_usage() / (1024 * 1024), 1);
+//        echo "mem used: {$mem} MiB\n";
 
         file_put_contents($outputPath, json_encode($outputData, JSON_PRETTY_PRINT));
     }
