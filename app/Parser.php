@@ -36,17 +36,22 @@ final class Parser
         }
 
         $tmpFiles = [];
+        $tmpHandles = [];
         $pids = [];
 
         foreach ($ranges as $index => &$range) {
-            $tmpFile = tempnam(sys_get_temp_dir(), "parser_worker_{$index}_");
-
+            // $tmpFile = tempnam(sys_get_temp_dir(), "parser_worker_{$index}_");
+            $tmpFile = sys_get_temp_dir() . "/parser_worker_{$index}_";
             $tmpFiles[] = $tmpFile;
+            $tmpHandles[] = fopen($tmpFile, 'w+');
+        }
+
+        foreach ($ranges as $index => &$range) {
             $pid = pcntl_fork();
 
             if ($pid === 0) {
                 try {
-                    $this->parseRange($inputPath, $range['start'], $range['end'], $tmpFile, $index);
+                    $this->parseRange($inputPath, $range['start'], $range['end'], $tmpHandles[$index]);
                     exit(0);
                 } catch (\Throwable $e) {
                     fwrite(STDERR, "[parser-worker-error] {$e->getMessage()}\n");
@@ -61,7 +66,7 @@ final class Parser
             pcntl_waitpid($pid, $status);
         }
 
-        $this->mergeAndWriteOutput($tmpFiles, $outputPath);
+        $this->mergeAndWriteOutput($tmpHandles, $outputPath);
     }
 
     private function parseSingleRange(string $inputPath, string $outputPath): void
@@ -161,7 +166,7 @@ final class Parser
     /**
      * @return ($tmpFile is null ? array<int, array<int, int>> : void)
      */
-    private function parseRange(string $inputPath, int $start, int $end, ?string $tmpFile = null, int $workerIndex = -1): void
+    private function parseRange(string $inputPath, int $start, int $end, $tmpHandle): void
     {
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 0);
@@ -204,30 +209,23 @@ final class Parser
         }
 
         fclose($input);
-        file_put_contents($tmpFile, serialize($countsByPath));
+        fwrite($tmpHandle, serialize($countsByPath));
+        fclose($tmpHandle);
     }
 
-    private function mergeAndWriteOutput(array $tmpFiles, string $outputPath): void
+    private function mergeAndWriteOutput(array $tmpHandles, string $outputPath): void
     {
         set_error_handler(fn () => true);
         $file = fopen($outputPath, 'w');
         stream_set_write_buffer($file, 0);
-        // Load all worker results upfront
-        // $allWorkerResults = [
-        //     0 => unserialize(file_get_contents($tmpFiles[0])),
-        //     1 => unserialize(file_get_contents($tmpFiles[1])),
-        //     2 => unserialize(file_get_contents($tmpFiles[2])),
-        //     3 => unserialize(file_get_contents($tmpFiles[3])),
-        //     4 => unserialize(file_get_contents($tmpFiles[4])),
-        //     5 => unserialize(file_get_contents($tmpFiles[5])),
-        //     6 => unserialize(file_get_contents($tmpFiles[6])),
-        //     7 => unserialize(file_get_contents($tmpFiles[7])),
-        //     8 => unserialize(file_get_contents($tmpFiles[8])),
-        //     9 => unserialize(file_get_contents($tmpFiles[9])),
-        // ];
-        foreach ($tmpFiles as $tmpFile) {
-            $allWorkerResults[] = unserialize(file_get_contents($tmpFile));
-        //     // unlink($tmpFile);
+
+        for ($i = 0; $i < 10; $i++) {
+            $h = $tmpHandles[$i];
+            stream_set_read_buffer($h, 0);
+            $stat = fstat($h);
+            rewind($h);
+            $allWorkerResults[] = unserialize(fread($h, $stat['size']));
+            fclose($h);
         }
 
         // Collect all unique pathIds — array + union on pathId-keyed arrays
