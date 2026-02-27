@@ -8,7 +8,7 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        $children = 2;
+        $children = 8;
         $fstat = stat($inputPath);
         $size = $fstat['size'];
         $childSize = round($size / ($children));
