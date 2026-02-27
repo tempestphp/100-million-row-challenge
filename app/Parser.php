@@ -45,9 +45,81 @@ final class Parser
             foreach ($this->getChunk() as $chunk) {
                 preg_match_all(";^https://stitcher.io(/[^,]+),(.{10});m", $chunk, $matches);
                 $matchCount = count($matches[1]);
-                for ($key = 0; $key < $matchCount; $key++) {
+                for ($key = 0; $key < $matchCount; $key+= 5) {
                     $path = $matches[1][$key];
                     $date = $matches[2][$key];
+
+                    if (!isset($toEncode[$path])) {
+                        $toEncode[$path] = [$date => 0];
+                    }
+                    if (!isset($toEncode[$path][$date])) {
+                        $toEncode[$path][$date] = 0;
+                    }
+
+                    $toEncode[$path][$date]++;
+
+                    // =================================================================================================
+
+                    if (!isset($matches[1][$key+1])) {
+                        break;
+                    }
+
+                    $path = $matches[1][$key+1];
+                    $date = $matches[2][$key+1];
+
+                    if (!isset($toEncode[$path])) {
+                        $toEncode[$path] = [$date => 0];
+                    }
+                    if (!isset($toEncode[$path][$date])) {
+                        $toEncode[$path][$date] = 0;
+                    }
+
+                    $toEncode[$path][$date]++;
+
+                    // =================================================================================================
+
+                    if (!isset($matches[1][$key+2])) {
+                        break;
+                    }
+
+                    $path = $matches[1][$key+2];
+                    $date = $matches[2][$key+2];
+
+                    if (!isset($toEncode[$path])) {
+                        $toEncode[$path] = [$date => 0];
+                    }
+                    if (!isset($toEncode[$path][$date])) {
+                        $toEncode[$path][$date] = 0;
+                    }
+
+                    $toEncode[$path][$date]++;
+
+                    // =================================================================================================
+
+                    if (!isset($matches[1][$key+3])) {
+                        break;
+                    }
+
+                    $path = $matches[1][$key+3];
+                    $date = $matches[2][$key+3];
+
+                    if (!isset($toEncode[$path])) {
+                        $toEncode[$path] = [$date => 0];
+                    }
+                    if (!isset($toEncode[$path][$date])) {
+                        $toEncode[$path][$date] = 0;
+                    }
+
+                    $toEncode[$path][$date]++;
+
+                    // =================================================================================================
+
+                    if (!isset($matches[1][$key+4])) {
+                        break;
+                    }
+
+                    $path = $matches[1][$key+4];
+                    $date = $matches[2][$key+4];
 
                     if (!isset($toEncode[$path])) {
                         $toEncode[$path] = [$date => 0];
