@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App;
 
 use App\Commands\Visit;
@@ -9,7 +11,7 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
-        //ini_set('memory_limit', '-1');
+        ini_set('memory_limit', '-1');
 
         $fileSize = filesize($inputPath);
         $workers = $this->getCpuCount();
@@ -24,13 +26,13 @@ final class Parser
         $scanPos = 0;
         $scanEnd = strrpos($scanBuf, "\n") ?: strlen($scanBuf);
         while ($scanPos < $scanEnd) {
-            $scanNl = strpos($scanBuf, "\n", $scanPos + 52);
-            if ($scanNl === false) break;
-            $century = substr($scanBuf, $scanNl - 25, 2);
-            $yy = (int)substr($scanBuf, $scanNl - 23, 2);
+            $c = strpos($scanBuf, ",", $scanPos + 29);
+            if ($c === false) break;
+            $century = substr($scanBuf, $c + 1, 2);
+            $yy = (int)substr($scanBuf, $c + 3, 2);
             if ($yy < $minYear) $minYear = $yy;
             if ($yy > $maxYear) $maxYear = $yy;
-            $scanPos = $scanNl + 1;
+            $scanPos = $c + 27;
         }
         unset($scanBuf);
 
@@ -76,19 +78,19 @@ final class Parser
         $slugLabels = [];
         $numSlugs = 0;
 
-        $sampleEnd = strrpos($sample, "\n");
+        $sampleEnd = strrpos($sample, "\n") ?: strlen($sample);
         $sp = 0;
 
         while ($sp < $sampleEnd) {
-            $nl = strpos($sample, "\n", $sp + 52);
-            if ($nl === false) break;
-            $slug = substr($sample, $sp + 25, $nl - $sp - 51);
+            $c = strpos($sample, ",", $sp + 29);
+            if ($c === false) break;
+            $slug = substr($sample, $sp + 25, $c - $sp - 25);
             if (!isset($slugIndex[$slug])) {
                 $slugIndex[$slug] = $numSlugs;
                 $slugLabels[$numSlugs] = $slug;
                 $numSlugs++;
             }
-            $sp = $nl + 1;
+            $sp = $c + 27;
         }
         unset($sample);
 
@@ -113,52 +115,90 @@ final class Parser
 
         $numChunks = count($bounds) - 1;
 
-        $tmpDir = sys_get_temp_dir();
-        $myPid = getmypid();
-        $childMap = [];
+        $pipes = [];
+        $childPids = [];
 
         for ($w = 0; $w < $numChunks - 1; $w++) {
-            $tmpFile = $tmpDir . '/p_' . $myPid . '_' . $w;
+            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             $pid = pcntl_fork();
 
             if ($pid === 0) {
-                $result = $this->crunch(
+                fclose($pair[0]);
+                $buckets = $this->crunch(
                     $inputPath, $bounds[$w], $bounds[$w + 1],
-                    $slugIndex, $dateChars, $numSlugs, $numDates,
+                    $slugIndex, $dateChars, $numSlugs,
                 );
-                $wfh = fopen($tmpFile, 'wb');
-                fwrite($wfh, pack('V*', ...$result));
-                fclose($wfh);
+
+                // Convert buckets to (slugId, dateId, count) tuples
+                $entries = [];
+                for ($s = 0; $s < $numSlugs; $s++) {
+                    if ($buckets[$s] === '') continue;
+                    $dateCounts = array_count_values(unpack('v*', $buckets[$s]));
+                    foreach ($dateCounts as $dateId => $count) {
+                        $entries[] = $s;
+                        $entries[] = $dateId;
+                        $entries[] = $count;
+                    }
+                }
+                $buckets = null;
+
+                $blob = pack('V*', ...$entries);
+                $entries = null;
+
+                $written = 0;
+                $blobLen = strlen($blob);
+                while ($written < $blobLen) {
+                    $chunk = fwrite($pair[1], substr($blob, $written, 1_048_576));
+                    if ($chunk === false || $chunk === 0) break;
+                    $written += $chunk;
+                }
+                fclose($pair[1]);
                 exit(0);
             }
 
-            $childMap[$pid] = $tmpFile;
+            fclose($pair[1]);
+            $pipes[$pid] = $pair[0];
+            $childPids[] = $pid;
         }
 
-        $tally = $this->crunch(
+        $buckets = $this->crunch(
             $inputPath, $bounds[$numChunks - 1], $bounds[$numChunks],
-            $slugIndex, $dateChars, $numSlugs, $numDates,
+            $slugIndex, $dateChars, $numSlugs,
         );
 
-        $pending = count($childMap);
-        while ($pending > 0) {
-            $pid = pcntl_wait($status);
-            if (isset($childMap[$pid])) {
-                $j = 0;
-                foreach (unpack('V*', file_get_contents($childMap[$pid])) as $v) {
-                    $tally[$j++] += $v;
+        $result = array_fill(0, $numSlugs, []);
+        for ($s = 0; $s < $numSlugs; $s++) {
+            if ($buckets[$s] === '') continue;
+            $result[$s] = array_count_values(unpack('v*', $buckets[$s]));
+        }
+        $buckets = null;
+
+        foreach ($childPids as $pid) {
+            $blob = stream_get_contents($pipes[$pid]);
+            fclose($pipes[$pid]);
+
+            $vals = unpack('V*', $blob);
+            $n = count($vals);
+            for ($i = 1; $i <= $n; $i += 3) {
+                $s = $vals[$i];
+                $d = $vals[$i + 1];
+                if (isset($result[$s][$d])) {
+                    $result[$s][$d] += $vals[$i + 2];
+                } else {
+                    $result[$s][$d] = $vals[$i + 2];
                 }
-                unlink($childMap[$pid]);
-                $pending--;
             }
+            unset($blob, $vals);
         }
 
-        $this->writeJson($tally, $numSlugs, $numDates, $slugLabels, $dateLabels, $outputPath);
+        while (pcntl_wait($status) > 0) {}
+
+        $this->writeJson($result, $numSlugs, $numDates, $slugLabels, $dateLabels, $outputPath);
     }
 
     private function crunch(
         string $path, int $from, int $until,
-        array $slugIndex, array $dateChars, int $numSlugs, int $numDates,
+        array $slugIndex, array $dateChars, int $numSlugs,
     ): array {
         $buckets = array_fill(0, $numSlugs, '');
 
@@ -188,53 +228,42 @@ final class Parser
             $fence = $end - 480;
 
             while ($p < $fence) {
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]]
-                    .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
+                $c = strpos($raw, ",", $p + 29);
+                $buckets[$slugIndex[substr($raw, $p + 25, $c - $p - 25)]]
+                    .= $dateChars[substr($raw, $c + 3, 8)];
+                $p = $c + 27;
 
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]]
-                    .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
+                $c = strpos($raw, ",", $p + 29);
+                $buckets[$slugIndex[substr($raw, $p + 25, $c - $p - 25)]]
+                    .= $dateChars[substr($raw, $c + 3, 8)];
+                $p = $c + 27;
 
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]]
-                    .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
+                $c = strpos($raw, ",", $p + 29);
+                $buckets[$slugIndex[substr($raw, $p + 25, $c - $p - 25)]]
+                    .= $dateChars[substr($raw, $c + 3, 8)];
+                $p = $c + 27;
 
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]]
-                    .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
+                $c = strpos($raw, ",", $p + 29);
+                $buckets[$slugIndex[substr($raw, $p + 25, $c - $p - 25)]]
+                    .= $dateChars[substr($raw, $c + 3, 8)];
+                $p = $c + 27;
             }
 
             while ($p < $end) {
-                $nl = strpos($raw, "\n", $p + 52);
-                if ($nl === false) break;
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]]
-                    .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
+                $c = strpos($raw, ",", $p + 29);
+                if ($c === false) break;
+                $buckets[$slugIndex[substr($raw, $p + 25, $c - $p - 25)]]
+                    .= $dateChars[substr($raw, $c + 3, 8)];
+                $p = $c + 27;
             }
         }
 
         fclose($fh);
-
-        $counts = array_fill(0, $numSlugs * $numDates, 0);
-
-        for ($s = 0; $s < $numSlugs; $s++) {
-            if ($buckets[$s] === '') continue;
-            $base = $s * $numDates;
-            foreach (array_count_values(unpack('v*', $buckets[$s])) as $dateId => $count) {
-                $counts[$base + $dateId] = $count;
-            }
-        }
-
-        return $counts;
+        return $buckets;
     }
 
     private function writeJson(
-        array &$tally, int $numSlugs, int $numDates,
+        array &$result, int $numSlugs, int $numDates,
         array $slugLabels, array $dateLabels, string $outputPath,
     ): void {
         $out = fopen($outputPath, 'wb');
@@ -254,14 +283,14 @@ final class Parser
         $firstSlug = true;
 
         for ($s = 0; $s < $numSlugs; $s++) {
-            $base = $s * $numDates;
+            if (empty($result[$s])) continue;
+
+            $dateCounts = &$result[$s];
             $buf = '';
             $sep = '';
-
             for ($d = 0; $d < $numDates; $d++) {
-                $n = $tally[$base + $d];
-                if ($n === 0) continue;
-                $buf .= $sep . $datePrefixes[$d] . $n;
+                if (!isset($dateCounts[$d])) continue;
+                $buf .= $sep . $datePrefixes[$d] . $dateCounts[$d];
                 $sep = ",\n";
             }
 
@@ -281,6 +310,9 @@ final class Parser
 
     private function getCpuCount(): int
     {
+        $env = getenv('PARSER_WORKERS');
+        if ($env !== false && (int)$env > 0) return (int)$env;
+
         if (is_readable('/proc/cpuinfo')) {
             $cpuinfo = file_get_contents('/proc/cpuinfo');
             preg_match_all('/^processor/m', $cpuinfo, $matches);
