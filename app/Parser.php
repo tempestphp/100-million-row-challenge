@@ -43,8 +43,8 @@ final class Parser
 {
     private const URL_PREFIX_LENGTH = 25; // https://stitcher.io/blog/
     private const SAMPLE_BYTES = 2_097_152; // 2 MB probe
-    private const READ_CHUNK_BYTES = 8_388_608; // 8 MB chunks
-    private const DEFAULT_WORKERS = 12;
+    private const READ_CHUNK_BYTES = 4_194_304; // 4 MB chunks
+    private const DEFAULT_WORKERS = 10;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -56,6 +56,7 @@ final class Parser
         [$slugIds, $slugLabels, $slugCount] = $this->buildSlugTables($inputPath, $fileSize);
 
         $workers = $this->resolveWorkerCount($fileSize);
+        $readChunkBytes = $this->resolveReadChunkBytes();
         $boundaries = $this->computeBoundaries($inputPath, $fileSize, $workers);
 
         if ($workers <= 1 || !function_exists('pcntl_fork') || !function_exists('stream_socket_pair')) {
@@ -67,6 +68,7 @@ final class Parser
                 $datePacked,
                 $slugCount,
                 $dateCount,
+                $readChunkBytes,
             );
 
             $this->writeJson($outputPath, $counts, $slugLabels, $dateLabels, $dateCount);
@@ -104,6 +106,7 @@ final class Parser
                     $datePacked,
                     $slugCount,
                     $dateCount,
+                    $readChunkBytes,
                 );
 
                 $use16Bit = max($result) <= 65_535;
@@ -131,6 +134,7 @@ final class Parser
             $datePacked,
             $slugCount,
             $dateCount,
+            $readChunkBytes,
         );
 
         foreach ($pipes as $pipe) {
@@ -163,13 +167,36 @@ final class Parser
     private function resolveWorkerCount(int $fileSize): int
     {
         $override = getenv('PARSER_WORKERS');
-        $workers = $override !== false ? (int) $override : self::DEFAULT_WORKERS;
+        if ($override !== false && $override !== '') {
+            $workers = (int) $override;
+        } else {
+            $workers = self::DEFAULT_WORKERS;
+            if (function_exists('posix_sysconf')) {
+                $cpuCount = (int) posix_sysconf(POSIX_SC_NPROCESSORS_ONLN);
+                if ($cpuCount > 0) {
+                    $workers = min(10, $cpuCount + 2);
+                }
+            }
+        }
 
         if ($fileSize < 64 * 1024 * 1024) {
             return 1;
         }
 
         return max(1, $workers);
+    }
+
+    private function resolveReadChunkBytes(): int
+    {
+        $override = getenv('PARSER_CHUNK_BYTES');
+        if ($override !== false && $override !== '') {
+            $bytes = (int) $override;
+            if ($bytes >= 1_048_576) {
+                return $bytes;
+            }
+        }
+
+        return self::READ_CHUNK_BYTES;
     }
 
     private function buildDateTables(): array
@@ -283,6 +310,7 @@ final class Parser
         array $datePacked,
         int $slugCount,
         int $dateCount,
+        int $readChunkBytes,
     ): array {
         $buckets = array_fill(0, $slugCount, '');
 
@@ -292,7 +320,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, min(self::READ_CHUNK_BYTES, $remaining));
+            $chunk = fread($handle, min($readChunkBytes, $remaining));
             $chunkLength = strlen($chunk);
 
             if ($chunkLength === 0) {
