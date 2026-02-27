@@ -6,6 +6,7 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
+        gc_disable();
         $handle = fopen($inputPath, 'r');
         stream_set_read_buffer($handle, 0);
 
