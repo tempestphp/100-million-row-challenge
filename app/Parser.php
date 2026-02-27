@@ -44,7 +44,7 @@ final class Parser
     private const URL_PREFIX_LENGTH = 25; // https://stitcher.io/blog/
     private const SAMPLE_BYTES = 2_097_152; // 2 MB probe
     private const READ_CHUNK_BYTES = 8_388_608; // 8 MB chunks
-    private const DEFAULT_WORKERS = 10;
+    private const DEFAULT_WORKERS = 12;
 
     public function parse(string $inputPath, string $outputPath): void
     {
