@@ -1,5 +1,8 @@
 > [!IMPORTANT]
-> The 100-million-row challenge is now **live**. You have until March 15, 11:59PM CET to submit your entry! Check out [leaderboard.csv](./leaderboard.csv) for actual results. Comment on your PR with `/bench` to request a re-run!
+> - The challenge is live; you have until March 15, 11:59PM CET to submit your entry. 
+> - Check out [leaderboard.csv](./leaderboard.csv) for actual results. 
+> - Comment on your PR with `/bench` to request a re-run.
+> - [Join our Discord](https://discord.com/channels/1236153076688359495/1476516330017394829) to discuss the challenge with other participants.
     
 Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize; there's also a dedicated prize for a single-core solution, and a participation prize that everyone can win! 
 
@@ -78,7 +81,7 @@ Send a pull request to this repository with your solution. The title of your pul
 > [!IMPORTANT]
 > You can request a re-run by writing a comment on your PR saying `/bench`. We'll still manually verify whether your submission can be run.
 
-If you rather want to participate in the single-thread challenge, please mention this in your PR so that we can add the [🚂 single thread](https://github.com/tempestphp/100-million-row-challenge/issues?q=state%3Aopen%20label%3A%22%F0%9F%9A%82%20single%20thread%22) label.
+If you rather want to participate in the single-thread challenge, please mention this in your PR so that we can add the [🚂 single thread](https://github.com/tempestphp/100-million-row-challenge/issues?q=state%3Aopen%20label%3A%22%F0%9F%9A%82%20single%20thread%22) label. You're allowed to submit an entry for both single-thread and multi-thread solutions. You can only win one prize though, so if you win in both categories, second place single-thread will be given the prize.
 
 ## A note on copying other branches
 
