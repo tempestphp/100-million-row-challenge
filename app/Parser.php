@@ -292,7 +292,7 @@ final class Parser
         fseek($fh, $from);
 
         $remaining = $until - $from;
-        $bufSize = 131_072;
+        $bufSize = 163_840;
 
         while ($remaining > 0) {
             $raw = fread($fh, $remaining > $bufSize ? $bufSize : $remaining);
