@@ -4,49 +4,49 @@ namespace App;
 
 use Exception;
 
+/**
+ * Optimized Parser for the 100 Million Row Challenge.
+ */
 final class Parser
 {
+    private const int CPU_COUNT = 8;
+    private const int PREFIX_LEN = 19;
+    private const int BUFFER_SIZE = 16 * 1024 * 1024;
+
     public function parse(string $inputPath, string $outputPath): void
     {
-        ini_set('memory_limit', '-1');
         gc_disable();
+        ini_set('memory_limit', '-1');
 
-        $cpuCount = 8;
         $fileSize = filesize($inputPath);
-        $chunkSize = (int) ($fileSize / $cpuCount);
-
-        // Increase shared memory to 1GB for better results handling
-        $shmId = shmop_open(ftok(__FILE__, 'p'), "c", 0644, 1024 * 1024 * 1024);
-        if (!$shmId) {
-            throw new Exception("Failed to open shared memory");
+        if ($fileSize === 0) {
+            file_put_contents($outputPath, "{}\n");
+            return;
         }
 
+        $chunkSize = (int) ceil($fileSize / self::CPU_COUNT);
         $pids = [];
-        for ($i = 0; $i < $cpuCount; $i++) {
-            $pid = pcntl_fork();
+        $tempFiles = [];
 
+        for ($i = 0; $i < self::CPU_COUNT; $i++) {
+            $start = $i * $chunkSize;
+            $end = ($i === self::CPU_COUNT - 1) ? $fileSize : ($i + 1) * $chunkSize;
+            
+            $tempFile = sys_get_temp_dir() . "/results_part_$i.bin";
+            $tempFiles[] = $tempFile;
+
+            $pid = pcntl_fork();
             if ($pid === -1) {
-                throw new Exception("Failed to create child process");
+                throw new Exception("Could not fork process $i");
             }
 
             if ($pid === 0) {
-                // Child process
-                $start = $i * $chunkSize;
-                $end = ($i === $cpuCount - 1) ? $fileSize : ($i + 1) * $chunkSize;
-                $results = $this->processChunk($inputPath, $start, $end);
-                
-                if (function_exists('igbinary_serialize')) {
-                    $data = igbinary_serialize($results);
-                } else {
-                    $data = serialize($results);
+                try {
+                    $this->processChunk($inputPath, $start, $end, $tempFile);
+                    exit(0);
+                } catch (\Throwable $e) {
+                    exit(1);
                 }
-                $length = strlen($data);
-                
-                // Each process writes into its own segment (120MB per process)
-                $offset = $i * (1024 * 1024 * 120);
-                shmop_write($shmId, pack('L', $length) . $data, $offset);
-                
-                exit(0);
             } else {
                 $pids[] = $pid;
             }
@@ -56,118 +56,107 @@ final class Parser
             pcntl_waitpid($pid, $status);
         }
 
-        $finalResults = [];
-        for ($i = 0; $i < $cpuCount; $i++) {
-            $offset = $i * (1024 * 1024 * 120);
-            $header = shmop_read($shmId, $offset, 4);
-            if (!$header) continue;
+        $mergedAggregates = [];
+        foreach ($tempFiles as $tempFile) {
+            if (!file_exists($tempFile)) continue;
             
-            $length = unpack('L', $header)[1];
-            if ($length > 0) {
-                $data = shmop_read($shmId, $offset + 4, $length);
-                if (function_exists('igbinary_unserialize')) {
-                    $partial = igbinary_unserialize($data);
-                } else {
-                    $partial = unserialize($data, ['allowed_classes' => false]);
-                }
+            $serializedData = file_get_contents($tempFile);
+            $partResults = function_exists('igbinary_unserialize') 
+                ? igbinary_unserialize($serializedData) 
+                : unserialize($serializedData);
+            unlink($tempFile);
 
-                // Optimized merge
-                foreach ($partial as $url => $dates) {
-                    if (!isset($finalResults[$url])) {
-                        $finalResults[$url] = $dates;
-                        continue;
-                    }
-                    foreach ($dates as $date => $count) {
-                        $finalResults[$url][$date] = ($finalResults[$url][$date] ?? 0) + $count;
-                    }
+            if (!is_array($partResults)) continue;
+
+            foreach ($partResults as $key => $count) {
+                if (isset($mergedAggregates[$key])) {
+                    $mergedAggregates[$key] += $count;
+                } else {
+                    $mergedAggregates[$key] = $count;
                 }
             }
+            unset($partResults);
         }
 
-        shmop_delete($shmId);
+        $finalResults = [];
+        foreach ($mergedAggregates as $key => $count) {
+            $commaPos = strrpos($key, ',');
+            $url = substr($key, 0, $commaPos);
+            $date = substr($key, $commaPos + 1);
+            $finalResults[$url][$date] = $count;
+        }
+        unset($mergedAggregates);
 
-        // Sorting and saving
         foreach ($finalResults as &$dates) {
             ksort($dates, SORT_STRING);
         }
 
-        file_put_contents($outputPath, json_encode($finalResults, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        file_put_contents($outputPath, json_encode($finalResults, JSON_PRETTY_PRINT));
     }
 
-    private function processChunk(string $path, int $start, int $end): array
+    private function processChunk(string $inputPath, int $start, int $end, string $tempFile): void
     {
-        $handle = fopen($path, 'r');
-        fseek($handle, $start);
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
         
         if ($start > 0) {
-            fgets($handle); // Skip to the beginning of a full line
+            fseek($handle, $start - 1);
+            while (($char = fgetc($handle)) !== false && $char !== "\n");
+        } else {
+            fseek($handle, 0);
         }
 
-        $currentPos = ftell($handle);
+        $currentFilePos = ftell($handle);
         $results = [];
-        $pathCache = [];
-        $dateCache = [];
-        $prefixLen = 19; // https://stitcher.io
-
-        $bufferSize = 4 * 1024 * 1024; // 4MB buffer
         $remaining = '';
-
-        while ($currentPos < $end) {
-            $chunk = fread($handle, $bufferSize);
-            if ($chunk === false || $chunk === '') break;
-
-            $currentPos += strlen($chunk);
-            $data = $remaining . $chunk;
-            $pos = 0;
-
-            while (($commaPos = strpos($data, ',', $pos)) !== false) {
-                $eolPos = strpos($data, "\n", $commaPos);
-                if ($eolPos === false) break;
-
-                // Extract path: remove prefix
-                $pathStr = substr($data, $pos + $prefixLen, $commaPos - $pos - $prefixLen);
-                $pathStr = $pathCache[$pathStr] ??= $pathStr;
-
-                // Date is 10 chars after comma (YYYY-MM-DD)
-                $date = substr($data, $commaPos + 1, 10);
-                $date = $dateCache[$date] ??= $date;
-                
-                if (isset($results[$pathStr][$date])) {
-                    $results[$pathStr][$date]++;
-                } else {
-                    $results[$pathStr][$date] = 1;
-                }
-
-                $pos = $eolPos + 1;
-            }
-            $remaining = substr($data, $pos);
-        }
         
-        // Handle last remaining line that started before $end
-        if ($remaining !== '') {
-            if (strpos($remaining, "\n") === false) {
-                $lineFromNext = fgets($handle);
-                if ($lineFromNext !== false) {
-                    $remaining .= $lineFromNext;
+        while ($currentFilePos < $end) {
+            $chunk = fread($handle, self::BUFFER_SIZE);
+            if ($chunk === false || $chunk === '') break;
+            
+            $data = $remaining . $chunk;
+            $dataStartInFile = $currentFilePos - strlen($remaining);
+            $currentFilePos += strlen($chunk);
+
+            $pos = 0;
+            while (($newlinePos = strpos($data, "\n", $pos)) !== false) {
+                if ($dataStartInFile + $pos >= $end) {
+                    $pos = strlen($data);
+                    break;
                 }
+
+                $key = substr($data, $pos + self::PREFIX_LEN, $newlinePos - $pos - (self::PREFIX_LEN + 15));
+                
+                if (isset($results[$key])) {
+                    $results[$key]++;
+                } else {
+                    $results[$key] = 1;
+                }
+                
+                $pos = $newlinePos + 1;
             }
             
-            $commaPos = strpos($remaining, ',');
-            if ($commaPos !== false) {
-                $pathStr = substr($remaining, $prefixLen, $commaPos - $prefixLen);
-                $pathStr = $pathCache[$pathStr] ??= $pathStr;
-                $date = substr($remaining, $commaPos + 1, 10);
-                $date = $dateCache[$date] ??= $date;
+            $remaining = substr($data, $pos);
+        }
 
-                if (isset($results[$pathStr][$date])) {
-                    $results[$pathStr][$date]++;
+        if ($remaining !== '') {
+            $newlinePos = strpos($remaining, "\n");
+            $line = ($newlinePos === false) ? $remaining : substr($remaining, 0, $newlinePos);
+            if ($line !== '') {
+                $key = substr($line, self::PREFIX_LEN, -15);
+                if (isset($results[$key])) {
+                    $results[$key]++;
                 } else {
-                    $results[$pathStr][$date] = 1;
+                    $results[$key] = 1;
                 }
             }
         }
 
         fclose($handle);
-        return $results;
+        
+        $serialized = function_exists('igbinary_serialize') 
+            ? igbinary_serialize($results) 
+            : serialize($results);
+        file_put_contents($tempFile, $serialized);
     }
 }

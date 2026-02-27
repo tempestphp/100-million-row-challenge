@@ -24,6 +24,15 @@ final class DataValidateCommand
 
         if ($actual !== $expected) {
             $this->console->error("Validation failed! Contents of {$actualPath} did not match {$expectedPath}");
+            $this->console->writeln("Actual length: " . strlen($actual));
+            $this->console->writeln("Expected length: " . strlen($expected));
+            
+            for ($i = 0; $i < min(strlen($actual), strlen($expected)); $i++) {
+                if ($actual[$i] !== $expected[$i]) {
+                    $this->console->writeln("First difference at index $i: Actual=" . ord($actual[$i]) . " Expected=" . ord($expected[$i]));
+                    break;
+                }
+            }
 
             return ExitCode::ERROR;
         }
