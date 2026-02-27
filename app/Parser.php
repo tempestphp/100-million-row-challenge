@@ -133,7 +133,7 @@ final class Parser
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $pathIds, $dateIdChars, $pathCount, $dateCount,
                 );
-                file_put_contents($tmpFile, pack('V*', ...$wCounts));
+                file_put_contents($tmpFile, pack('v*', ...$wCounts));
                 exit(0);
             }
             $children[] = [$pid, $tmpFile];
@@ -146,7 +146,7 @@ final class Parser
 
         foreach ($children as [$cpid, $tmpFile]) {
             pcntl_waitpid($cpid, $status);
-            $wCounts = unpack('V*', file_get_contents($tmpFile));
+            $wCounts = unpack('v*', file_get_contents($tmpFile));
             unlink($tmpFile);
             $j = 0;
             foreach ($wCounts as $v) {
