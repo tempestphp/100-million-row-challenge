@@ -41,6 +41,8 @@ final class Parser
         $tempDir = (is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir()) . '/php_parser_' . getmypid();
         @mkdir($tempDir, 0777, true);
 
+        $useIgbinary = \function_exists('igbinary_serialize');
+
         $pids = [];
         foreach ($chunks as $index => $chunk) {
             $pid = pcntl_fork();
@@ -48,53 +50,78 @@ final class Parser
                 die("Could not fork");
             } elseif ($pid === 0) {
                 [$result, $order] = $this->processChunk($inputPath, $chunk[0], $chunk[1]);
-                file_put_contents($tempDir . '/w' . $index, serialize([$result, $order]));
+                $tempFile = $tempDir . '/w' . $index;
+                if ($useIgbinary) {
+                    \file_put_contents($tempFile, \igbinary_serialize([$result, $order]));
+                } else {
+                    \file_put_contents($tempFile, \serialize([$result, $order]));
+                }
                 exit(0);
             } else {
                 $pids[] = $pid;
             }
         }
 
-        // Merge
+        // Merge results as workers complete
         $finalResult = [];
         $finalOrder = [];
 
-        $pidToIndex = array_combine($pids, array_keys($chunks));
+        $pidToIndex = \array_combine($pids, \array_keys($chunks));
 
-        $numChunks = count($chunks);
+        $numChunks = \count($chunks);
         for ($i = 0; $i < $numChunks; $i++) {
-            $pid = pcntl_wait($status);
+            $pid = \pcntl_wait($status);
             $workerIndex = $pidToIndex[$pid];
 
             $tempFile = $tempDir . '/w' . $workerIndex;
-            [$workerResult, $workerOrder] = unserialize(file_get_contents($tempFile));
-            unlink($tempFile);
+            $raw = \file_get_contents($tempFile);
+            \unlink($tempFile);
+
+            if ($useIgbinary) {
+                [$workerResult, $workerOrder] = \igbinary_unserialize($raw);
+            } else {
+                [$workerResult, $workerOrder] = \unserialize($raw);
+            }
+            unset($raw);
 
             $orderOffset = $workerIndex * 1000000000;
             foreach ($workerOrder as $path => $localOrd) {
                 $globalOrd = $orderOffset + $localOrd;
-                $finalOrder[$path] = min($finalOrder[$path] ?? PHP_INT_MAX, $globalOrd);
+                if (!isset($finalOrder[$path]) || $globalOrd < $finalOrder[$path]) {
+                    $finalOrder[$path] = $globalOrd;
+                }
             }
+            unset($workerOrder);
 
             foreach ($workerResult as $path => $dates) {
                 if (!isset($finalResult[$path])) {
                     $finalResult[$path] = $dates;
                 } else {
+                    $existing = &$finalResult[$path];
                     foreach ($dates as $date => $count) {
-                        $finalResult[$path][$date] = ($finalResult[$path][$date] ?? 0) + $count;
+                        $existing[$date] = ($existing[$date] ?? 0) + $count;
                     }
+                    unset($existing);
                 }
             }
+            unset($workerResult);
         }
 
         @rmdir($tempDir);
+
+        // Re-sort dates after merge (workers pre-sorted, but merge adds new keys out of order)
+        foreach ($finalResult as &$dates) {
+            \ksort($dates, SORT_STRING);
+        }
+        unset($dates);
+
         $this->writeOutput($finalResult, $finalOrder, $outputPath);
     }
 
     private function processChunk(string $inputPath, int $start, int $end): array
     {
-        $fp = fopen($inputPath, 'rb');
-        fseek($fp, $start);
+        $fp = \fopen($inputPath, 'rb');
+        \fseek($fp, $start);
 
         $result = [];
         $order = [];
@@ -132,13 +159,15 @@ final class Parser
                     $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
                 }
             }
+
+            unset($buffer, $matches, $paths, $dates);
         }
 
-        fclose($fp);
+        \fclose($fp);
 
-        // Pre-sort dates in worker so parent doesn't have to
+        // Pre-sort dates in worker
         foreach ($result as &$dates) {
-            ksort($dates, SORT_STRING);
+            \ksort($dates, SORT_STRING);
         }
         unset($dates);
 
@@ -148,15 +177,16 @@ final class Parser
     private function writeOutput(array $result, array $order, string $outputPath): void
     {
         // Sort paths by first-appearance order
-        asort($order, SORT_NUMERIC);
+        \asort($order, SORT_NUMERIC);
 
-        // Build ordered result (dates already sorted by workers)
+        // Build ordered result (dates already sorted)
         $ordered = [];
-        foreach (array_keys($order) as $path) {
-            if (isset($result[$path]))
+        foreach (\array_keys($order) as $path) {
+            if (isset($result[$path])) {
                 $ordered[$path] = $result[$path];
+            }
         }
 
-        file_put_contents($outputPath, json_encode($ordered, JSON_PRETTY_PRINT));
+        \file_put_contents($outputPath, \json_encode($ordered, JSON_PRETTY_PRINT));
     }
 }
