@@ -13,6 +13,8 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
+use function file_get_contents;
+use function file_put_contents;
 use function filesize;
 use function fopen;
 use function fread;
@@ -20,28 +22,22 @@ use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
+use function getmypid;
 use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
-use function array_search;
-use function array_values;
-use function feof;
 use function str_replace;
-use function stream_select;
-use function stream_set_blocking;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
-use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function sys_get_temp_dir;
+use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
-use const STREAM_IPPROTO_IP;
-use const STREAM_PF_UNIX;
-use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
@@ -140,34 +136,33 @@ final class Parser
 
         $numChunks = count($bounds) - 1;
 
-        // ─── Fork children with socket pairs for IPC ───
+        // ─── Fork children with file-based IPC ───
 
-        $pipes = [];
-        $childPids = [];
+        $tmpDir = sys_get_temp_dir();
+        $myPid = getmypid();
+        $children = [];
 
         for ($w = 0; $w < $numChunks - 1; $w++) {
-            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            $tmpFile = $tmpDir . '/p100m_' . $myPid . '_' . $w;
             $pid = pcntl_fork();
 
             if ($pid === 0) {
-                fclose($pair[0]);
                 $result = $this->crunch(
                     $inputPath, $bounds[$w], $bounds[$w + 1],
                     $slugIndex, $dateChars, $numSlugs, $numDates,
                 );
                 $v16 = max($result) <= 65535;
-                fwrite($pair[1], $v16 ? "\x00" : "\x01");
+                $header = $v16 ? "\x00" : "\x01";
                 $fmt = $v16 ? 'v*' : 'V*';
+                $packed = $header;
                 foreach (array_chunk($result, 8192) as $batch) {
-                    fwrite($pair[1], pack($fmt, ...$batch));
+                    $packed .= pack($fmt, ...$batch);
                 }
-                fclose($pair[1]);
+                file_put_contents($tmpFile, $packed);
                 exit(0);
             }
 
-            fclose($pair[1]);
-            $pipes[$w] = $pair[0];
-            $childPids[] = $pid;
+            $children[] = [$pid, $tmpFile];
         }
 
         // Parent crunches last chunk (children get a head start)
@@ -176,62 +171,23 @@ final class Parser
             $slugIndex, $dateChars, $numSlugs, $numDates,
         );
 
-        // ─── Merge child results via stream_select (concurrent drain) ───
+        // ─── Merge child results from files ───
 
-        $buffers = [];
-        $open = [];
-        foreach ($pipes as $k => $pipe) {
-            stream_set_blocking($pipe, false);
-            $buffers[$k] = '';
-            $open[$k] = $pipe;
-        }
+        foreach ($children as [$cpid, $tmpFile]) {
+            pcntl_waitpid($cpid, $status);
+            $raw = file_get_contents($tmpFile);
+            unlink($tmpFile);
 
-        $stallCount = 0;
-        while ($open) {
-            $read = array_values($open);
-            $w = null;
-            $e = null;
-            $ready = stream_select($read, $w, $e, 5);
-
-            if ($ready === 0) {
-                if (++$stallCount > 6) {
-                    break; // 30s with no progress — fail fast
-                }
-                continue;
-            }
-            $stallCount = 0;
-
-            foreach ($read as $pipe) {
-                $k = array_search($pipe, $open, true);
-                $data = fread($pipe, 131072);
-                if ($data !== '' && $data !== false) {
-                    $buffers[$k] .= $data;
-                }
-                if (feof($pipe)) {
-                    $raw = $buffers[$k];
-                    fclose($pipe);
-                    unset($open[$k], $buffers[$k]);
-
-                    if ($raw === '') {
-                        continue;
-                    }
-
-                    $rawLen = strlen($raw);
-                    $isV16 = ord($raw[0]) === 0;
-                    $fmt = $isV16 ? 'v*' : 'V*';
-                    $step = $isV16 ? 16384 : 32768;
-                    $j = 0;
-                    for ($off = 1; $off < $rawLen; $off += $step) {
-                        foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
-                            $tally[$j++] += $v;
-                        }
-                    }
+            $rawLen = strlen($raw);
+            $isV16 = ord($raw[0]) === 0;
+            $fmt = $isV16 ? 'v*' : 'V*';
+            $step = $isV16 ? 16384 : 32768;
+            $j = 0;
+            for ($off = 1; $off < $rawLen; $off += $step) {
+                foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
+                    $tally[$j++] += $v;
                 }
             }
-        }
-
-        foreach ($childPids as $pid) {
-            pcntl_waitpid($pid, $status);
         }
 
         // ─── Emit JSON ───
@@ -248,7 +204,7 @@ final class Parser
         }
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
+        stream_set_write_buffer($out, 524_288);
 
         fwrite($out, '{');
         $firstSlug = true;
@@ -314,9 +270,17 @@ final class Parser
             }
 
             $p = 0;
-            $fence = $end - 480;
+            $fence = $end - 720;
 
             while ($p < $fence) {
+                $nl = strpos($raw, "\n", $p + 52);
+                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
+                $p = $nl + 1;
+
+                $nl = strpos($raw, "\n", $p + 52);
+                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
+                $p = $nl + 1;
+
                 $nl = strpos($raw, "\n", $p + 52);
                 $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
                 $p = $nl + 1;
