@@ -17,6 +17,7 @@ final class Parser
             $outputData[$site][$date] ??= 0;
             $outputData[$site][$date] += 1;
         }
+        fclose($handle);
 
         foreach ($outputData as &$data) {
             ksort($data);
