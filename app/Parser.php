@@ -10,9 +10,9 @@ final class Parser
 
     private ?int $readChunkSize = null;
     private ?array $pathIdByPath = null;
-    private ?array $pathById = null;
+    private ?array $pathLinePrefix = null;
     private ?array $generatedDateKeyByString = null;
-    private ?array $generatedDateStringByKey = null;
+    private ?array $generatedDateLinePrefix = null;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -45,10 +45,7 @@ final class Parser
 
             if ($pid === 0) {
                 try {
-                    $payload = $this->parseRange($inputPath, $range['start'], $range['end']);
-                    $serializedPayload = $this->serializeWorkerPayload($payload);
-                    file_put_contents($tmpFile, $serializedPayload);
-
+                    $this->parseRange($inputPath, $range['start'], $range['end'], $tmpFile);
                     exit(0);
                 } catch (\Throwable $e) {
                     fwrite(STDERR, "[parser-worker-error] {$e->getMessage()}\n");
@@ -60,25 +57,22 @@ final class Parser
         }
 
         foreach ($pids as $pid) {
-            $status = 0;
             pcntl_waitpid($pid, $status);
         }
 
         $countsByPath = [];
         foreach ($tmpFiles as $tmpFile) {
-            $serializedPayload = file_get_contents($tmpFile);
+            $workerCountsByPath = unserialize(file_get_contents($tmpFile));
             unlink($tmpFile);
-
-            $payload = $this->unserializeWorkerPayload($serializedPayload);
-            $workerCountsByPath = $payload['countsByPath'];
 
             foreach ($workerCountsByPath as $pathId => $workerDateCounts) {
                 if (! isset($countsByPath[$pathId])) {
-                    $countsByPath[$pathId] = [];
-                }
-                $row = &$countsByPath[$pathId];
-                foreach ($workerDateCounts as $dateKey => $count) {
-                    $row[$dateKey] = ($row[$dateKey] ?? 0) + $count;
+                    $countsByPath[$pathId] = $workerDateCounts;
+                } else {
+                    $row = &$countsByPath[$pathId];
+                    foreach ($workerDateCounts as $dateKey => $count) {
+                        $row[$dateKey] = ($row[$dateKey] ?? 0) + $count;
+                    }
                 }
             }
         }
@@ -90,8 +84,7 @@ final class Parser
     {
         $fileSize = filesize($inputPath);
 
-        $payload = $this->parseRange($inputPath, 0, $fileSize);
-        $countsByPath = $payload['countsByPath'];
+        $countsByPath = $this->parseRange($inputPath, 0, $fileSize);
 
         $this->buildVisitsAndWriteOutput($countsByPath, $outputPath);
     }
@@ -182,11 +175,9 @@ final class Parser
     }
 
     /**
-     * @return array{
-     *   countsByPath: array<int, array<int, int>>
-     * }
+     * @return ($tmpFile is null ? array<int, array<int, int>> : void)
      */
-    private function parseRange(string $inputPath, int $start, int $end): array
+    private function parseRange(string $inputPath, int $start, int $end, ?string $tmpFile = null): array|null
     {
         $input = fopen($inputPath, 'r');
 
@@ -197,36 +188,29 @@ final class Parser
         $countsByPath = [];
         $pathIdByPath = &$this->pathIdByPath;
         $buffer = '';
-        $bufferStartOffset = $start;
-        $reachedEnd = false;
+        $chunkSize = $this->getReadChunkSize();
+        $remaining = $end - $start;
 
-        while (! $reachedEnd && ! feof($input)) {
-            $chunk = fread($input, $this->getReadChunkSize());
+        while ($remaining > 0) {
+            $chunk = fread($input, min($chunkSize, $remaining));
 
-            if ($chunk === '') {
+            if ($chunk === '' || $chunk === false) {
                 break;
             }
 
+            $remaining -= strlen($chunk);
             $buffer .= $chunk;
             $lineStart = 0;
 
             while (($newlinePos = strpos($buffer, "\n", $lineStart)) !== false) {
-                if ($bufferStartOffset + $newlinePos + 1 > $end) {
-                    $reachedEnd = true;
-                    break 2;
-                }
-                $path = substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51);
-                $pathId = $pathIdByPath[$path];
-
+                $row = &$countsByPath[$pathIdByPath[substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51)]];
                 $dateKey =
-                    (ord($buffer[$newlinePos - 23]) - 48) * 100000 +
                     (ord($buffer[$newlinePos - 22]) - 48) * 10000 +
                     (ord($buffer[$newlinePos - 20]) - 48) * 1000 +
                     (ord($buffer[$newlinePos - 19]) - 48) * 100 +
                     (ord($buffer[$newlinePos - 17]) - 48) * 10 +
                     (ord($buffer[$newlinePos - 16]) - 48);
 
-                $row = &$countsByPath[$pathId];
                 $row[$dateKey] = ($row[$dateKey] ?? 0) + 1;
 
                 $lineStart = $newlinePos + 1;
@@ -234,35 +218,38 @@ final class Parser
 
             if ($lineStart > 0) {
                 $buffer = substr($buffer, $lineStart);
-                $bufferStartOffset += $lineStart;
             }
         }
 
         fclose($input);
 
-        return [
-            'countsByPath' => $countsByPath,
-        ];
+        if ($tmpFile !== null) {
+            file_put_contents($tmpFile, serialize($countsByPath));
+
+            return null;
+        }
+
+        return $countsByPath;
     }
 
     private function buildVisitsAndWriteOutput(array $countsByPath, string $outputPath): void
     {
         $file = fopen($outputPath, 'w');
 
-        $dateStringByKey = &$this->generatedDateStringByKey;
-        $pathById = &$this->pathById;
+        $dateLinePrefix = &$this->generatedDateLinePrefix;
+        $pathLinePrefix = &$this->pathLinePrefix;
         $buffer = '{' . PHP_EOL;
         $pathCount = count($countsByPath);
 
         foreach ($countsByPath as $pathId => &$dateCounts) {
             ksort($dateCounts, SORT_NUMERIC);
 
-            $buffer .= '    "\/blog\/' . $pathById[$pathId] . '": {' . PHP_EOL;
+            $buffer .= $pathLinePrefix[$pathId];
             $dateCount = count($dateCounts);
 
             foreach ($dateCounts as $dateKey => $count) {
                 $dateComma = (--$dateCount) ? ',' : '';
-                $buffer .= '        "20' . $dateStringByKey[$dateKey] . '": ' . $count . $dateComma . PHP_EOL;
+                $buffer .= $dateLinePrefix[$dateKey] . $count . $dateComma . PHP_EOL;
             }
 
             $pathComma = (--$pathCount) ? ',' : '';
@@ -274,50 +261,28 @@ final class Parser
         fclose($file);
     }
 
-    private function serializeWorkerPayload(array $payload): string
-    {
-        if (function_exists('igbinary_serialize')) {
-            return igbinary_serialize($payload);
-        }
-
-        return serialize($payload);
-    }
-
-    private function unserializeWorkerPayload(string $serializedPayload): array
-    {
-        if (function_exists('igbinary_unserialize')) {
-            $payload = @igbinary_unserialize($serializedPayload);
-
-            if (is_array($payload)) {
-                return $payload;
-            }
-        }
-
-        return unserialize($serializedPayload, ['allowed_classes' => false]);
-    }
-
     private function initializePathCache(): void
     {
-        if ($this->pathIdByPath !== null && $this->pathById !== null) {
+        if ($this->pathIdByPath !== null) {
             return;
         }
 
         $pathIdByPath = [];
-        $pathById = [];
+        $pathLinePrefix = [];
 
         foreach (Visit::all() as $pathId => $visit) {
             $path = substr($visit->uri, 25);
             $pathIdByPath[$path] = $pathId;
-            $pathById[$pathId] = $path;
+            $pathLinePrefix[$pathId] = '    "\/blog\/' . $path . '": {' . PHP_EOL;
         }
 
         $this->pathIdByPath = $pathIdByPath;
-        $this->pathById = $pathById;
+        $this->pathLinePrefix = $pathLinePrefix;
     }
 
     private function initializeGeneratedDateCache(): void
     {
-        if ($this->generatedDateKeyByString !== null && $this->generatedDateStringByKey !== null) {
+        if ($this->generatedDateKeyByString !== null) {
             return;
         }
 
@@ -326,12 +291,12 @@ final class Parser
         $oneDaySeconds = 60 * 60 * 24;
 
         $dateKeyByString = [];
-        $dateStringByKey = [];
+        $dateLinePrefix = [];
 
         for ($timestamp = $startDayTimestamp; $timestamp <= $endDayTimestamp; $timestamp += $oneDaySeconds) {
             $dateString = gmdate('y-m-d', $timestamp);
+            $shortDate = substr($dateString, 1); // "4-06-15" instead of "24-06-15"
             $dateKey = (
-                (ord($dateString[0]) - 48) * 100000 +
                 (ord($dateString[1]) - 48) * 10000 +
                 (ord($dateString[3]) - 48) * 1000 +
                 (ord($dateString[4]) - 48) * 100 +
@@ -339,12 +304,12 @@ final class Parser
                 (ord($dateString[7]) - 48)
             );
 
-            $dateKeyByString[$dateString] = $dateKey;
-            $dateStringByKey[$dateKey] = $dateString;
+            $dateKeyByString[$shortDate] = $dateKey;
+            $dateLinePrefix[$dateKey] = '        "202' . $shortDate . '": ';
         }
 
         $this->generatedDateKeyByString = $dateKeyByString;
-        $this->generatedDateStringByKey = $dateStringByKey;
+        $this->generatedDateLinePrefix = $dateLinePrefix;
     }
 
     private function getReadChunkSize(): int
