@@ -33,7 +33,7 @@ use function unpack;
 final class Parser
 {
     // Number of parallel worker processes (one per core on M1)
-    private const int THREADS = 8;
+    private const int THREADS = 16;
 
     // strlen('https://stitcher.io/blog/') — fixed URL prefix skipped in hot loop
     private const int URL_PREFIX_LEN = 25;
