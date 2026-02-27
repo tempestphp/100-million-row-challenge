@@ -1,231 +1,284 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App;
 
 use App\Commands\Visit;
 
 final class Parser
 {
-    private const PREFIX_LEN = 25;
-    private const DAY_SECONDS = 86400;
-    private const WINDOW_DAYS = 1825; // 365*5 (matches generator)
-    private const CHUNK = 8_388_608; // 8MB
-//    private const CHUNK = 64_000_000; // 64MB
-    private const OUT_FLUSH = 1_048_576; // 1MB
+    private const int CHUNK_SIZE = 536_870_912; // 512MB
+    private const int PROBE_SIZE = 2_097_152;   // 2MB
+    private const int WRITE_BUF  = 1_048_576;   // 1MB
 
-    /** @var array<string,int> slug => id */
-    private array $slugToId = [];
+    private const int PREFIX_LEN = 25;
 
-    /** @var array<int,string> id => slug */
-    private array $idToSlug = [];
+    private const array DIG = [
+        '0'=>0,'1'=>1,'2'=>2,'3'=>3,'4'=>4,'5'=>5,'6'=>6,'7'=>7,'8'=>8,'9'=>9,
+    ];
 
-    /** @var array<int,int> YYYYMMDD => dayIndex */
-    private array $dateToIndex = [];
-
-    /** @var array<int,string> dayIndex => YYYY-MM-DD */
-    private array $indexToDate = [];
-
-    private int $days = 0;
-
-    public function parse(string $inputPath, string $outputPath, int $seed = 1772177204): void
+    public function parse(string $inputPath, string $outputPath): void
     {
         \gc_disable();
 
-        $this->initSlugs();
-        $this->initDatesFromSeed($seed);
-
-        $slugCount = \count($this->idToSlug);
-        $counts = \array_fill(0, $slugCount * $this->days, 0);
-
-        $h = \fopen($inputPath, 'rb');
-        if ($h === false) {
-            throw new \RuntimeException("Failed to read input file: $inputPath");
+        $fileSize = \filesize($inputPath);
+        if ($fileSize === false) {
+            throw new \RuntimeException("Failed to stat input file: $inputPath");
         }
 
-        $leftover = '';
+        // 1) Dates 2020..2026 -> dateId
+        $yearBaseId = [];
+        $daysBefore = [];
+        $dateLabels = [];
+        $numDates   = 0;
 
-        while (!\feof($h)) {
-            $raw = \fread($h, self::CHUNK);
-            if ($raw === '' || $raw === false) {
-                break;
+        for ($yy = 20; $yy <= 26; $yy++) {
+            $yearBaseId[$yy] = $numDates;
+
+            $daysBefore[$yy] = [0,0,0,0,0,0,0,0,0,0,0,0,0];
+            $run = 0;
+
+            for ($m = 1; $m <= 12; $m++) {
+                $daysBefore[$yy][$m] = $run;
+
+                $dim = match ($m) {
+                    2           => ($yy % 4 === 0) ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default     => 31,
+                };
+
+                $mm = ($m < 10) ? "0{$m}" : (string)$m;
+
+                for ($d = 1; $d <= $dim; $d++) {
+                    $dd = ($d < 10) ? "0{$d}" : (string)$d;
+                    $dateLabels[$numDates] = "{$yy}-{$mm}-{$dd}";
+                    $numDates++;
+                }
+
+                $run += $dim;
+            }
+        }
+
+        // 2) Slugs from probe + Visit::all()
+        $fh = \fopen($inputPath, 'rb');
+        if ($fh === false) {
+            throw new \RuntimeException("Failed to read input file: $inputPath");
+        }
+        \stream_set_read_buffer($fh, 0);
+        $sample = \fread($fh, \min($fileSize, self::PROBE_SIZE));
+        \fclose($fh);
+
+        if ($sample === false) {
+            throw new \RuntimeException("Failed to read sample");
+        }
+
+        $slugIndex  = [];
+        $slugLabels = [];
+        $numSlugs   = 0;
+
+        $bound = \strrpos($sample, "\n");
+        if ($bound === false) $bound = \strlen($sample);
+
+        for ($pos = 0; $pos < $bound;) {
+            $nl = \strpos($sample, "\n", $pos + 52);
+            if ($nl === false) break;
+
+            $slug = \substr($sample, $pos + self::PREFIX_LEN, $nl - $pos - 51);
+            if (!isset($slugIndex[$slug])) {
+                $slugIndex[$slug]      = $numSlugs;
+                $slugLabels[$numSlugs] = $slug;
+                $numSlugs++;
+            }
+            $pos = $nl + 1;
+        }
+        unset($sample);
+
+        foreach (Visit::all() as $visit) {
+            $slug = \substr($visit->uri, self::PREFIX_LEN);
+            if (!isset($slugIndex[$slug])) {
+                $slugIndex[$slug]      = $numSlugs;
+                $slugLabels[$numSlugs] = $slug;
+                $numSlugs++;
+            }
+        }
+
+        // 3) Parse -> bins (2 bytes per row)
+        $bins = \array_fill(0, $numSlugs, '');
+
+        $D = self::DIG;
+
+        $fh = \fopen($inputPath, 'rb');
+        if ($fh === false) {
+            throw new \RuntimeException("Failed to read input file: $inputPath");
+        }
+        \stream_set_read_buffer($fh, 0);
+
+        $remaining = $fileSize;
+
+        while ($remaining > 0) {
+            $readSize = $remaining > self::CHUNK_SIZE ? self::CHUNK_SIZE : $remaining;
+            $chunk = \fread($fh, $readSize);
+            if ($chunk === false) {
+                throw new \RuntimeException("Failed to read chunk");
             }
 
-            // avoid concat if no leftover
-            $chunk = ($leftover !== '') ? ($leftover . $raw) : $raw;
-            $leftover = '';
+            $chunkLength = \strlen($chunk);
+            if ($chunkLength === 0) break;
+
+            $remaining -= $chunkLength;
+
+            $lastNl = \strrpos($chunk, "\n");
+            if ($lastNl === false) break;
+
+            $over = $chunkLength - $lastNl - 1;
+            if ($over > 0) {
+                \fseek($fh, -$over, \SEEK_CUR);
+                $remaining += $over;
+            }
 
             $pos = 0;
-            $len = \strlen($chunk);
 
-            while (true) {
-                // minimal bytes for: prefix + "," + "YYYY-MM-DD" + "\n"
-                if ($pos + self::PREFIX_LEN + 1 + 10 + 1 > $len) {
-                    $leftover = \substr($chunk, $pos);
-                    break;
-                }
+            // Make this margin big enough for “weirdly long” slugs near the end of the chunk.
+            // If we’re too close to $lastNl, strpos() can return false and your offsets explode.
+            $safe = $lastNl - 4096;
+            if ($safe < 0) $safe = 0;
 
-                // comma after prefix
-                $comma = \strpos($chunk, ',', $pos + self::PREFIX_LEN);
-                if ($comma === false) {
-                    $leftover = \substr($chunk, $pos);
-                    break;
-                }
+            // --- Unrolled 4x with guards (still fast; prevents bogus $nl)
+            while ($pos < $safe) {
+                // 1
+                $nl = \strpos($chunk, "\n", $pos + 52);
+                if ($nl === false || $nl > $lastNl) break;
+                $slugId = $slugIndex[\substr($chunk, $pos + self::PREFIX_LEN, $nl - $pos - 51)];
 
-                // newline: fast-path assumes fixed-length timestamp like date('c')
-                $nl = $comma + 26;
-                if ($nl >= $len || $chunk[$nl] !== "\n") {
-                    $nl = \strpos($chunk, "\n", $comma);
-                    if ($nl === false) {
-                        $leftover = \substr($chunk, $pos);
-                        break;
-                    }
-                }
+                $yy = $D[$chunk[$nl - 23]] * 10 + $D[$chunk[$nl - 22]];
+                $mm = $D[$chunk[$nl - 20]] * 10 + $D[$chunk[$nl - 19]];
+                $dd = $D[$chunk[$nl - 17]] * 10 + $D[$chunk[$nl - 16]];
+                if ($yy < 20 || $yy > 26 || $mm < 1 || $mm > 12) { $pos = $nl + 1; continue; }
 
-                // slug substring (yes, per line). Still fastest overall without hashing.
-                $slugStart = $pos + self::PREFIX_LEN;
-                $slugLen   = $comma - $slugStart;
+                $dateId = $yearBaseId[$yy] + $daysBefore[$yy][$mm] + ($dd - 1);
+                $bins[$slugId] .= \chr($dateId & 0xFF) . \chr($dateId >> 8);
+                $pos = $nl + 1;
 
-                // empty slug guard
-                if ($slugLen > 0) {
-                    $slug = \substr($chunk, $slugStart, $slugLen);
-                    $id = $this->slugToId[$slug] ?? -1;
+                // 2
+                $nl = \strpos($chunk, "\n", $pos + 52);
+                if ($nl === false || $nl > $lastNl) break;
+                $slugId = $slugIndex[\substr($chunk, $pos + self::PREFIX_LEN, $nl - $pos - 51)];
 
-                    if ($id !== -1) {
-                        // parse YYYY-MM-DD into YYYYMMDD without allocations
-                        // positions: comma+1..4 year, comma+6..7 month, comma+9..10 day
-                        $y =
-                            (\ord($chunk[$comma + 1]) - 48) * 1000 +
-                            (\ord($chunk[$comma + 2]) - 48) * 100 +
-                            (\ord($chunk[$comma + 3]) - 48) * 10 +
-                            (\ord($chunk[$comma + 4]) - 48);
+                $yy = $D[$chunk[$nl - 23]] * 10 + $D[$chunk[$nl - 22]];
+                $mm = $D[$chunk[$nl - 20]] * 10 + $D[$chunk[$nl - 19]];
+                $dd = $D[$chunk[$nl - 17]] * 10 + $D[$chunk[$nl - 16]];
+                if ($yy < 20 || $yy > 26 || $mm < 1 || $mm > 12) { $pos = $nl + 1; continue; }
 
-                        $m =
-                            (\ord($chunk[$comma + 6]) - 48) * 10 +
-                            (\ord($chunk[$comma + 7]) - 48);
+                $dateId = $yearBaseId[$yy] + $daysBefore[$yy][$mm] + ($dd - 1);
+                $bins[$slugId] .= \chr($dateId & 0xFF) . \chr($dateId >> 8);
+                $pos = $nl + 1;
 
-                        $d =
-                            (\ord($chunk[$comma + 9]) - 48) * 10 +
-                            (\ord($chunk[$comma + 10]) - 48);
+                // 3
+                $nl = \strpos($chunk, "\n", $pos + 52);
+                if ($nl === false || $nl > $lastNl) break;
+                $slugId = $slugIndex[\substr($chunk, $pos + self::PREFIX_LEN, $nl - $pos - 51)];
 
-                        $dateInt = $y * 10000 + $m * 100 + $d;
+                $yy = $D[$chunk[$nl - 23]] * 10 + $D[$chunk[$nl - 22]];
+                $mm = $D[$chunk[$nl - 20]] * 10 + $D[$chunk[$nl - 19]];
+                $dd = $D[$chunk[$nl - 17]] * 10 + $D[$chunk[$nl - 16]];
+                if ($yy < 20 || $yy > 26 || $mm < 1 || $mm > 12) { $pos = $nl + 1; continue; }
 
-                        $di = $this->dateToIndex[$dateInt] ?? -1;
-                        if ($di !== -1) {
-                            $counts[$id * $this->days + $di]++;
-                        }
-                    }
+                $dateId = $yearBaseId[$yy] + $daysBefore[$yy][$mm] + ($dd - 1);
+                $bins[$slugId] .= \chr($dateId & 0xFF) . \chr($dateId >> 8);
+                $pos = $nl + 1;
+
+                // 4
+                $nl = \strpos($chunk, "\n", $pos + 52);
+                if ($nl === false || $nl > $lastNl) break;
+                $slugId = $slugIndex[\substr($chunk, $pos + self::PREFIX_LEN, $nl - $pos - 51)];
+
+                $yy = $D[$chunk[$nl - 23]] * 10 + $D[$chunk[$nl - 22]];
+                $mm = $D[$chunk[$nl - 20]] * 10 + $D[$chunk[$nl - 19]];
+                $dd = $D[$chunk[$nl - 17]] * 10 + $D[$chunk[$nl - 16]];
+                if ($yy < 20 || $yy > 26 || $mm < 1 || $mm > 12) { $pos = $nl + 1; continue; }
+
+                $dateId = $yearBaseId[$yy] + $daysBefore[$yy][$mm] + ($dd - 1);
+                $bins[$slugId] .= \chr($dateId & 0xFF) . \chr($dateId >> 8);
+                $pos = $nl + 1;
+            }
+
+            // Tail loop (safe + correct)
+            while ($pos < $lastNl) {
+                $nl = \strpos($chunk, "\n", $pos + 52);
+                if ($nl === false || $nl > $lastNl) break;
+
+                $slugId = $slugIndex[\substr($chunk, $pos + self::PREFIX_LEN, $nl - $pos - 51)];
+
+                $yy = $D[$chunk[$nl - 23]] * 10 + $D[$chunk[$nl - 22]];
+                $mm = $D[$chunk[$nl - 20]] * 10 + $D[$chunk[$nl - 19]];
+                $dd = $D[$chunk[$nl - 17]] * 10 + $D[$chunk[$nl - 16]];
+
+                if ($yy >= 20 && $yy <= 26 && $mm >= 1 && $mm <= 12) {
+                    $dateId = $yearBaseId[$yy] + $daysBefore[$yy][$mm] + ($dd - 1);
+                    $bins[$slugId] .= \chr($dateId & 0xFF) . \chr($dateId >> 8);
                 }
 
                 $pos = $nl + 1;
-                if ($pos >= $len) {
-                    break;
-                }
             }
         }
 
-        \fclose($h);
+        \fclose($fh);
 
-        $this->writeJson($outputPath, $counts, $slugCount);
-    }
+        // 4) Bulk count to dense grid
+        $grid = \array_fill(0, $numSlugs * $numDates, 0);
 
-    private function initSlugs(): void
-    {
-        $id = 0;
+        for ($slugId = 0; $slugId < $numSlugs; $slugId++) {
+            $bin = $bins[$slugId];
+            if ($bin === '') continue;
 
-        foreach (Visit::all() as $visit) {
-            // generator writes full URI; your parser expects prefix length 25,
-            // so slug is uri[25..]
-            $slug = \substr($visit->uri, self::PREFIX_LEN);
-
-            // de-dupe, stable ids
-            if (!isset($this->slugToId[$slug])) {
-                $this->slugToId[$slug] = $id;
-                $this->idToSlug[$id] = $slug;
-                $id++;
+            $base = $slugId * $numDates;
+            foreach (\array_count_values(\unpack('v*', $bin)) as $dateId => $count) {
+                $grid[$base + $dateId] = $count;
             }
         }
-    }
+        unset($bins);
 
-    private function initDatesFromSeed(int $seed): void
-    {
-        $endTs = ($seed === 0) ? \time() : $seed;
-        $startTs = $endTs - (self::WINDOW_DAYS * self::DAY_SECONDS);
-
-        // Build by stepping days in UTC; index is naturally sorted.
-        $idx = 0;
-
-        // include both endpoints -> +1 day count
-        for ($ts = $startTs; $ts <= $endTs; $ts += self::DAY_SECONDS) {
-            $y = (int)\gmdate('Y', $ts);
-            $m = (int)\gmdate('m', $ts);
-            $d = (int)\gmdate('d', $ts);
-
-            $dateInt = $y * 10000 + $m * 100 + $d;
-
-            // if two timestamps land on same UTC date (DST/oddities shouldn’t in UTC), keep first index
-            if (!isset($this->dateToIndex[$dateInt])) {
-                $this->dateToIndex[$dateInt] = $idx;
-                $this->indexToDate[$idx] = \sprintf('%04d-%02d-%02d', $y, $m, $d);
-                $idx++;
-            }
-        }
-
-        $this->days = $idx;
-    }
-
-    private function writeJson(string $outputPath, array $counts, int $slugCount): void
-    {
+        // 5) Output
         $out = \fopen($outputPath, 'wb');
         if ($out === false) {
             throw new \RuntimeException("Failed to write output file: $outputPath");
         }
+        \stream_set_write_buffer($out, self::WRITE_BUF);
 
-        $buf = "{\n";
-
-        for ($id = 0; $id < $slugCount; $id++) {
-            if ($id !== 0) {
-                $buf .= ",\n";
-            }
-
-            $slug = $this->idToSlug[$id];
-            // If slugs are strictly safe, keep as-is. Otherwise uncomment:
-            // $slug = \addcslashes($slug, "\\\"\n\r\t");
-
-            $buf .= "    \"\\/blog\\/$slug\": {\n";
-
-            $base = $id * $this->days;
-            $first = true;
-
-            for ($di = 0; $di < $this->days; $di++) {
-                $c = $counts[$base + $di];
-                if ($c === 0) {
-                    continue;
-                }
-
-                if (!$first) {
-                    $buf .= ",\n";
-                }
-                $first = false;
-
-                $date = $this->indexToDate[$di];
-                $buf .= "        \"$date\": $c";
-
-                if (\strlen($buf) >= self::OUT_FLUSH) {
-                    \fwrite($out, $buf);
-                    $buf = '';
-                }
-            }
-
-            $buf .= "\n    }";
-
-            if (\strlen($buf) >= self::OUT_FLUSH) {
-                \fwrite($out, $buf);
-                $buf = '';
-            }
+        $datePfx = [];
+        for ($dateId = 0; $dateId < $numDates; $dateId++) {
+            $datePfx[$dateId] = '        "20' . $dateLabels[$dateId] . '": ';
         }
 
-        $buf .= "\n}\n";
-        \fwrite($out, $buf);
+        $slugHdr = [];
+        for ($slugId = 0; $slugId < $numSlugs; $slugId++) {
+            $slugHdr[$slugId] = '"\\/blog\\/' . \str_replace('/', '\\/', $slugLabels[$slugId]) . '"';
+        }
+
+        \fwrite($out, '{');
+        $first = true;
+
+        for ($slugId = 0; $slugId < $numSlugs; $slugId++) {
+            $base      = $slugId * $numDates;
+            $body      = '';
+            $sep       = '';
+
+            for ($dateId = 0; $dateId < $numDates; $dateId++) {
+                $count = $grid[$base + $dateId];
+                if ($count === 0) continue;
+
+                $body .= $sep . $datePfx[$dateId] . $count;
+                $sep = ",\n";
+            }
+
+            if ($body === '') continue;
+
+            \fwrite($out, ($first ? '' : ',') . "\n    " . $slugHdr[$slugId] . ": {\n" . $body . "\n    }");
+            $first = false;
+        }
+
+        \fwrite($out, "\n}");
         \fclose($out);
     }
 }
