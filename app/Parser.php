@@ -71,9 +71,9 @@ final class Parser
             }
         }
 
-        $dateIdChars = [];
+        $dateIdInts = [];
         foreach ($dateIds as $date => $id) {
-            $dateIdChars[$date] = chr($id & 0xFF) . chr($id >> 8);
+            $dateIdInts[unpack('P', $date)[1]] = chr($id & 0xFF) . chr($id >> 8);
         }
 
         $handle = fopen($inputPath, 'rb');
@@ -132,7 +132,7 @@ final class Parser
             if ($pid === 0) {
                 $wCounts = $this->parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $pathIds, $dateIdChars, $pathCount, $dateCount,
+                    $pathIds, $dateIdInts, $pathCount, $dateCount,
                 );
                 file_put_contents($tmpFile, pack('v*', ...$wCounts));
                 exit(0);
@@ -142,7 +142,7 @@ final class Parser
 
         $counts = $this->parseRange(
             $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
-            $pathIds, $dateIdChars, $pathCount, $dateCount,
+            $pathIds, $dateIdInts, $pathCount, $dateCount,
         );
 
         $pending = count($childMap);
@@ -167,7 +167,7 @@ final class Parser
 
     private function parseRange(
         $inputPath, $start, $end,
-        $pathIds, $dateIdChars,
+        $pathIds, $dateIdInts,
         $pathCount, $dateCount,
     ) {
         $buckets = array_fill(0, $pathCount, '');
@@ -197,34 +197,34 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdInts[unpack('P', $chunk, $sep + 3)[1]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdInts[unpack('P', $chunk, $sep + 3)[1]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdInts[unpack('P', $chunk, $sep + 3)[1]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdInts[unpack('P', $chunk, $sep + 3)[1]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdInts[unpack('P', $chunk, $sep + 3)[1]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdInts[unpack('P', $chunk, $sep + 3)[1]];
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdInts[unpack('P', $chunk, $sep + 3)[1]];
                 $p = $sep + 52;
             }
         }
