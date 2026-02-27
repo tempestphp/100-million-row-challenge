@@ -59,18 +59,19 @@ final class Parser
 
         $stride = $dateCount;
         $totalCells = $pathCount * $stride;
-        $chunkSize = 262144;
+        $chunkSize = 1048576;
 
         if ($fileSize >= 10485760) {
             $ncpu = PHP_OS_FAMILY === 'Darwin'
                 ? (int)\trim(\shell_exec('sysctl -n hw.ncpu'))
                 : (int)(\trim(\shell_exec('nproc 2>/dev/null') ?: '8'));
             $numWorkers = $ncpu + 4;
+            $totalSegments = $numWorkers * 4;
 
             $handle = \fopen($inputPath, 'rb');
             $splits = [0];
-            for ($s = 1; $s < $numWorkers; $s++) {
-                \fseek($handle, (int)($fileSize * $s / $numWorkers));
+            for ($s = 1; $s < $totalSegments; $s++) {
+                \fseek($handle, (int)($fileSize * $s / $totalSegments));
                 \fgets($handle);
                 $splits[] = \ftell($handle);
             }
@@ -87,53 +88,56 @@ final class Parser
                 if ($pid === 0) {
                     $handle = \fopen($inputPath, 'rb');
                     \stream_set_read_buffer($handle, 0);
-                    \fseek($handle, $splits[$w]);
                     $buckets = \array_fill(0, $pathCount, '');
-                    $remaining = $splits[$w + 1] - $splits[$w];
 
-                    while ($remaining > 0) {
-                        $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
-                        $chunk = \fread($handle, $toRead);
-                        if ($chunk === false || $chunk === '') break;
-                        $chunkLen = \strlen($chunk);
-                        $remaining -= $chunkLen;
+                    for ($seg = $w; $seg < $totalSegments; $seg += $numWorkers) {
+                        \fseek($handle, $splits[$seg]);
+                        $remaining = $splits[$seg + 1] - $splits[$seg];
 
-                        $lastNl = \strrpos($chunk, "\n");
-                        if ($lastNl === false) continue;
+                        while ($remaining > 0) {
+                            $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
+                            $chunk = \fread($handle, $toRead);
+                            if ($chunk === false || $chunk === '') break;
+                            $chunkLen = \strlen($chunk);
+                            $remaining -= $chunkLen;
 
-                        $tail = $chunkLen - $lastNl - 1;
-                        if ($tail > 0) {
-                            \fseek($handle, -$tail, SEEK_CUR);
-                            $remaining += $tail;
-                        }
+                            $lastNl = \strrpos($chunk, "\n");
+                            if ($lastNl === false) continue;
 
-                        $fence = $lastNl - 720;
-                        $pos = 0;
-                        while ($pos < $fence) {
-                            $nlPos = \strpos($chunk, "\n", $pos + 54);
-                            $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
-                            $pos = $nlPos + 1;
-                            $nlPos = \strpos($chunk, "\n", $pos + 54);
-                            $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
-                            $pos = $nlPos + 1;
-                            $nlPos = \strpos($chunk, "\n", $pos + 54);
-                            $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
-                            $pos = $nlPos + 1;
-                            $nlPos = \strpos($chunk, "\n", $pos + 54);
-                            $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
-                            $pos = $nlPos + 1;
-                            $nlPos = \strpos($chunk, "\n", $pos + 54);
-                            $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
-                            $pos = $nlPos + 1;
-                            $nlPos = \strpos($chunk, "\n", $pos + 54);
-                            $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
-                            $pos = $nlPos + 1;
-                        }
-                        while ($pos < $lastNl) {
-                            $nlPos = \strpos($chunk, "\n", $pos + 54);
-                            if ($nlPos === false || $nlPos > $lastNl) break;
-                            $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
-                            $pos = $nlPos + 1;
+                            $tail = $chunkLen - $lastNl - 1;
+                            if ($tail > 0) {
+                                \fseek($handle, -$tail, SEEK_CUR);
+                                $remaining += $tail;
+                            }
+
+                            $fence = $lastNl - 720;
+                            $pos = 0;
+                            while ($pos < $fence) {
+                                $nlPos = \strpos($chunk, "\n", $pos + 54);
+                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pos = $nlPos + 1;
+                                $nlPos = \strpos($chunk, "\n", $pos + 54);
+                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pos = $nlPos + 1;
+                                $nlPos = \strpos($chunk, "\n", $pos + 54);
+                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pos = $nlPos + 1;
+                                $nlPos = \strpos($chunk, "\n", $pos + 54);
+                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pos = $nlPos + 1;
+                                $nlPos = \strpos($chunk, "\n", $pos + 54);
+                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pos = $nlPos + 1;
+                                $nlPos = \strpos($chunk, "\n", $pos + 54);
+                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pos = $nlPos + 1;
+                            }
+                            while ($pos < $lastNl) {
+                                $nlPos = \strpos($chunk, "\n", $pos + 54);
+                                if ($nlPos === false || $nlPos > $lastNl) break;
+                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pos = $nlPos + 1;
+                            }
                         }
                     }
                     \fclose($handle);
@@ -152,12 +156,16 @@ final class Parser
                 $childPids[$w] = $pid;
             }
 
+            // Parent is worker 0: round-robin segments
             $handle = \fopen($inputPath, 'rb');
             \stream_set_read_buffer($handle, 0);
             $buckets = \array_fill(0, $pathCount, '');
-            $remaining = $splits[1];
 
-            while ($remaining > 0) {
+            for ($seg = 0; $seg < $totalSegments; $seg += $numWorkers) {
+                \fseek($handle, $splits[$seg]);
+                $remaining = $splits[$seg + 1] - $splits[$seg];
+
+                while ($remaining > 0) {
                 $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
                 $chunk = \fread($handle, $toRead);
                 if ($chunk === false || $chunk === '') break;
@@ -201,6 +209,7 @@ final class Parser
                     $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                     $pos = $nlPos + 1;
                 }
+                }
             }
             \fclose($handle);
 
@@ -214,21 +223,6 @@ final class Parser
             }
             unset($buckets);
 
-            $remaining = \count($childPids);
-            while ($remaining > 0) {
-                $pid = \pcntl_wait($status);
-                $w = \array_search($pid, $childPids);
-                if ($w === false) continue;
-                $raw = \file_get_contents($tmpPrefix . $w);
-                @\unlink($tmpPrefix . $w);
-                $j = 0;
-                foreach (\unpack('V*', $raw) as $v) {
-                    $counts[$j] += $v;
-                    $j++;
-                }
-                $remaining--;
-            }
-
             $escapedPaths = [];
             $datePrefixes = [];
             for ($p = 0; $p < $pathCount; $p++) {
@@ -237,6 +231,25 @@ final class Parser
             for ($d = 0; $d < $dateCount; $d++) {
                 $datePrefixes[$d] = "\n        \"" . $dateList[$d] . "\": ";
             }
+
+            $remaining = \count($childPids);
+            while ($remaining > 0) {
+                $pid = \pcntl_wait($status);
+                $w = \array_search($pid, $childPids);
+                if ($w === false) continue;
+                $raw = \file_get_contents($tmpPrefix . $w);
+                @\unlink($tmpPrefix . $w);
+                $j = 0;
+                $len = \strlen($raw);
+                for ($off = 0; $off < $len; $off += 65536) {
+                    foreach (\unpack('V*', \substr($raw, $off, 65536)) as $v) {
+                        $counts[$j] += $v;
+                        $j++;
+                    }
+                }
+                $remaining--;
+            }
+
             $fp = \fopen($outputPath, 'wb');
             \stream_set_write_buffer($fp, 1048576);
             $buf = '{';
