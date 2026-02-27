@@ -7,35 +7,28 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
-        $f = fopen($inputPath, 'rb');
-        $v = fgets($f);
-        $s = strpos($v, '/', 8); // discover scheme://host prefix len
-        fclose($f);
-
-        $id = ftok($inputPath, 'M');
-        $shm = shm_attach($id, 1000000000);
-        $sem = sem_get($id);
 
         $ncpu = 8;
         $chunk = floor(filesize($inputPath) / $ncpu);
         $children = [];
         for ($i=0; $i < $ncpu; $i++) {
+            $tmp = tmpfile();
             $pid = pcntl_fork();
             if ($pid === 0) {
                 $f = fopen($inputPath, 'rnb');
-                $job = $this->parseChunk($f, $s, $i, $chunk);
-                sem_acquire($sem); // shm needs mutex
-                shm_put_var($shm, $i, $job); // passed as string to avoid serializing inside semaphore
-                sem_release($sem);
+                $job = $this->parseChunk($f, $i, $chunk);
+                fwrite($tmp, igbinary_serialize($job));
                 die; // children work is done, parachute
             }
-            $children[$i] = $pid;
+            $children[$pid] = $tmp;
         }
 
         $h = [];
-        for ($i=0; $i < $ncpu; $i++) {
-            $pid = pcntl_waitpid(-1, $status);
-            $p = unserialize(shm_get_var($shm, array_search($pid, $children)));
+        foreach ($children as $pid => $tmp) {
+            $pid = pcntl_waitpid($pid, $status);
+            rewind($tmp);
+            $c = stream_get_contents($tmp);
+            $p = igbinary_unserialize($c);
 
             foreach ($p as $k => $v) {
                 foreach ($v as $d => $c) {
@@ -45,15 +38,18 @@ final class Parser
             };
         }
 
-        foreach ($h as &$v) {
-           ksort($v);
+        $r = [];
+        foreach ($h as $k => &$v) {
+            ksort($v);
+            preg_match('@://[^/]+(/.*)@', $k, $m);
+            $r[$m[1]] = $v;
         };
         
 
-        file_put_contents($outputPath, json_encode($h, JSON_PRETTY_PRINT));
+        file_put_contents($outputPath, json_encode($r, JSON_PRETTY_PRINT));
     }
 
-    public function parseChunk($f, $s, $i, $chunk) {
+    public function parseChunk($f, $i, $chunk) {
 
         if ($i > 0) {
             fseek($f, $i * $chunk);
@@ -62,7 +58,7 @@ final class Parser
 
         $h = [];
         while ($chunk > 0 && $v = stream_get_line($f, 8192, PHP_EOL)) {
-            $h[substr($v, $s, -26)][] = substr($v, -25, 10);
+            $h[substr($v, 0, -26)][] = substr($v, -25, 10);
             $chunk -= strlen($v);
             $chunk--; // EOL
         }
@@ -71,6 +67,6 @@ final class Parser
             $v = array_count_values($v);
         };
 
-        return serialize($h);
+        return $h;
     }
 }
