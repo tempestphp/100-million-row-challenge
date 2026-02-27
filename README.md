@@ -1,7 +1,10 @@
 > [!IMPORTANT]
-> The 100-million-row challenge is now **live**. You have until March 15, 11:59PM CET to submit your entry!
+> - The challenge is live; you have until March 15, 11:59PM CET to submit your entry. 
+> - Check out [leaderboard.csv](./leaderboard.csv) and [leaderboard-single-thread.csv](./leaderboard-single-thread.csv) for actual results. 
+> - Comment on your PR with `/bench` to request a re-run.
+> - [Join our Discord](https://discord.com/channels/1236153076688359495/1476516330017394829) to discuss the challenge with other participants.
     
-Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize! 
+Welcome to the 100-million-row challenge in PHP! Your goal is to parse a data set of page visits into a JSON file. This repository contains all you need to get started locally. Submitting an entry is as easy as sending a pull request to this repository. This competition will run for two weeks: from Feb 24 to March 15, 2026. When it's done, the top three fastest solutions will win a prize; there's also a dedicated prize for a single-core solution, and a participation prize that everyone can win! 
 
 ## Getting started
 
@@ -46,7 +49,7 @@ You'll be parsing millions of CSV lines into a JSON file, with the following rul
 
 - Each entry in the generated JSON file should be a key-value pair with the page's URL path as the key and an array with the number of visits per day as the value.
 - Visits should be sorted by date in ascending order.
-- The output should be encoded as a pretty JSON string.
+- The output should be encoded as a pretty JSON string (as generated with `JSON_PRETTY_PRINT`).
 
 As an example, take the following input:
 
@@ -75,6 +78,11 @@ Your parser should store the following output in `$outputPath` as a JSON file:
 
 Send a pull request to this repository with your solution. The title of your pull request should simply be your GitHub's username. If your solution validates, we'll run it on the benchmark server and store your time in [leaderboard.csv](./leaderboard.csv). You can continue to improve your solution, but keep in mind that benchmarks are manually triggered, and you might need to wait a while before your results are published.
 
+> [!IMPORTANT]
+> You can request a re-run by writing a comment on your PR saying `/bench`. We'll still manually verify whether your submission can be run.
+
+If you rather want to participate in the single-thread challenge, please mention this in your PR so that we can add the [🚂 single thread](https://github.com/tempestphp/100-million-row-challenge/issues?q=state%3Aopen%20label%3A%22%F0%9F%9A%82%20single%20thread%22) label. You're allowed to submit an entry for both single-thread and multi-thread solutions. You can only win one prize though, so if you win in both categories, second place single-thread will be given the prize.
+
 ## A note on copying other branches
 
 You might be tempted to look for inspiration from other competitors. While we have no means of preventing you from doing that, we will remove submissions that have clearly been copied from other submissions. We validate each submission by hand up front and ask you to come up with an original solution of your own.
@@ -87,7 +95,7 @@ Prizes are sponsored by [PhpStorm](https://www.jetbrains.com/phpstorm/) and [Tid
 
 All entries must be submitted before March 16, 2026 (so you have until March 15, 11:59PM CET to submit). Any entries submitted after the cutoff date won't be taken into account.
 
-**First place** will get:
+**🥇 First place** will get:
 
 - One PhpStorm Elephpant
 - One Tideways Elephpant
@@ -95,20 +103,25 @@ All entries must be submitted before March 16, 2026 (so you have until March 15,
 - Three-month JetBrains AI Ultimate license
 - One-year Tideways Team license
 
-**Second place** will get:
+**🥈 Second place** will get:
 
 - One PhpStorm Elephpant
 - One Tideways Elephpant
 - One-year JetBrains all-products pack license
 - Three-month JetBrains AI Ultimate license
 
-**Third place** will get:
+**🥉 Third place** will get:
 
 - One PhpStorm Elephpant
 - One Tideways Elephpant
 - One-year JetBrains all-products pack license
 
-Then, there are two more prizes to win: one for the **fastest single-core submission**, and one participation prize (a random winner picked from all entries). Both will get:
+ **🚂 Fastest single-core submission**:
+
+- One PhpStorm Elephpant
+- One-year JetBrains all-products pack license
+
+**🏅 Participation prize** — a random winner picked from all entries who will get:
 
 - One PhpStorm Elephpant
 - One-year JetBrains all-products pack license
@@ -119,11 +132,13 @@ The benchmark results of each run are stored in [leaderboard.csv](./leaderboard.
 
 #### What kind of server is used for the benchmark?
 
-The benchmark runs on a Premium Intel Digital Ocean Droplet with 2vCPUs and 1.5GB of available memory. We deliberately chose not to use a more powerful server because we like to test in a somewhat "standard" environment for PHP. These PHP extensions are available:
+The benchmark runs on a Mac Mini M1 with 12GB of RAM of available memory. These PHP extensions are available:
 
 ```txt
-bcmath, calendar, Core, ctype, curl, date, dom, exif, fileinfo, filter, ftp, gd, gettext, gmp, hash, iconv, igbinary, imagick, imap, intl, json, lexbor, libxml, mbstring, memcached, msgpack, mysqli, mysqlnd, openssl, pcntl, pcre, PDO, pdo_mysql, pdo_pgsql, pdo_sqlite, pgsql, Phar, posix, random, readline, redis, Reflection, session, shmop, SimpleXML, soap, sockets, sodium, SPL, sqlite3, standard, sysvmsg, sysvsem, sysvshm, tokenizer, uri, xml, xmlreader, xmlwriter, xsl, Zend OPcache, zip, zlib, Zend OPcache
+bcmath, bz2, calendar, Core, ctype, curl, date, dba, dom, exif, fileinfo, filter, ftp, gd, gettext, gmp, hash, iconv, igbinary, intl, json, ldap, lexbor, libxml, mbstring, mysqli, mysqlnd, odbc, openssl, pcntl, pcre, PDO, pdo_dblib, pdo_mysql, PDO_ODBC, pdo_pgsql, pdo_sqlite, pgsql, Phar, posix, random, readline, Reflection, session, shmop, SimpleXML, snmp, soap, sockets, sodium, SPL, sqlite3, standard, sysvmsg, sysvsem, sysvshm, tidy, tokenizer, uri, xml, xmlreader, xmlwriter, xsl, Zend OPcache, zip, zlib, Zend OPcache
 ```
+
+![Story and the Server](./.github/stormy.png)
 
 #### How to ensure fair results?
 
@@ -147,4 +162,4 @@ The point of this challenge is to push PHP to its limits. That's why you're not 
 
 #### How long should I wait for benchmark results to come in?
 
-We manually verify each submission before running it on the benchmark sever. Depending on our availability, this means possible waiting times. If we haven't gotten to your submission within 24 hours, feel free to ping @brendt or @xHeaven in a comment to make sure we don't forget you.
+We manually verify each submission before running it on the benchmark sever. Depending on our availability, this means possible waiting times. You can mark your PR as ready for a run by adding a comment saying `/bench`.

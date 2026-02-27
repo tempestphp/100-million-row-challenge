@@ -15,6 +15,8 @@ final class DataParseCommand
         string $inputPath = __DIR__ . '/../../data/data.csv',
         string $outputPath = __DIR__ . '/../../data/data.json',
     ): void {
+        ini_set('max_execution_time', 60 * 5);
+
         $startTime = microtime(true);
 
         new Parser()->parse($inputPath, $outputPath);

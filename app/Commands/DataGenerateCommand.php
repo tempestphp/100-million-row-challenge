@@ -19,7 +19,7 @@ final class DataGenerateCommand
     public function __invoke(
         int|string $iterations = 1_000_000,
         string $outputPath = __DIR__ . '/../../data/data.csv',
-        int $seed = 1,
+        int $seed = 1772177204,
     ): void
     {
         $this->randomizer = $seed === 0
@@ -41,7 +41,7 @@ final class DataGenerateCommand
         $uris = array_map(fn (Visit $v) => $v->uri, Visit::all());
         $uriCount = count($uris);
 
-        $now = time();
+        $now = $seed === 0 ? time() : $seed;
         $fiveYearsInSeconds = 60 * 60 * 24 * 365 * 5;
 
         $datePoolSize = 10_000;
