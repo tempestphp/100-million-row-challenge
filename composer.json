@@ -1,6 +1,7 @@
 {
     "require": {
         "php": "^8.5",
+        "ext-pcntl": "*",
         "tempest/framework": "^3.2"
     },
     "autoload": {
