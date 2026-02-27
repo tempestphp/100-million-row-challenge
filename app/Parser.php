@@ -6,9 +6,7 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        gc_disable();
-
-        $ncpu = 8;
+        $ncpu = 16;
         $chunk = floor(filesize($inputPath) / $ncpu);
         $children = [];
         for ($i=0; $i < $ncpu; $i++) {
@@ -57,10 +55,11 @@ final class Parser
         }
 
         $h = [];
-        while ($chunk > 0 && $v = stream_get_line($f, 8192, PHP_EOL)) {
-            $h[substr($v, 0, -26)][] = substr($v, -25, 10);
+        while ($chunk > 0 && $v = fgets($f)) {
+            $k = substr($v, 0, -27);
+            $d = substr($v, -26, 10);
+            $h[$k][] = $d;
             $chunk -= strlen($v);
-            $chunk--; // EOL
         }
 
         foreach ($h as &$v) {
