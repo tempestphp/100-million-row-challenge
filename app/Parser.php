@@ -7,7 +7,7 @@ use Exception;
 final class Parser
 {
     private const WORKERS = 8;
-    private const BUF_SIZE = 8 * 1024 * 1024; // 8 MB
+    private const BUF_SIZE = 16 * 1024 * 1024; // 16 MB
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -41,12 +41,15 @@ final class Parser
             $tmpFiles[$i] = sys_get_temp_dir() . "/parser_{$myPid}_{$i}.tmp";
         }
 
+        $useIgbinary = function_exists('igbinary_serialize');
+
         // Fork workers
         $pids = [];
         for ($i = 0; $i < self::WORKERS; $i++) {
             if ($starts[$i] >= $ends[$i]) {
                 // Empty chunk (file smaller than WORKERS lines)
-                file_put_contents($tmpFiles[$i], serialize([]));
+                $empty = $useIgbinary ? igbinary_serialize([]) : serialize([]);
+                file_put_contents($tmpFiles[$i], $empty);
                 continue;
             }
 
@@ -56,7 +59,7 @@ final class Parser
             }
             if ($pid === 0) {
                 // Child: process this chunk and exit
-                $this->processChunk($inputPath, $starts[$i], $ends[$i], $tmpFiles[$i]);
+                $this->processChunk($inputPath, $starts[$i], $ends[$i], $tmpFiles[$i], $useIgbinary);
                 exit(0);
             }
             $pids[$i] = $pid;
@@ -70,7 +73,8 @@ final class Parser
         // Merge worker results in order 0..WORKERS-1 (preserves first-seen URL ordering)
         $merged = [];
         for ($i = 0; $i < self::WORKERS; $i++) {
-            $wdata = unserialize(file_get_contents($tmpFiles[$i]));
+            $raw = file_get_contents($tmpFiles[$i]);
+            $wdata = $useIgbinary ? igbinary_unserialize($raw) : unserialize($raw);
             unlink($tmpFiles[$i]);
             foreach ($wdata as $path => $dates) {
                 foreach ($dates as $date => $count) {
@@ -91,7 +95,7 @@ final class Parser
         file_put_contents($outputPath, json_encode($merged, JSON_PRETTY_PRINT));
     }
 
-    private function processChunk(string $inputPath, int $start, int $end, string $tmpFile): void
+    private function processChunk(string $inputPath, int $start, int $end, string $tmpFile, bool $useIgbinary): void
     {
         $fh = fopen($inputPath, 'rb');
         fseek($fh, $start);
@@ -101,51 +105,68 @@ final class Parser
 
         while ($toRead > 0) {
             $raw = fread($fh, min(self::BUF_SIZE, $toRead));
-            $toRead -= strlen($raw); // actual bytes read (may be less than requested)
+            $toRead -= strlen($raw);
 
-            $buf = $leftover . $raw;
-            $lastNL = strrpos($buf, "\n");
-
-            if ($lastNL === false) {
-                $leftover = $buf;
-                continue;
-            }
-
-            $leftover = substr($buf, $lastNL + 1);
-            $lines = explode("\n", substr($buf, 0, $lastNL + 1));
-            $lineCount = count($lines) - 1; // last element is always '' (buf ends with \n)
-
-            for ($i = 0; $i < $lineCount; $i++) {
-                $l = $lines[$i];
-                $len = strlen($l);
-                if ($len < 27) {
-                    // guard against empty/malformed lines
+            // Handle junction line: leftover bytes from previous buffer + start of $raw
+            if ($leftover !== '') {
+                $firstNL = strpos($raw, "\n");
+                if ($firstNL !== false) {
+                    $jl = $leftover . substr($raw, 0, $firstNL);
+                    $jLen = strlen($jl);
+                    if ($jLen >= 45) {
+                        // path: offset 19 (https://stitcher.io = 19 chars), length = jLen - 45
+                        // date: offset jLen - 25 (commaPos + 1 = jLen - 26 + 1), length = 10
+                        $path = substr($jl, 19, $jLen - 45);
+                        $date = substr($jl, $jLen - 25, 10);
+                        if (isset($data[$path][$date])) {
+                            $data[$path][$date]++;
+                        } else {
+                            $data[$path][$date] = 1;
+                        }
+                    }
+                    $scanStart = $firstNL + 1;
+                } else {
+                    // Entire raw is still part of the leftover partial line
+                    $leftover .= $raw;
                     continue;
                 }
+            } else {
+                $scanStart = 0;
+            }
 
-                $commaPos = $len - 26; // timestamp always 25 chars + comma = 26 from end
-                $pathStart = strpos($l, '/', 8); // 3rd slash: skip past 'https://'
-                $path = substr($l, $pathStart, $commaPos - $pathStart);
-                $date = substr($l, $commaPos + 1, 10);
+            // New leftover: bytes after last \n in $raw
+            $lastNL = strrpos($raw, "\n");
+            $leftover = $lastNL !== false ? substr($raw, $lastNL + 1) : $raw;
 
-                if (isset($data[$path][$date])) {
-                    $data[$path][$date]++;
-                } else {
-                    $data[$path][$date] = 1;
+            // Scan $raw directly — no concat, no explode, no intermediate array
+            $pos = $scanStart;
+            while (($nlPos = strpos($raw, "\n", $pos)) !== false && $nlPos <= $lastNL) {
+                $lineLen = $nlPos - $pos;
+                if ($lineLen >= 45) {
+                    // URL base 'https://stitcher.io' is always 19 bytes (fixed offset)
+                    // comma always at lineLen - 26 (timestamp = 25 chars + 1 comma)
+                    // path: [pos+19 .. pos+lineLen-27], length = lineLen - 45
+                    // date: [pos+lineLen-25 .. pos+lineLen-16], length = 10
+                    $path = substr($raw, $pos + 19, $lineLen - 45);
+                    $date = substr($raw, $pos + $lineLen - 25, 10);
+                    if (isset($data[$path][$date])) {
+                        $data[$path][$date]++;
+                    } else {
+                        $data[$path][$date] = 1;
+                    }
                 }
+                $pos = $nlPos + 1;
             }
         }
 
         fclose($fh);
 
-        // Process any leftover bytes (partial line at chunk end, no trailing \n)
+        // Final leftover: partial line at chunk end (no trailing \n)
         if ($leftover !== '') {
             $len = strlen($leftover);
-            if ($len >= 27) {
-                $commaPos = $len - 26;
-                $pathStart = strpos($leftover, '/', 8);
-                $path = substr($leftover, $pathStart, $commaPos - $pathStart);
-                $date = substr($leftover, $commaPos + 1, 10);
+            if ($len >= 45) {
+                $path = substr($leftover, 19, $len - 45);
+                $date = substr($leftover, $len - 25, 10);
                 if (isset($data[$path][$date])) {
                     $data[$path][$date]++;
                 } else {
@@ -154,7 +175,7 @@ final class Parser
             }
         }
 
-        file_put_contents($tmpFile, serialize($data));
+        $payload = $useIgbinary ? igbinary_serialize($data) : serialize($data);
+        file_put_contents($tmpFile, $payload);
     }
-
 }
