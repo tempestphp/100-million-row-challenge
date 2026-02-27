@@ -8,7 +8,7 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
-        ini_set('memory_limit', '1G');
+        ini_set('memory_limit', '-1');
         $fileSize = filesize($inputPath);
 
         if ($fileSize < 1024 * 1024 * 2 || !function_exists('pcntl_fork') || self::NUM_WORKERS === 1) {
@@ -98,18 +98,18 @@ final class Parser
         $order = [];
         $orderCounter = 0;
         $pos = $start;
-        $chunkSize = 16 * 1024 * 1024; // 16MB
+        $chunkSize = 128 * 1024 * 1024; // 128MB
 
         while ($pos < $end) {
-            $readTo = min($pos + $chunkSize, $end);
+            $readTo = \min($pos + $chunkSize, $end);
             $bytesToRead = $readTo - $pos;
-            $buffer = fread($fp, $bytesToRead);
+            $buffer = \fread($fp, $bytesToRead);
             if ($buffer === false || $buffer === '') {
                 break;
             }
 
             if ($readTo < $end) {
-                $extra = fgets($fp);
+                $extra = \fgets($fp);
                 if ($extra !== false) {
                     $buffer .= $extra;
                 }
@@ -117,19 +117,14 @@ final class Parser
 
             $pos += \strlen($buffer);
 
-            if (\preg_match_all('/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/m', $buffer, $matches)) {
-                $paths = $matches[1];
-                $dates = $matches[2];
-                $count = \count($paths);
-
-                for ($i = 0; $i < $count; ++$i) {
-                    $path = $paths[$i];
-                    $date = $dates[$i];
-
-                    $order[$path] ??= ++$orderCounter;
-                    $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
-                }
-            }
+            \preg_replace_callback(
+                '/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/m',
+                static function ($matches) use (&$order, &$result, &$orderCounter) {
+                    $order[$matches[1]] ??= ++$orderCounter;
+                    $result[$matches[1]][$matches[2]] = ($result[$matches[1]][$matches[2]] ?? 0) + 1;
+                },
+                $buffer
+            );
         }
 
         fclose($fp);
