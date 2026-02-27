@@ -10,10 +10,10 @@ if (isset($argv[1]) && $argv[1] === 'data:parse') {
     $name = null;
 
     for ($i = 2; $i < $argc; $i++) {
-        if (str_starts_with($argv[$i], '--inputPath=')) {
-            $inputPath = substr($argv[$i], 12);
-        } elseif (str_starts_with($argv[$i], '--outputPath=')) {
-            $outputPath = substr($argv[$i], 13);
+        if (str_starts_with($argv[$i], '--inputPath=') || str_starts_with($argv[$i], '--input-path=')) {
+            $inputPath = substr($argv[$i], strpos($argv[$i], '=') + 1);
+        } elseif (str_starts_with($argv[$i], '--outputPath=') || str_starts_with($argv[$i], '--output-path=')) {
+            $outputPath = substr($argv[$i], strpos($argv[$i], '=') + 1);
         } elseif ($argv[$i] === '--store') {
             $store = true;
         } elseif (str_starts_with($argv[$i], '--name=')) {

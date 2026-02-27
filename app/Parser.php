@@ -6,8 +6,8 @@ require_once __DIR__ . '/parse.php';
 
 final class Parser
 {
-    public function parse($inputPath, $outputPath)
+    public function parse($i, $o)
     {
-        \App\parse($inputPath, $outputPath);
+        \App\parse($i, $o);
     }
 }
