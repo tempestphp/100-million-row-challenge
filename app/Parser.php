@@ -19,7 +19,8 @@ final class Parser
         gc_disable();
         $this->initializePathCache();
         $this->initializeGeneratedDateCache();
-        $workers = max(2, (int) (getenv('PARSER_WORKERS') ?: '4'));
+
+        $workers = max(2, (int) (getenv('PARSER_WORKERS') ?: '10'));
 
         $this->parseParallel($inputPath, $outputPath, $workers);
     }
@@ -45,7 +46,7 @@ final class Parser
 
             if ($pid === 0) {
                 try {
-                    $this->parseRange($inputPath, $range['start'], $range['end'], $tmpFile);
+                    $this->parseRange($inputPath, $range['start'], $range['end'], $tmpFile, $index);
                     exit(0);
                 } catch (\Throwable $e) {
                     fwrite(STDERR, "[parser-worker-error] {$e->getMessage()}\n");
@@ -60,24 +61,7 @@ final class Parser
             pcntl_waitpid($pid, $status);
         }
 
-        $countsByPath = [];
-        foreach ($tmpFiles as $tmpFile) {
-            $workerCountsByPath = unserialize(file_get_contents($tmpFile));
-            unlink($tmpFile);
-
-            foreach ($workerCountsByPath as $pathId => $workerDateCounts) {
-                if (! isset($countsByPath[$pathId])) {
-                    $countsByPath[$pathId] = $workerDateCounts;
-                } else {
-                    $row = &$countsByPath[$pathId];
-                    foreach ($workerDateCounts as $dateKey => $count) {
-                        $row[$dateKey] = ($row[$dateKey] ?? 0) + $count;
-                    }
-                }
-            }
-        }
-
-        $this->buildVisitsAndWriteOutput($countsByPath, $outputPath);
+        $this->mergeAndWriteOutput($tmpFiles, $outputPath);
     }
 
     private function parseSingleRange(string $inputPath, string $outputPath): void
@@ -177,59 +161,149 @@ final class Parser
     /**
      * @return ($tmpFile is null ? array<int, array<int, int>> : void)
      */
-    private function parseRange(string $inputPath, int $start, int $end, ?string $tmpFile = null): array|null
+    private function parseRange(string $inputPath, int $start, int $end, ?string $tmpFile = null, int $workerIndex = -1): array|null
     {
         $input = fopen($inputPath, 'r');
-
-        stream_set_read_buffer($input, 1024 * 1024);
-
+        stream_set_read_buffer($input, 128 * 1024);
         fseek($input, $start);
 
         $countsByPath = [];
         $pathIdByPath = &$this->pathIdByPath;
+        $dateKeyByString = &$this->generatedDateKeyByString;
         $buffer = '';
-        $chunkSize = $this->getReadChunkSize();
+        $bufferOffset = 0;
+        $chunkSize = max(65_536, min(16_777_216, (int) (getenv('PARSER_READ_CHUNK_SIZE') ?: self::DEFAULT_READ_CHUNK_SIZE)));
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($input, min($chunkSize, $remaining));
+            if ($bufferOffset > 0) {
+                $buffer = substr($buffer, $bufferOffset);
+                $bufferOffset = 0;
+            }
+
+            $chunk = fread($input, $remaining > $chunkSize ? $chunkSize : $remaining);
 
             if ($chunk === '' || $chunk === false) {
                 break;
             }
 
-            $remaining -= strlen($chunk);
+            $remaining -= $chunkSize;
             $buffer .= $chunk;
             $lineStart = 0;
 
             while (($newlinePos = strpos($buffer, "\n", $lineStart)) !== false) {
                 $row = &$countsByPath[$pathIdByPath[substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51)]];
-                $dateKey =
-                    (ord($buffer[$newlinePos - 22]) - 48) * 10000 +
-                    (ord($buffer[$newlinePos - 20]) - 48) * 1000 +
-                    (ord($buffer[$newlinePos - 19]) - 48) * 100 +
-                    (ord($buffer[$newlinePos - 17]) - 48) * 10 +
-                    (ord($buffer[$newlinePos - 16]) - 48);
+                $dateKey = $dateKeyByString[substr($buffer, $newlinePos - 22, 7)];
 
                 $row[$dateKey] = ($row[$dateKey] ?? 0) + 1;
 
                 $lineStart = $newlinePos + 1;
             }
 
-            if ($lineStart > 0) {
-                $buffer = substr($buffer, $lineStart);
-            }
+            $bufferOffset = $lineStart;
         }
 
         fclose($input);
+        file_put_contents($tmpFile, serialize($countsByPath));
+    }
 
-        if ($tmpFile !== null) {
-            file_put_contents($tmpFile, serialize($countsByPath));
-
-            return null;
+    private function mergeAndWriteOutput(array $tmpFiles, string $outputPath): void
+    {
+        set_error_handler(fn () => true);
+        $file = fopen($outputPath, 'w');
+        // Load all worker results upfront
+        // $allWorkerResults = [
+        //     0 => unserialize(file_get_contents($tmpFiles[0])),
+        //     1 => unserialize(file_get_contents($tmpFiles[1])),
+        //     2 => unserialize(file_get_contents($tmpFiles[2])),
+        //     3 => unserialize(file_get_contents($tmpFiles[3])),
+        //     4 => unserialize(file_get_contents($tmpFiles[4])),
+        //     5 => unserialize(file_get_contents($tmpFiles[5])),
+        //     6 => unserialize(file_get_contents($tmpFiles[6])),
+        //     7 => unserialize(file_get_contents($tmpFiles[7])),
+        //     8 => unserialize(file_get_contents($tmpFiles[8])),
+        //     9 => unserialize(file_get_contents($tmpFiles[9])),
+        // ];
+        foreach ($tmpFiles as $tmpFile) {
+            $allWorkerResults[] = unserialize(file_get_contents($tmpFile));
+        //     // unlink($tmpFile);
         }
 
-        return $countsByPath;
+        // Collect all unique pathIds — array + union on pathId-keyed arrays
+        $pathIds = $allWorkerResults[0] + $allWorkerResults[1] + $allWorkerResults[2] + $allWorkerResults[3] + $allWorkerResults[4] + $allWorkerResults[5] + $allWorkerResults[6] + $allWorkerResults[7] + $allWorkerResults[8] + $allWorkerResults[9];
+
+        $dateLinePrefix = &$this->generatedDateLinePrefix;
+        $pathLinePrefix = &$this->pathLinePrefix;
+        $workerCount = 10;
+        $pathCount = count($pathIds);
+
+        $w0_results = &$allWorkerResults[0];
+        // $w1_results = &$allWorkerResults[1];
+        // $w2_results = &$allWorkerResults[2];
+        // $w3_results = &$allWorkerResults[3];
+        // $w4_results = &$allWorkerResults[4];
+        // $w5_results = &$allWorkerResults[5];
+        // $w6_results = &$allWorkerResults[6];
+        // $w7_results = &$allWorkerResults[7];
+        // $w8_results = &$allWorkerResults[8];
+        // $w9_results = &$allWorkerResults[9];
+
+        fwrite($file, '{' . PHP_EOL);
+
+        // Single loop: for each path, merge all workers, sort, write
+        foreach ($pathIds as $pathId => $_) {
+            $dateCounts = &$w0_results[$pathId];
+
+            for ($w = 1; $w < 10; ++$w) {
+                foreach ($allWorkerResults[$w][$pathId] as $dateKey => $count) {
+                    $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+                }
+            }
+            // foreach ($w1_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w2_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w3_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w4_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w5_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w6_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w7_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w8_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+            // foreach ($w9_results[$pathId] as $dateKey => $count) {
+            //     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
+            // }
+
+            ksort($dateCounts, SORT_NUMERIC);
+
+            $buffer = $pathLinePrefix[$pathId];
+            $dateCount = count($dateCounts);
+
+            foreach ($dateCounts as $dateKey => $count) {
+                $buffer .= $dateLinePrefix[$dateKey] . $count . ((--$dateCount) ? ',' : '') . PHP_EOL;
+            }
+
+
+            $buffer .= ((--$pathCount) ? '    },' : '    }') . PHP_EOL;
+
+            fwrite($file, $buffer);
+        }
+
+        fwrite($file, '}');
+        fclose($file);
     }
 
     private function buildVisitsAndWriteOutput(array $countsByPath, string $outputPath): void
@@ -248,16 +322,17 @@ final class Parser
             $dateCount = count($dateCounts);
 
             foreach ($dateCounts as $dateKey => $count) {
-                $dateComma = (--$dateCount) ? ',' : '';
-                $buffer .= $dateLinePrefix[$dateKey] . $count . $dateComma . PHP_EOL;
+                $buffer .= $dateLinePrefix[$dateKey] . $count . ((--$dateCount) ? ',' : '') . PHP_EOL;
             }
 
-            $pathComma = (--$pathCount) ? ',' : '';
-            $buffer .= '    }' . $pathComma . PHP_EOL;
+
+            $buffer .= ((--$pathCount) ? '    },' : '    }') . PHP_EOL;
+            // fwrite($file, $buffer . '    }' . $pathComma . PHP_EOL);
+            // $buffer = '';
+
         }
 
-        $buffer .= '}';
-        fwrite($file, $buffer);
+        fwrite($file, $buffer . '}');
         fclose($file);
     }
 
@@ -310,23 +385,6 @@ final class Parser
 
         $this->generatedDateKeyByString = $dateKeyByString;
         $this->generatedDateLinePrefix = $dateLinePrefix;
-    }
-
-    private function getReadChunkSize(): int
-    {
-        if ($this->readChunkSize !== null) {
-            return $this->readChunkSize;
-        }
-
-        $size = (int) (getenv('PARSER_READ_CHUNK_SIZE') ?: self::DEFAULT_READ_CHUNK_SIZE);
-
-        if ($size < 65_536) {
-            $size = 65_536;
-        } elseif ($size > 16_777_216) {
-            $size = 16_777_216;
-        }
-
-        return $this->readChunkSize = $size;
     }
 
 }
