@@ -53,9 +53,55 @@ final class Parser
             $dateIdChars[$date] = \chr($id & 0xFF) . \chr($id >> 8);
         }
 
+        $byLen = [];
+        foreach ($pathIds as $path => $id) {
+            $byLen[\strlen($path)][] = ['p' => $path, 'id' => $id];
+        }
+        $dp1 = \array_fill(0, 100, 19);
+        $dp2 = \array_fill(0, 100, 20);
+        $fastP = [];
+        foreach ($byLen as $len => $group) {
+            $gc = \count($group);
+            if ($gc === 1) {
+                $dp1[$len] = 19; $dp2[$len] = 20;
+                $g = $group[0];
+                $fastP[$len][$g['p'][0]][$g['p'][1]] = $g['id'];
+                continue;
+            }
+            $best1 = 0; $best2 = 1; $bestScore = 0;
+            for ($i = 0; $i < $len && $bestScore < $gc; $i++) {
+                for ($j = $i + 1; $j < $len; $j++) {
+                    $seen = [];
+                    foreach ($group as $g) {
+                        $k = $g['p'][$i] . $g['p'][$j];
+                        $seen[$k] = ($seen[$k] ?? 0) + 1;
+                    }
+                    $u = 0;
+                    foreach ($seen as $c) if ($c === 1) $u++;
+                    if ($u > $bestScore) { $bestScore = $u; $best1 = $i; $best2 = $j; }
+                    if ($u === $gc) break 2;
+                }
+            }
+            $dp1[$len] = 19 + $best1;
+            $dp2[$len] = 19 + $best2;
+            foreach ($group as $g) {
+                $b1 = $g['p'][$best1]; $b2 = $g['p'][$best2];
+                $unique = true;
+                foreach ($group as $g2) {
+                    if ($g2['id'] !== $g['id'] && $g2['p'][$best1] === $b1 && $g2['p'][$best2] === $b2) {
+                        $unique = false; break;
+                    }
+                }
+                if ($unique) $fastP[$len][$b1][$b2] = $g['id'];
+            }
+        }
+        unset($byLen);
+
         if ($fileSize >= 10485760) {
-            if (PHP_OS_FAMILY === 'Darwin') {
-                $numWorkers = (int)\trim(\shell_exec('sysctl -n hw.ncpu'));
+            if (($envW = \getenv('WORKERS')) !== false) {
+                $numWorkers = (int)$envW;
+            } elseif (PHP_OS_FAMILY === 'Darwin') {
+                $numWorkers = (int)\trim(\shell_exec('sysctl -n hw.ncpu')) + 2;
             } else {
                 $numWorkers = (int)(\trim(\shell_exec('nproc 2>/dev/null') ?: '8'));
             }
@@ -120,27 +166,33 @@ final class Parser
                             while (true) {
                                 $nlPos = \strpos($chunk, "\n", $pos);
                                 if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pL = $nlPos - $pos - 45;
+                                $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                                 $pos = $nlPos + 1;
                                 $nlPos = \strpos($chunk, "\n", $pos);
                                 if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pL = $nlPos - $pos - 45;
+                                $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                                 $pos = $nlPos + 1;
                                 $nlPos = \strpos($chunk, "\n", $pos);
                                 if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pL = $nlPos - $pos - 45;
+                                $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                                 $pos = $nlPos + 1;
                                 $nlPos = \strpos($chunk, "\n", $pos);
                                 if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pL = $nlPos - $pos - 45;
+                                $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                                 $pos = $nlPos + 1;
                                 $nlPos = \strpos($chunk, "\n", $pos);
                                 if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pL = $nlPos - $pos - 45;
+                                $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                                 $pos = $nlPos + 1;
                                 $nlPos = \strpos($chunk, "\n", $pos);
                                 if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                                $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                                $pL = $nlPos - $pos - 45;
+                                $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                                 $pos = $nlPos + 1;
                             }
                         }
@@ -211,27 +263,33 @@ final class Parser
                     while (true) {
                         $nlPos = \strpos($chunk, "\n", $pos);
                         if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                        $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                        $pL = $nlPos - $pos - 45;
+                        $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                         $pos = $nlPos + 1;
                         $nlPos = \strpos($chunk, "\n", $pos);
                         if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                        $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                        $pL = $nlPos - $pos - 45;
+                        $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                         $pos = $nlPos + 1;
                         $nlPos = \strpos($chunk, "\n", $pos);
                         if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                        $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                        $pL = $nlPos - $pos - 45;
+                        $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                         $pos = $nlPos + 1;
                         $nlPos = \strpos($chunk, "\n", $pos);
                         if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                        $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                        $pL = $nlPos - $pos - 45;
+                        $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                         $pos = $nlPos + 1;
                         $nlPos = \strpos($chunk, "\n", $pos);
                         if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                        $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                        $pL = $nlPos - $pos - 45;
+                        $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                         $pos = $nlPos + 1;
                         $nlPos = \strpos($chunk, "\n", $pos);
                         if ($nlPos === false) { $leftover = \substr($chunk, $pos); break; }
-                        $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
+                        $pL = $nlPos - $pos - 45;
+                        $buckets[$fastP[$pL][$chunk[$pos + $dp1[$pL]]][$chunk[$pos + $dp2[$pL]]] ?? $pathIds[\substr($chunk, $pos + 19, $pL)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                         $pos = $nlPos + 1;
                     }
                 }
@@ -260,25 +318,20 @@ final class Parser
             }
             unset($buckets);
 
-            $childRaw = [];
             $remaining = \count($childPids);
             while ($remaining > 0) {
                 $pid = \pcntl_wait($status);
                 $w = \array_search($pid, $childPids);
                 if ($w === false) continue;
-                $childRaw[] = \file_get_contents($tmpPrefix . $w);
+                $raw = \file_get_contents($tmpPrefix . $w);
                 @\unlink($tmpPrefix . $w);
-                $remaining--;
-            }
-
-            foreach ($childRaw as $raw) {
                 $j = 0;
                 foreach (\unpack('V*', $raw) as $v) {
                     $counts[$j] += $v;
                     $j++;
                 }
+                $remaining--;
             }
-            unset($childRaw);
 
             $escapedPaths = [];
             $datePrefixes = [];
