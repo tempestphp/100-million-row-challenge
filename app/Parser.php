@@ -4,7 +4,7 @@ namespace App;
 
 final class Parser
 {
-    public function parse1(string $inputPath, string $outputPath): void
+    public function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
         $f = fopen($inputPath, 'rb');
