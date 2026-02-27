@@ -19,7 +19,7 @@ use function substr;
 
 final class Parser
 {
-    private const int READ_CHUNK_SIZE = 1024 * 1024 * 16;
+    private const int READ_CHUNK_SIZE = 1024 * 1024 * 4;
 
     // "https://stitcher.io" is 19 chars long
     private const int URL_HOST_LEN = 19;
@@ -39,22 +39,23 @@ final class Parser
     {
         try {
             $toEncode = [];
+            $matches = [];
             ($this->inputHandle = fopen($inputPath, "r")) || throw new Exception("Couldn't open input file");
             foreach ($this->getChunk() as $chunk) {
-                /** @var string $row */
-                foreach($chunk as $row) {
-                    if(!$row) {
-                        continue;
+                preg_match_all(";^https://stitcher.io(/[^,]+),(.{10});m", $chunk, $matches);
+                $matchCount = count($matches[1]);
+                for ($key = 0; $key < $matchCount; $key++) {
+                    $path = $matches[1][$key];
+                    $date = $matches[2][$key];
+
+                    if (!isset($toEncode[$path])) {
+                        $toEncode[$path] = [$date => 0];
                     }
-                    $parts = explode(",", substr($row, self::URL_HOST_LEN, self::TIMESTAMP_TIME_LEN));
-                    if (!isset($toEncode[$parts[0]])) {
-                        $toEncode[$parts[0]] = [$parts[1] => 0];
-                    }
-                    if (!isset($toEncode[$parts[0]][$parts[1]])) {
-                        $toEncode[$parts[0]][$parts[1]] = 0;
+                    if (!isset($toEncode[$path][$date])) {
+                        $toEncode[$path][$date] = 0;
                     }
 
-                    $toEncode[$parts[0]][$parts[1]]++;
+                    $toEncode[$path][$date]++;
                 }
             }
 
@@ -69,7 +70,7 @@ final class Parser
     }
 
     /**
-     * @return Generator<array<int, string>>
+     * @return Generator<string>
      */
     private function getChunk(): Generator
     {
@@ -78,7 +79,7 @@ final class Parser
             if (!str_ends_with($str, "\n")) {
                 $str .= (string) fgets($this->inputHandle, 1024);
             }
-            yield explode("\n", $str);
+            yield($str);
         }
     }
 }
