@@ -11,8 +11,8 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const WORKERS = 10;
-    private const BUF_SIZE = 163_840; // 160 KB — L1-cache-friendly reads
+    private const WORKERS = 12;
+    private const BUF_SIZE = 524288; // 512 KB — fewer fread syscalls
     private const PROBE_SIZE = 2_097_152; // 2 MB warm-up scan
 
     public function parse(string $inputPath, string $outputPath): void
@@ -27,7 +27,7 @@ final class Parser
             return;
         }
 
-        // Build date lookup table: 2020–2026
+        // Build date lookup table: 2021–2026
         $dateChars = [];
         $dateLabels = [];
         $dateCount = 0;
