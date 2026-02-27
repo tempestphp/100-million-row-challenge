@@ -28,6 +28,7 @@ final class Parser
                 // child
                 $start = ($childNo - 1) * $childSize;
                 $this->processFile($start, $childSize, $socks[1], $inputPath);
+                fflush($socks[1]);
                 fclose($socks[1]);
                 exit(0);
             }
