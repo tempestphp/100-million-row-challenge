@@ -65,13 +65,12 @@ final class Parser
             $ncpu = PHP_OS_FAMILY === 'Darwin'
                 ? (int)\trim(\shell_exec('sysctl -n hw.ncpu'))
                 : (int)(\trim(\shell_exec('nproc 2>/dev/null') ?: '8'));
-            $numWorkers = $ncpu + 4;
-            $totalSegments = $numWorkers * 4;
+            $numWorkers = $ncpu + 2;
 
             $handle = \fopen($inputPath, 'rb');
             $splits = [0];
-            for ($s = 1; $s < $totalSegments; $s++) {
-                \fseek($handle, (int)($fileSize * $s / $totalSegments));
+            for ($s = 1; $s < $numWorkers; $s++) {
+                \fseek($handle, (int)($fileSize * $s / $numWorkers));
                 \fgets($handle);
                 $splits[] = \ftell($handle);
             }
@@ -90,11 +89,10 @@ final class Parser
                     \stream_set_read_buffer($handle, 0);
                     $buckets = \array_fill(0, $pathCount, '');
 
-                    for ($seg = $w; $seg < $totalSegments; $seg += $numWorkers) {
-                        \fseek($handle, $splits[$seg]);
-                        $remaining = $splits[$seg + 1] - $splits[$seg];
+                    \fseek($handle, $splits[$w]);
+                    $remaining = $splits[$w + 1] - $splits[$w];
 
-                        while ($remaining > 0) {
+                    while ($remaining > 0) {
                             $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
                             $chunk = \fread($handle, $toRead);
                             if ($chunk === false || $chunk === '') break;
@@ -139,7 +137,6 @@ final class Parser
                                 $pos = $nlPos + 1;
                             }
                         }
-                    }
                     \fclose($handle);
 
                     $counts = \array_fill(0, $totalCells, 0);
@@ -156,16 +153,13 @@ final class Parser
                 $childPids[$w] = $pid;
             }
 
-            // Parent is worker 0: round-robin segments
+            // Parent is worker 0: contiguous segment
             $handle = \fopen($inputPath, 'rb');
             \stream_set_read_buffer($handle, 0);
             $buckets = \array_fill(0, $pathCount, '');
+            $remaining = $splits[1] - $splits[0];
 
-            for ($seg = 0; $seg < $totalSegments; $seg += $numWorkers) {
-                \fseek($handle, $splits[$seg]);
-                $remaining = $splits[$seg + 1] - $splits[$seg];
-
-                while ($remaining > 0) {
+            while ($remaining > 0) {
                 $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
                 $chunk = \fread($handle, $toRead);
                 if ($chunk === false || $chunk === '') break;
@@ -208,7 +202,6 @@ final class Parser
                     if ($nlPos === false || $nlPos > $lastNl) break;
                     $buckets[$pathIds[\substr($chunk, $pos + 19, $nlPos - $pos - 45)]] .= $dateIdChars[\substr($chunk, $nlPos - 23, 8)];
                     $pos = $nlPos + 1;
-                }
                 }
             }
             \fclose($handle);
