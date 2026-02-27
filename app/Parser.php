@@ -63,7 +63,7 @@ final class Parser
                     default => 31,
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
-                $ymStr = $y . '-' . $mStr . '-';
+                $ymStr = "{$y}-{$mStr}-";
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $dateCount;
@@ -132,7 +132,7 @@ final class Parser
         $childMap = [];
 
         for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $tmpFile = $tmpDir . '/p100m_' . $myPid . '_' . $w;
+            $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
             $pid = pcntl_fork();
             if ($pid === 0) {
                 $wCounts = self::parseRange(
