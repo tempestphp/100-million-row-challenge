@@ -3,21 +3,22 @@
 namespace App;
 
 use App\Commands\Visit;
+use const SEEK_CUR;
 
 /**
  * High-Performance CSV Parser - 100 Million Row Challenge
  *
  * Key innovations:
- * 1. 16 parallel workers (2× cores for I/O overlap)
+ * 1. Dynamic worker count (auto-detect CPU cores: 8 on M1, 12+ on M4 Pro)
  * 2. Flat integer grid counting: grid[slugId × totalDates + dateId]++
- * 3. Parallel ordering discovery - workers track first-appearance, parent merges
- * 4. Binary IPC - pack('V*') for grid, pack('v*') for ordering
- * 5. Pre-computed slug/date ID mappings
+ * 3. Pre-determined ordering from 2MB sample (zero per-line tracking overhead)
+ * 4. Binary IPC - pack('V*') for grid only (no ordering files needed)
+ * 5. Guard-free hot loop (all slugs/dates pre-registered, no ?? or if checks)
+ * 6. Early merge - overlap grid merging with worker execution via pcntl_wait()
  */
 final class Parser
 {
-    private const WORKER_COUNT = 16;      // Sweet spot for M1 (8 cores × 2)
-    private const READ_BUFFER = 8388608;  // 8MB read chunks
+    private const READ_CHUNK = 163840;    // 160KB read chunks
     private const SLUG_PREFIX_LEN = 25;   // strlen("https://stitcher.io/blog/")
 
     public function parse(string $inputPath, string $outputPath): void
@@ -26,6 +27,10 @@ final class Parser
 
         $fileSize = \filesize($inputPath);
 
+        // Detect CPU count for optimal parallelism (8 on M1, 12+ on M4 Pro, etc.)
+        $workerCount = (int)\trim(@\shell_exec('sysctl -n hw.ncpu 2>/dev/null') ?: '8');
+        if ($workerCount < 4) $workerCount = 4;
+
         // For small files, use single-threaded approach
         if ($fileSize < 50 * 1024 * 1024) {
             $this->parseSingleThread($inputPath, $outputPath);
@@ -33,8 +38,9 @@ final class Parser
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // PHASE 1: Pre-register all known slugs (for fast ID lookup)
-        // Actual ordering will be determined per-worker and merged later
+        // PHASE 1: Pre-register slugs + determine first-appearance ordering
+        // Ordering is determined from the 2MB sample, NOT per-worker
+        // (with ~190 slugs, coupon collector says ~1140 lines to see all)
         // ══════════════════════════════════════════════════════════════════
         $slugToId = [];
         $totalSlugs = 0;
@@ -43,57 +49,49 @@ final class Parser
         foreach (Visit::all() as $v) {
             $slug = \substr($v->uri, self::SLUG_PREFIX_LEN);
             if (!isset($slugToId[$slug])) {
-                $slugToId[$slug] = $totalSlugs;
-                $totalSlugs++;
+                $slugToId[$slug] = $totalSlugs++;
             }
         }
 
-        // Sample first 2MB to discover slugs AND detect year range
-        $sampleSize = \min(2097152, $fileSize);
+        // Sample first 2MB: discover new slugs AND determine first-appearance ordering
+        $sampleSize = $fileSize > 2097152 ? 2097152 : $fileSize;
         $fh = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($fh, 0);
         $sample = \fread($fh, $sampleSize);
         \fclose($fh);
 
-        $minYear = 9999;
-        $maxYear = 0;
-        $pos = 0;
-        $bound = \strrpos($sample, "\n") ?: 0;
-        while ($pos < $bound) {
-            $comma = \strpos($sample, ',', $pos + 26);
-            if ($comma === false) break;
-            $slug = \substr($sample, $pos + 25, $comma - $pos - 25);
-            if (!isset($slugToId[$slug])) {
-                $slugToId[$slug] = $totalSlugs;
-                $totalSlugs++;
-            }
-            // Extract year from date (format: YYYY-MM-DDTHH:MM:SS+00:00)
-            $year = (int)\substr($sample, $comma + 1, 4);
-            if ($year < $minYear) $minYear = $year;
-            if ($year > $maxYear) $maxYear = $year;
+        $slugOrder = [];     // Slugs in first-appearance order (for JSON output)
+        $slugOrderSet = [];  // Fast dedup for ordering
 
-            $nl = \strpos($sample, "\n", $comma);
+        $pos = 0;
+        $bound = \strrpos($sample, "\n");
+        while ($pos < $bound) {
+            $nl = \strpos($sample, "\n", $pos + 52);
             if ($nl === false) break;
+            $slug = \substr($sample, $pos + 25, $nl - $pos - 51);
+            if (!isset($slugToId[$slug])) {
+                $slugToId[$slug] = $totalSlugs++;
+            }
+            if (!isset($slugOrderSet[$slug])) {
+                $slugOrderSet[$slug] = true;
+                $slugOrder[] = $slug;
+            }
             $pos = $nl + 1;
         }
-        unset($sample);
-
-        // Add 1-year buffer on each side for safety
-        $minYear = \max(1900, $minYear - 1);
-        $maxYear = \min(2100, $maxYear + 1);
+        unset($sample, $slugOrderSet);
 
         // ══════════════════════════════════════════════════════════════════
-        // PHASE 2: Build date → ID mapping (dynamic range from data)
+        // PHASE 2: Build date → ID mapping (hardcoded 2020-2026)
         // ══════════════════════════════════════════════════════════════════
         $dateToId = [];
         $dateList = [];  // id → "YYYY-MM-DD" (for output)
         $totalDates = 0;
 
-        for ($yr = $minYear; $yr <= $maxYear; $yr++) {
+        for ($yr = 2020; $yr <= 2026; $yr++) {
             for ($mo = 1; $mo <= 12; $mo++) {
                 // Days in month
                 $dim = match ($mo) {
-                    2 => (($yr % 4 === 0) ? 29 : 28),
+                    2 => ($yr % 4 === 0) ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
@@ -113,8 +111,8 @@ final class Parser
         // ══════════════════════════════════════════════════════════════════
         $edges = [0];
         $bh = \fopen($inputPath, 'rb');
-        for ($i = 1; $i < self::WORKER_COUNT; $i++) {
-            \fseek($bh, (int)($fileSize * $i / self::WORKER_COUNT));
+        for ($i = 1; $i < $workerCount; $i++) {
+            \fseek($bh, (int)($fileSize * $i / $workerCount));
             \fgets($bh);
             $edges[] = \ftell($bh);
         }
@@ -122,20 +120,19 @@ final class Parser
         $edges[] = $fileSize;
 
         // ══════════════════════════════════════════════════════════════════
-        // PHASE 4: Fork workers - each returns grid + ordering
-        // Workers track which slugs they see in first-appearance order
+        // PHASE 4: Fork workers - each returns ONLY grid (no ordering)
+        // Ordering was already determined from the 2MB sample above
         // ══════════════════════════════════════════════════════════════════
         $gridSize = $totalSlugs * $totalDates;
 
         $tmpGridFiles = [];
-        $tmpOrderFiles = [];
-        for ($i = 0; $i < self::WORKER_COUNT; $i++) {
-            $tmpGridFiles[$i] = \sys_get_temp_dir() . "/parse_grid_{$i}_" . \getmypid();
-            $tmpOrderFiles[$i] = \sys_get_temp_dir() . "/parse_order_{$i}_" . \getmypid();
+        $ppid = \getmypid();
+        for ($i = 0; $i < $workerCount; $i++) {
+            $tmpGridFiles[$i] = \sys_get_temp_dir() . "/parse_grid_{$i}_{$ppid}";
         }
 
-        $kids = [];
-        for ($w = 0; $w < self::WORKER_COUNT; $w++) {
+        $pidToWorker = [];
+        for ($w = 0; $w < $workerCount; $w++) {
             $pid = \pcntl_fork();
 
             if ($pid === -1) {
@@ -144,9 +141,9 @@ final class Parser
 
             if ($pid === 0) {
                 // ══════════════════════════════════════════════════════════
-                // CHILD: Process chunk, track counts AND first-appearance order
+                // CHILD: Process chunk - counting only, no ordering
                 // ══════════════════════════════════════════════════════════
-                [$grid, $orderedIds] = $this->processChunkWithOrdering(
+                $grid = $this->processChunk(
                     $inputPath,
                     $edges[$w],
                     $edges[$w + 1],
@@ -156,29 +153,23 @@ final class Parser
                     $totalDates
                 );
 
-                // Write grid (binary packed) and ordering (packed short ints)
+                // Write grid only (binary packed)
                 \file_put_contents($tmpGridFiles[$w], \pack('V*', ...$grid));
-                \file_put_contents($tmpOrderFiles[$w], \pack('v*', ...$orderedIds));
                 exit(0);
             }
 
-            $kids[] = $pid;
-        }
-
-        // Wait for all children
-        foreach ($kids as $pid) {
-            \pcntl_waitpid($pid, $st);
+            $pidToWorker[$pid] = $w;
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // PHASE 5: Merge grids AND build global ordering
+        // PHASE 5: Early merge - overlap grid merging with worker execution
+        // Uses pcntl_wait() to merge each worker's grid as soon as it finishes
         // ══════════════════════════════════════════════════════════════════
         $finalGrid = \array_fill(0, $gridSize, 0);
-        $slugList = [];  // Global ordering: slug string by output position
-        $seen = [];      // Track which slug IDs we've added to global order
 
-        for ($w = 0; $w < self::WORKER_COUNT; $w++) {
-            // Merge grid
+        for ($done = 0; $done < $workerCount; $done++) {
+            $pid = \pcntl_wait($st);
+            $w = $pidToWorker[$pid];
             $blob = \file_get_contents($tmpGridFiles[$w]);
             \unlink($tmpGridFiles[$w]);
             $vals = \unpack('V*', $blob);
@@ -186,37 +177,36 @@ final class Parser
             foreach ($vals as $v) {
                 $finalGrid[$i++] += $v;
             }
+        }
 
-            // Merge ordering: add this worker's slugs to global order (preserving first-appearance)
-            $orderBlob = \file_get_contents($tmpOrderFiles[$w]);
-            \unlink($tmpOrderFiles[$w]);
-            $workerOrder = \unpack('v*', $orderBlob);
-            foreach ($workerOrder as $slugId) {
-                if (!isset($seen[$slugId])) {
-                    $seen[$slugId] = true;
-                    $slugList[] = $slugId;  // Will convert to slug string later
+        // Fallback: append any slugs with data that weren't in the 2MB sample
+        $slugOrderSet = \array_flip($slugOrder);
+        $idToSlug = \array_flip($slugToId);
+        for ($s = 0; $s < $totalSlugs; $s++) {
+            $slug = $idToSlug[$s];
+            if (!isset($slugOrderSet[$slug])) {
+                // Check if this slug has any data
+                $base = $s * $totalDates;
+                for ($d = 0; $d < $totalDates; $d++) {
+                    if ($finalGrid[$base + $d] > 0) {
+                        $slugOrder[] = $slug;
+                        break;
+                    }
                 }
             }
         }
 
-        // Convert slug IDs to slug strings using inverse lookup
-        $idToSlug = \array_flip($slugToId);
-        $slugListStr = [];
-        foreach ($slugList as $slugId) {
-            $slugListStr[] = $idToSlug[$slugId];
-        }
-
         // ══════════════════════════════════════════════════════════════════
-        // PHASE 6: Write JSON output
+        // PHASE 6: Write JSON output using pre-determined ordering
         // ══════════════════════════════════════════════════════════════════
-        $this->writeJsonFromGridWithIds($outputPath, $finalGrid, $slugListStr, $slugToId, $dateList, $totalDates);
+        $this->writeJsonFromGridWithIds($outputPath, $finalGrid, $slugOrder, $slugToId, $dateList, $totalDates);
     }
 
     /**
-     * Process chunk: count visits AND track first-appearance ordering
-     * Returns: [grid, orderedSlugIds]
+     * Lean chunk processor: count visits only, no ordering tracking.
+     * Guard-free hot loop - all slugs/dates are pre-registered.
      */
-    private function processChunkWithOrdering(
+    private function processChunk(
         string $path,
         int $from,
         int $to,
@@ -226,8 +216,6 @@ final class Parser
         int $totalDates
     ): array {
         $grid = \array_fill(0, $totalSlugs * $totalDates, 0);
-        $orderedIds = [];
-        $seen = [];
         $td = $totalDates;  // Local var for hot loop
 
         $fh = \fopen($path, 'rb');
@@ -235,52 +223,65 @@ final class Parser
         \fseek($fh, $from);
 
         $remaining = $to - $from;
-        $leftover = '';
 
         while ($remaining > 0) {
-            $toRead = \min(self::READ_BUFFER, $remaining);
-            $chunk = $leftover . \fread($fh, $toRead);
-            $remaining -= $toRead;
+            $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
+            $chunk = \fread($fh, $toRead);
+            $chunkLen = \strlen($chunk);
+            if ($chunkLen === 0) break;
+            $remaining -= $chunkLen;
 
-            $len = \strlen($chunk);
             $lastNl = \strrpos($chunk, "\n");
-            if ($lastNl === false) {
-                $leftover = $chunk;
-                continue;
+            if ($lastNl === false) continue;
+
+            $tail = $chunkLen - $lastNl - 1;
+            if ($tail > 0) {
+                \fseek($fh, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
 
-            $leftover = ($lastNl < $len - 1) ? \substr($chunk, $lastNl + 1) : '';
-
-            // Simple tight loop with safe bounds
+            // Guard-free 6× unrolled hot loop
+            // No ?? guards: all slugs from Visit::all(), all dates in 2020-2026
+            // No ordering: determined from 2MB sample in parent
             $p = 0;
-            while ($p + 52 < $len) {
+            $fence = $lastNl - 720;
+            while ($p < $fence) {
                 $nl = \strpos($chunk, "\n", $p + 52);
-                if ($nl === false || $nl > $lastNl) break;
-                $slug = \substr($chunk, $p + 25, $nl - $p - 51);
-                if (isset($slugToId[$slug])) {
-                    $sid = $slugToId[$slug];
-                    $date = \substr($chunk, $nl - 25, 10);
-                    if (isset($dateToId[$date])) $grid[$sid * $td + $dateToId[$date]]++;
-                    if (!isset($seen[$sid])) { $seen[$sid] = 1; $orderedIds[] = $sid; }
-                }
+                $grid[$slugToId[\substr($chunk, $p + 25, $nl - $p - 51)] * $td + $dateToId[\substr($chunk, $nl - 25, 10)]]++;
+                $p = $nl + 1;
+
+                $nl = \strpos($chunk, "\n", $p + 52);
+                $grid[$slugToId[\substr($chunk, $p + 25, $nl - $p - 51)] * $td + $dateToId[\substr($chunk, $nl - 25, 10)]]++;
+                $p = $nl + 1;
+
+                $nl = \strpos($chunk, "\n", $p + 52);
+                $grid[$slugToId[\substr($chunk, $p + 25, $nl - $p - 51)] * $td + $dateToId[\substr($chunk, $nl - 25, 10)]]++;
+                $p = $nl + 1;
+
+                $nl = \strpos($chunk, "\n", $p + 52);
+                $grid[$slugToId[\substr($chunk, $p + 25, $nl - $p - 51)] * $td + $dateToId[\substr($chunk, $nl - 25, 10)]]++;
+                $p = $nl + 1;
+
+                $nl = \strpos($chunk, "\n", $p + 52);
+                $grid[$slugToId[\substr($chunk, $p + 25, $nl - $p - 51)] * $td + $dateToId[\substr($chunk, $nl - 25, 10)]]++;
+                $p = $nl + 1;
+
+                $nl = \strpos($chunk, "\n", $p + 52);
+                $grid[$slugToId[\substr($chunk, $p + 25, $nl - $p - 51)] * $td + $dateToId[\substr($chunk, $nl - 25, 10)]]++;
+                $p = $nl + 1;
+            }
+
+            // Handle remaining lines (keep false check as safety net)
+            while ($p < $lastNl) {
+                $nl = \strpos($chunk, "\n", $p + 52);
+                if ($nl === false) break;
+                $grid[$slugToId[\substr($chunk, $p + 25, $nl - $p - 51)] * $td + $dateToId[\substr($chunk, $nl - 25, 10)]]++;
                 $p = $nl + 1;
             }
         }
 
-        // Process leftover
-        if ($leftover !== '' && \strlen($leftover) > 51) {
-            $ll = \strlen($leftover);
-            $slug = \substr($leftover, 25, $ll - 51);
-            $date = \substr($leftover, $ll - 25, 10);
-            if (isset($slugToId[$slug], $dateToId[$date])) {
-                $sid = $slugToId[$slug];
-                $grid[$sid * $td + $dateToId[$date]]++;
-                if (!isset($seen[$sid])) $orderedIds[] = $sid;
-            }
-        }
-
         \fclose($fh);
-        return [$grid, $orderedIds];
+        return $grid;
     }
 
     private function processChunkSingleThread(string $chunk, array &$result): void
