@@ -3,7 +3,6 @@
 namespace App;
 
 use App\Commands\Visit;
-
 use function array_count_values;
 use function array_fill;
 use function chr;
@@ -34,14 +33,13 @@ use function substr;
 use function sys_get_temp_dir;
 use function unlink;
 use function unpack;
-
 use const SEEK_CUR;
 use const WNOHANG;
 
 final class Parser
 {
     private const int WORKERS = 10;
-    private const int READ_CHUNK = 163_840;
+    private const int READ_CHUNK = 1_048_576;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function parse($inputPath, $outputPath)
