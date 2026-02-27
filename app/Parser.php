@@ -19,11 +19,9 @@ use function ftell;
 use function fwrite;
 use function gc_disable;
 use function getmypid;
-use function json_encode;
-use function ksort;
 use function pack;
 use function pcntl_fork;
-use function pcntl_wait;
+use function pcntl_waitpid;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -40,11 +38,10 @@ use const SEEK_CUR;
 final class Parser
 {
 	private const int BLOG_PREFIX_LENGTH = 25;
-    private const int WORKERS = 10;
+    private const int WORKERS = 12;
     private const int CHUNK_SIZE = 524_288;
 
-	private const string FORMAT_16BIT = "\x01";
-	private const string FORMAT_32BIT = "\x02";
+
 
 	public function parse(string $inputPath, string $outputPath): void
 	{
@@ -65,13 +62,8 @@ final class Parser
 			$dateLabelById,
 			$dateCount,
 		] = $this->buildDateLookup();
+
 		$sampleBuffer = $this->readSampleBuffer($inputPath, $fileSize);
-
-		if (!$this->supportsFastDateRange($sampleBuffer, $packedDateIdByDate)) {
-			$this->parseGeneric($inputPath, $outputPath);
-
-			return;
-		}
 
 		[$slugIdByPath, $slugPathById, $slugCount] = $this->buildSlugLookup(
 			$sampleBuffer,
@@ -114,10 +106,7 @@ final class Parser
 			$childProcessId = pcntl_fork();
 
 			if ($childProcessId === 0) {
-				[
-					$chunkCounts,
-					$maximumChunkCount,
-				] = $this->crunch(
+				$chunkCounts = $this->crunch(
 					$inputPath,
 					$chunkBounds[$workerChunkIndex],
 					$chunkBounds[$workerChunkIndex + 1],
@@ -127,18 +116,7 @@ final class Parser
 					$dateCount,
 				);
 
-				$uses16BitPacking = $maximumChunkCount <= 0xffff;
-				$packedChunkCounts = $uses16BitPacking
-					? pack("v*", ...$chunkCounts)
-					: pack("V*", ...$chunkCounts);
-
-				$temporaryFileStream = fopen($temporaryFilePath, "wb");
-				fwrite(
-					$temporaryFileStream,
-					$uses16BitPacking ? self::FORMAT_16BIT : self::FORMAT_32BIT,
-				);
-				fwrite($temporaryFileStream, $packedChunkCounts);
-				fclose($temporaryFileStream);
+				file_put_contents($temporaryFilePath, pack("V*", ...$chunkCounts));
 
 				exit(0);
 			}
@@ -146,7 +124,7 @@ final class Parser
 			$childProcessFileByPid[$childProcessId] = $temporaryFilePath;
 		}
 
-		[$totalCounts] = $this->crunch(
+		$totalCounts = $this->crunch(
 			$inputPath,
 			$chunkBounds[$chunkCount - 1],
 			$chunkBounds[$chunkCount],
@@ -156,39 +134,14 @@ final class Parser
 			$dateCount,
 		);
 
-		$pendingChildProcessCount = count($childProcessFileByPid);
-		while ($pendingChildProcessCount > 0) {
-			$childExitStatus = 0;
-			$childProcessId = pcntl_wait($childExitStatus);
-
-			if ($childProcessId <= 0) {
-				break;
+		foreach ($childProcessFileByPid as $childProcessId => $temporaryFilePath) {
+			pcntl_waitpid($childProcessId, $status);
+			$decodedCounts = unpack("V*", file_get_contents($temporaryFilePath));
+			unlink($temporaryFilePath);
+			$countIndex = 0;
+			foreach ($decodedCounts as $decodedCount) {
+				$totalCounts[$countIndex++] += $decodedCount;
 			}
-
-			if (!isset($childProcessFileByPid[$childProcessId])) {
-				continue;
-			}
-
-			$encodedChildCounts = file_get_contents(
-				$childProcessFileByPid[$childProcessId],
-			);
-
-			if ($encodedChildCounts !== false && $encodedChildCounts !== "") {
-				$encodedFormat = $encodedChildCounts[0] ?? self::FORMAT_32BIT;
-				$decodedCounts = unpack(
-					$encodedFormat === self::FORMAT_16BIT ? "v*" : "V*",
-					$encodedChildCounts,
-					1,
-				);
-
-				$countIndex = 0;
-				foreach ($decodedCounts as $decodedCount) {
-					$totalCounts[$countIndex++] += $decodedCount;
-				}
-			}
-
-			unlink($childProcessFileByPid[$childProcessId]);
-			$pendingChildProcessCount--;
 		}
 
 		$outputStream = fopen($outputPath, "wb");
@@ -292,9 +245,39 @@ final class Parser
 			}
 
 			$lineStartOffset = 0;
-			$unrolledLoopLimit = $lastNewLineOffset - 480;
+			$unrolledLoopLimit = $lastNewLineOffset - 720;
 
 			while ($lineStartOffset < $unrolledLoopLimit) {
+				$newLineOffset = strpos(
+					$chunkBuffer,
+					"\n",
+					$lineStartOffset + 53,
+				);
+				$slugPath = substr(
+					$chunkBuffer,
+					$lineStartOffset + self::BLOG_PREFIX_LENGTH,
+					$newLineOffset - $lineStartOffset - 51,
+				);
+				$dateKey = substr($chunkBuffer, $newLineOffset - 23, 8);
+				$packedDateIdsBySlug[$slugIdByPath[$slugPath]] .=
+					$packedDateIdByDate[$dateKey];
+				$lineStartOffset = $newLineOffset + 1;
+
+				$newLineOffset = strpos(
+					$chunkBuffer,
+					"\n",
+					$lineStartOffset + 53,
+				);
+				$slugPath = substr(
+					$chunkBuffer,
+					$lineStartOffset + self::BLOG_PREFIX_LENGTH,
+					$newLineOffset - $lineStartOffset - 51,
+				);
+				$dateKey = substr($chunkBuffer, $newLineOffset - 23, 8);
+				$packedDateIdsBySlug[$slugIdByPath[$slugPath]] .=
+					$packedDateIdByDate[$dateKey];
+				$lineStartOffset = $newLineOffset + 1;
+
 				$newLineOffset = strpos(
 					$chunkBuffer,
 					"\n",
@@ -381,7 +364,6 @@ final class Parser
 		fclose($inputStream);
 
 		$flatCounts = array_fill(0, $slugCount * $dateCount, 0);
-		$maximumVisitCount = 0;
 
 		for ($slugId = 0; $slugId < $slugCount; $slugId++) {
 			if ($packedDateIdsBySlug[$slugId] === "") {
@@ -395,76 +377,10 @@ final class Parser
 				as $dateId => $visitCount
 			) {
 				$flatCounts[$slugOffset + $dateId] = $visitCount;
-
-				if ($visitCount > $maximumVisitCount) {
-					$maximumVisitCount = $visitCount;
-				}
 			}
 		}
 
-		return [$flatCounts, $maximumVisitCount];
-	}
-
-	private function supportsFastDateRange(
-		string $sampleBuffer,
-		array $packedDateIdByDate,
-	): bool {
-		if ($sampleBuffer === "") {
-			return true;
-		}
-
-		$newLineOffset = strpos($sampleBuffer, "\n");
-		$firstLine =
-			$newLineOffset === false
-				? $sampleBuffer
-				: substr($sampleBuffer, 0, $newLineOffset + 1);
-
-		$newLineOffset = strrpos($firstLine, "\n");
-		if ($newLineOffset === false) {
-			$newLineOffset = strlen($firstLine);
-		}
-
-		return isset($packedDateIdByDate[substr($firstLine, $newLineOffset - 23, 8)]);
-	}
-
-	private function parseGeneric(string $inputPath, string $outputPath): void
-	{
-		$visitsByPathAndDate = [];
-
-		$inputStream = fopen($inputPath, "rb");
-		stream_set_read_buffer($inputStream, 0);
-
-		while (($line = fgets($inputStream)) !== false) {
-			$commaOffset = strpos($line, ",", self::BLOG_PREFIX_LENGTH);
-			if ($commaOffset === false) {
-				continue;
-			}
-
-			$path = substr(
-				$line,
-				self::BLOG_PREFIX_LENGTH,
-				$commaOffset - self::BLOG_PREFIX_LENGTH,
-			);
-			$date = substr($line, $commaOffset + 1, 10);
-
-			$visitsByPathAndDate[$path][$date] =
-				($visitsByPathAndDate[$path][$date] ?? 0) + 1;
-		}
-
-		fclose($inputStream);
-
-		foreach ($visitsByPathAndDate as &$visitsByDate) {
-			ksort($visitsByDate);
-		}
-
-		unset($visitsByDate);
-
-		$outputStream = fopen($outputPath, "wb");
-		fwrite(
-			$outputStream,
-			json_encode($visitsByPathAndDate, JSON_PRETTY_PRINT) ?: "{}",
-		);
-		fclose($outputStream);
+		return $flatCounts;
 	}
 
 	private function buildDateLookup(): array
