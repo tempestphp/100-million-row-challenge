@@ -65,7 +65,7 @@ final class Parser
 
 		$sampleBuffer = $this->readSampleBuffer($inputPath, $fileSize);
 
-		[$slugIdByPath, $slugPathById, $slugCount] = $this->buildSlugLookup(
+		[$slugIdByPath, $escapedPathBySlugId, $slugCount] = $this->buildSlugLookup(
 			$sampleBuffer,
 		);
 
@@ -149,16 +149,7 @@ final class Parser
 
 		$datePrefixById = [];
 		for ($dateId = 0; $dateId < $dateCount; $dateId++) {
-			$datePrefixById[$dateId] =
-				'        "' . $dateLabelById[$dateId] . '": ';
-		}
-
-		$escapedPathBySlugId = [];
-		for ($slugId = 0; $slugId < $slugCount; $slugId++) {
-			$escapedPathBySlugId[$slugId] =
-				'"\\/blog\\/' .
-				str_replace("/", "\\/", $slugPathById[$slugId]) .
-				'"';
+			$datePrefixById[$dateId] = '        "' . $dateLabelById[$dateId] . '": ';
 		}
 
 		fwrite($outputStream, "{");
@@ -175,8 +166,7 @@ final class Parser
 					continue;
 				}
 
-				$dateLinesBuffer .=
-					$lineSeparator . $datePrefixById[$dateId] . $visitCount;
+				$dateLinesBuffer .= $lineSeparator . $datePrefixById[$dateId] . $visitCount;
 				$lineSeparator = ",\n";
 			}
 
@@ -462,7 +452,13 @@ final class Parser
 			}
 		}
 
-		return [$slugIdByPath, $slugPathById, $slugCount];
+		// Pre-escape slug paths for JSON output
+		$escapedPathBySlugId = [];
+		foreach ($slugPathById as $slugId => $slugPath) {
+			$escapedPathBySlugId[$slugId] = '"\\/blog\\/' . str_replace("/", "\\/", $slugPath) . '"';
+		}
+
+		return [$slugIdByPath, $escapedPathBySlugId, $slugCount];
 	}
 
 	private function readSampleBuffer(string $inputPath, int $fileSize): string
