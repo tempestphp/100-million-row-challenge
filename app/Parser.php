@@ -12,8 +12,9 @@ final class Parser
         $s = strpos($v, '/', 8); // discover scheme://host prefix len
         fclose($f);
 
-        $shm = shm_attach(0, 1000000000);
-        $sem = sem_get(0);
+        $id = ftok($inputPath, 'M');
+        $shm = shm_attach($id, 1000000000);
+        $sem = sem_get($id);
 
         $ncpu = 8;
         $chunk = floor(filesize($inputPath) / $ncpu);
