@@ -248,7 +248,7 @@ final class Parser
         }
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 524_288);
+        stream_set_write_buffer($out, 1_048_576);
 
         fwrite($out, '{');
         $firstSlug = true;
@@ -314,17 +314,9 @@ final class Parser
             }
 
             $p = 0;
-            $fence = $end - 720;
+            $fence = $end - 480;
 
             while ($p < $fence) {
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
-
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
-
                 $nl = strpos($raw, "\n", $p + 52);
                 $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
                 $p = $nl + 1;
