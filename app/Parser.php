@@ -40,7 +40,7 @@ use const SEEK_CUR;
 final class Parser
 {
     private const int WORKERS = 12;
-    private const int READ_CHUNK = 33554432;
+    private const int READ_CHUNK = 4_194_304;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function parse($inputPath, $outputPath)
