@@ -120,12 +120,8 @@ final class Parser
                     $inputPath, $starts[$i], $ends[$i],
                     $slugIds, $dateChars, $slugCount, $dateCount,
                 );
-                // Adaptive width: halves payload when counts fit in uint16
-                $use16 = max($result) <= 65535;
-                fwrite($pair[1], $use16 ? "\x00" : "\x01");
-                $fmt = $use16 ? 'v*' : 'V*';
                 foreach (array_chunk($result, 8192) as $batch) {
-                    fwrite($pair[1], pack($fmt, ...$batch));
+                    fwrite($pair[1], pack('v*', ...$batch));
                 }
                 fclose($pair[1]);
                 exit(0);
@@ -176,12 +172,9 @@ final class Parser
                         continue;
                     }
 
-                    $isV16 = ord($raw[0]) === 0;
-                    $fmt = $isV16 ? 'v*' : 'V*';
-                    $step = $isV16 ? 16384 : 32768;
                     $j = 0;
-                    for ($off = 1, $rawLen = strlen($raw); $off < $rawLen; $off += $step) {
-                        foreach (unpack($fmt, substr($raw, $off, $step)) as $v) {
+                    for ($off = 0, $rawLen = strlen($raw); $off < $rawLen; $off += 16384) {
+                        foreach (unpack('v*', substr($raw, $off, 16384)) as $v) {
                             $counts[$j++] += $v;
                         }
                     }
@@ -247,6 +240,7 @@ final class Parser
     ): array {
         $buckets = array_fill(0, $slugCount, '');
         $fh = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fh, 0);
         fseek($fh, $start);
         $remaining = $end - $start;
 
