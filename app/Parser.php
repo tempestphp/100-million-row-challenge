@@ -164,7 +164,7 @@ final class Parser
     private function parseRange(string $inputPath, int $start, int $end, ?string $tmpFile = null, int $workerIndex = -1): array|null
     {
         $input = fopen($inputPath, 'r');
-        stream_set_read_buffer($input, 128 * 1024);
+        stream_set_read_buffer($input, 0);
         fseek($input, $start);
 
         $countsByPath = [];
@@ -211,6 +211,7 @@ final class Parser
     {
         set_error_handler(fn () => true);
         $file = fopen($outputPath, 'w');
+        stream_set_write_buffer($file, 0);
         // Load all worker results upfront
         // $allWorkerResults = [
         //     0 => unserialize(file_get_contents($tmpFiles[0])),
@@ -234,7 +235,6 @@ final class Parser
 
         $dateLinePrefix = &$this->generatedDateLinePrefix;
         $pathLinePrefix = &$this->pathLinePrefix;
-        $workerCount = 10;
         $pathCount = count($pathIds);
 
         $w0_results = &$allWorkerResults[0];
@@ -247,9 +247,8 @@ final class Parser
         // $w7_results = &$allWorkerResults[7];
         // $w8_results = &$allWorkerResults[8];
         // $w9_results = &$allWorkerResults[9];
-
         fwrite($file, '{' . PHP_EOL);
-
+        // $buffer = '{' . PHP_EOL;
         // Single loop: for each path, merge all workers, sort, write
         foreach ($pathIds as $pathId => $_) {
             $dateCounts = &$w0_results[$pathId];
