@@ -117,14 +117,19 @@ final class Parser
 
             $pos += \strlen($buffer);
 
-            \preg_replace_callback(
-                '/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/m',
-                static function ($matches) use (&$order, &$result, &$orderCounter) {
-                    $order[$matches[1]] ??= ++$orderCounter;
-                    $result[$matches[1]][$matches[2]] = ($result[$matches[1]][$matches[2]] ?? 0) + 1;
-                },
-                $buffer
-            );
+            if (\preg_match_all('/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/m', $buffer, $matches)) {
+                $paths = $matches[1];
+                $dates = $matches[2];
+                $count = \count($paths);
+
+                for ($i = 0; $i < $count; ++$i) {
+                    $path = $paths[$i];
+                    $date = $dates[$i];
+
+                    $order[$path] ??= ++$orderCounter;
+                    $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
+                }
+            }
         }
 
         fclose($fp);
