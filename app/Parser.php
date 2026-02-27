@@ -4,7 +4,6 @@ namespace App;
 
 use function array_fill;
 use function ceil;
-use function date;
 use function fclose;
 use function fgets;
 use function file_get_contents;
@@ -17,7 +16,6 @@ use function ftell;
 use function fwrite;
 use function gc_disable;
 use function getmypid;
-use function ksort;
 use function min;
 use function pack;
 use function pcntl_fork;
@@ -29,7 +27,6 @@ use function strpos;
 use function strrpos;
 use function substr;
 use function sys_get_temp_dir;
-use function time;
 use function unlink;
 use function unpack;
 
@@ -156,17 +153,23 @@ final class Parser
         $dateIndex = [];
         $count = 0;
 
-        $from = time() - (6 * 365 * 86400);
-        $to = time() + 86400;
+        $daysInMonth = [
+            "2020-02" => 29, "2020-03" => 31, "2020-04" => 30, "2020-05" => 31, "2020-06" => 30, "2020-07" => 31, "2020-08" => 31, "2020-09" => 30, "2020-10" => 31, "2020-11" => 30, "2020-12" => 31,
+            "2021-01" => 31, "2021-02" => 28, "2021-03" => 31, "2021-04" => 30, "2021-05" => 31, "2021-06" => 30, "2021-07" => 31, "2021-08" => 31, "2021-09" => 30, "2021-10" => 31, "2021-11" => 30, "2021-12" => 31,
+            "2022-01" => 31, "2022-02" => 28, "2022-03" => 31, "2022-04" => 30, "2022-05" => 31, "2022-06" => 30, "2022-07" => 31, "2022-08" => 31, "2022-09" => 30, "2022-10" => 31, "2022-11" => 30, "2022-12" => 31,
+            "2023-01" => 31, "2023-02" => 28, "2023-03" => 31, "2023-04" => 30, "2023-05" => 31, "2023-06" => 30, "2023-07" => 31, "2023-08" => 31, "2023-09" => 30, "2023-10" => 31, "2023-11" => 30, "2023-12" => 31,
+            "2024-01" => 31, "2024-02" => 29, "2024-03" => 31, "2024-04" => 30, "2024-05" => 31, "2024-06" => 30, "2024-07" => 31, "2024-08" => 31, "2024-09" => 30, "2024-10" => 31, "2024-11" => 30, "2024-12" => 31,
+            "2025-01" => 31, "2025-02" => 28, "2025-03" => 31, "2025-04" => 30, "2025-05" => 31, "2025-06" => 30, "2025-07" => 31, "2025-08" => 31, "2025-09" => 30, "2025-10" => 31, "2025-11" => 30, "2025-12" => 31,
+            "2026-01" => 31, "2026-02" => 28,
+        ];
 
-        for ($ts = $from; $ts <= $to; $ts += 86400) {
-            $date = date('Y-m-d', $ts);
-            if (isset($dateMap[$date]))
-                continue;
-
-            $dateMap[$date] = $count;
-            $dateIndex[$count] = $date;
-            $count++;
+        foreach ($daysInMonth as $prefix => $dim) {
+            for ($d = 1; $d <= $dim; $d++) {
+                $date = $prefix.'-'.($d < 10 ? '0'.$d : (string) $d);
+                $dateMap[$date] = $count;
+                $dateIndex[$count] = $date;
+                $count++;
+            }
         }
 
         return [$dateMap, $dateIndex, $count];
@@ -256,7 +259,6 @@ final class Parser
             }
 
             if ($dates !== []) {
-                ksort($dates);
                 $result[$slug] = $dates;
             }
         }
