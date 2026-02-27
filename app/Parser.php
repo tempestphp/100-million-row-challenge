@@ -7,176 +7,137 @@ use Generator;
 
 final class Parser
 {
-    private const int CHUNK_SIZE = 1024 * 1024 * 1;
+    private const int CHUNK_SIZE = 1024 * 1024 * 14;
+    private const int DATE_CHUNK_SIZE = 1024 * 1024 * 5;
+    private static array $urls = [];
+    private static array $doneUrls = [];
 
     public function parse(string $inputPath, string $outputPath): void
     {
-        $urls = $this->getUrls($inputPath);
-        $this->jsonStreamUrlsWithPlaceholders($urls, $outputPath);
-        $this->handleDatesForEachUrl($urls, $inputPath, $outputPath);
+        foreach ($this->getUrls($inputPath) as $chunkUrls) {
+            foreach ($this->getUrlsAndDates($inputPath) as $chunkUrlsAndDates) {
+                foreach ($chunkUrls as $url => $true) {
+                    if (!isset($chunkUrlsAndDates[$url])) {
+                        continue;
+                    }
+
+                    $dates = $chunkUrlsAndDates[$url];
+
+                    if (!isset(self::$urls[$url])) {
+                        self::$urls[$url] = $dates;
+                    } else {
+                        foreach ($dates as $date => $count) {
+                            self::$urls[$url][$date] = (self::$urls[$url][$date] ?? 0) + $count;
+                        }
+                    }
+
+                    ksort(self::$urls[$url]);
+                }
+            }
+
+            $this->jsonStream($outputPath);
+            self::$urls = [];
+        }
+    }
+
+    private function getUrls(string $inputPath): Generator
+    {
+        $left = '';
+
+        foreach ($this->readChunkByChunk($inputPath, self::CHUNK_SIZE) as $chunk) {
+            $lastEolPost = strrpos($chunk, PHP_EOL);
+            $buffer = $left . substr($chunk, 0, $lastEolPost);
+            $left = substr($chunk, $lastEolPost + 1, strlen($chunk));
+            $lines = explode(PHP_EOL, $buffer);
+            $urls = [];
+
+            foreach ($lines as $line) {
+                $parts = explode(',', $line);
+
+                if (!isset(self::$doneUrls[$parts[0]])) {
+                    $urls[$parts[0]] = true;
+                }
+            }
+
+            yield $urls;
+        }
+    }
+
+    private function getUrlsAndDates(string $inputPath): Generator
+    {
+        $left = '';
+
+        foreach ($this->readChunkByChunk($inputPath, self::DATE_CHUNK_SIZE) as $chunk) {
+            $lastEolPost = strrpos($chunk, PHP_EOL);
+            $buffer = $left . substr($chunk, 0, $lastEolPost);
+            $left = substr($chunk, $lastEolPost + 1, strlen($chunk));
+            $lines = explode(PHP_EOL, $buffer);
+            $urlsAndDates = [];
+
+            foreach ($lines as $line) {
+                $parts = explode(',', $line);
+                $url = $parts[0];
+                $date = substr($parts[1], 0, 10);
+
+                if (!isset($urlsAndDates[$url][$date])) {
+                    $urlsAndDates[$url][$date] = 0;
+                }
+
+                $urlsAndDates[$url][$date]++;
+            }
+
+            yield $urlsAndDates;
+        }
     }
 
     private function getUrlPath(string $url, bool $escaped = false): string
     {
-        $path = substr($url, 19);
+        $path = substr($url, 25);
 
         if ($escaped) {
-            $path = '"'.str_replace('/', '\/', $path).'"';
+            $path = '"\/blog\/'.$path.'"';
         }
 
         return $path;
     }
 
-    private function readLineByLine(string $inputPath): Generator
-    {
-        $file = fopen($inputPath, 'r');
-
-        while (($line = fgets($file)) !== false) {
-            yield $line;
-        }
-
-        fclose($file);
-    }
-
-    private function readChunkByChunk(string $inputPath): Generator
+    private function readChunkByChunk(string $inputPath, int $chunkSize): Generator
     {
         $file = fopen($inputPath, 'r');
 
         while (!feof($file)) {
-            yield fread($file, self::CHUNK_SIZE);
+            yield fread($file, $chunkSize);
         }
 
         fclose($file);
     }
 
-    private function getUrls(string $inputPath): array
-    {
-        $urls = [];
-        $left = '';
-
-        foreach ($this->readChunkByChunk($inputPath) as $chunk) {
-            $lastEolPost = strrpos($chunk, PHP_EOL);
-            $buffer = $left . substr($chunk, 0, $lastEolPost);
-            $left = substr($chunk, $lastEolPost + 1, strlen($chunk));
-            $lines = explode(PHP_EOL, $buffer);
-
-            foreach ($lines as $line) {
-                $parts = explode(',', $line);
-                $urls[$parts[0]] = true;
-            }
-        }
-
-        return $urls;
-    }
-
-    private function jsonStreamUrlsWithPlaceholders(array $urls, string $outputPath): void
+    private function jsonStream(string $outputPath): void
     {
         $fileOutput = fopen($outputPath, 'w');
         fwrite($fileOutput, "{\n");
         $isFirst = true;
         $content = '';
 
-        foreach (array_keys($urls) as $url) {
+        foreach (self::$urls as $url => $dates) {
             $escapedPath = $this->getUrlPath($url, escaped: true);
+            $content .= $isFirst
+                ? '    '.$escapedPath.': {'
+                : ",\n".'    '.$escapedPath.': {';
+            $dateKeys = array_keys($dates);
+            $last = array_key_last($dateKeys);
 
-            if ($isFirst) {
-                $content .= '    '.$escapedPath.': {dates_placeholder}';
-            } else {
-                $content .= ",\n".'    '.$escapedPath.': {dates_placeholder}';
+            foreach ($dateKeys as $i => $date) {
+                $comma = $i === $last ? '' : ',';
+                $content .= "\n        " . '"' . $date . '": ' . $dates[$date] . $comma;
             }
 
+            $content .= "\n    }";
             $isFirst = false;
+            self::$doneUrls[$url] = true;
         }
 
         fwrite($fileOutput, $content."\n}");
         fclose($fileOutput);
-    }
-
-    private function handleDatesForEachUrl(array $urls, string $inputPath, string $outputPath): void
-    {
-        foreach (array_keys($urls) as $url) {
-            $dates = $this->getDates($url, $inputPath);
-            ksort($dates);
-            $this->jsonStreamReplaceDatesPlaceholders($url, $dates, $outputPath);
-        }
-    }
-
-    private function getDates(string $url, string $inputPath): array
-    {
-        $dates = [];
-        $left = '';
-
-        foreach ($this->readChunkByChunk($inputPath) as $chunk) {
-            $lastEolPost = strrpos($chunk, PHP_EOL);
-            $buffer = $left . substr($chunk, 0, $lastEolPost);
-            $left = substr($chunk, $lastEolPost + 1, strlen($chunk));
-            $lines = explode(PHP_EOL, $buffer);
-
-            foreach ($lines as $line) {
-                $parts = explode(',', $line);
-
-                if ($url === $parts[0]) {
-                    $date = substr($parts[1], 0, 10);
-
-                    $dates[$date] = $dates[$date] ?? 0;
-                    $dates[$date]++;
-                }
-            }
-        }
-
-        return $dates;
-    }
-
-    private function jsonStreamReplaceDatesPlaceholders(string $url, array $dates, string $outputPath): void
-    {
-        $escapedPath = $this->getUrlPath($url, escaped: true);
-        $search = $escapedPath . ': {dates_placeholder}';
-        $dateContent = '';
-        $dateKeys = array_keys($dates);
-        $last = array_key_last($dateKeys);
-
-        foreach ($dateKeys as $i => $date) {
-            $comma = $i === $last ? '' : ',';
-            $dateContent .= "\n        " . '"' . $date . '": ' . $dates[$date] . $comma;
-        }
-
-        $replace = $escapedPath . ': {' . $dateContent . "\n    }";
-
-        $tmpPath = tempnam(dirname($outputPath), '.tmp_');
-        $in = fopen($outputPath, 'rb');
-        $out = fopen($tmpPath, 'wb');
-
-        $overlap = strlen($search) - 1;
-        $carry   = '';
-
-        while (!feof($in)) {
-            $chunk = fread($in, self::CHUNK_SIZE);
-
-            if ($chunk === false || $chunk === '') {
-                break;
-            }
-
-            $buffer = $carry . $chunk;
-
-            if (!feof($in)) {
-                $carry = substr($buffer, -$overlap);
-                $writeChunk = substr($buffer, 0, strlen($buffer) - $overlap);
-            } else {
-                $carry = '';
-                $writeChunk = $buffer;
-            }
-
-            fwrite($out, str_replace($search, $replace, $writeChunk));
-        }
-
-        if ($carry !== '') {
-            fwrite($out, str_replace($search, $replace, $carry));
-        }
-
-        fclose($in);
-        fclose($out);
-
-        chmod($tmpPath, fileperms($outputPath));
-        rename($tmpPath, $outputPath);
     }
 }
