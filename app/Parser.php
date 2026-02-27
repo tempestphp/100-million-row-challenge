@@ -6,7 +6,7 @@ namespace App;
 
 use Exception;
 use Generator;
-use function explode;
+use function count;
 use function fclose;
 use function feof;
 use function fgets;
@@ -14,19 +14,14 @@ use function file_put_contents;
 use function fopen;
 use function fread;
 use function json_encode;
+use function preg_match_all;
 use function str_ends_with;
-use function substr;
 
 final class Parser
 {
     private const int READ_CHUNK_SIZE = 1024 * 1024 * 4;
 
-    // "https://stitcher.io" is 19 chars long
-    private const int URL_HOST_LEN = 19;
-
-    // The last 15 characters of the timestamp is the time portion
-    private const int TIMESTAMP_TIME_LEN = -15;
-
+    private const string REGEX_LINE_PARSER = ";^https://stitcher.io(/[^,]+),(.{10});";
     /**
      * @var false|resource
      */
@@ -40,11 +35,12 @@ final class Parser
         \gc_disable();
         try {
             $toEncode = [];
-            $matches = [];
             ($this->inputHandle = fopen($inputPath, "r")) || throw new Exception("Couldn't open input file");
             foreach ($this->getChunk() as $chunk) {
-                preg_match_all(";^https://stitcher.io(/[^,]+),(.{10});m", $chunk, $matches);
+                $matches = [];
+                preg_match_all(self::REGEX_LINE_PARSER, $chunk, $matches);
                 $matchCount = count($matches[1]);
+
                 for ($key = 0; $key < $matchCount; $key++) {
                     $path = $matches[1][$key];
                     $date = $matches[2][$key];
