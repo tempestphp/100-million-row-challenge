@@ -41,12 +41,9 @@ final class Parser
     // fread chunk size in bytes — tune this for M1 memory bandwidth
     private const int BUFFER_SIZE = 2_097_152;
 
-    // strlen('yyyy-mm-dd') — date portion of the flat key
-    private const int DATE_LEN = 10;
-
-    // Offset from commaPos to the start of the next line:
-    // comma(1) + datetime(25) + \n(1) = 27
-    private const int LINE_ADVANCE = 27;
+    // From comma position to start of slug on next line:
+    // comma(1) + datetime(25) + \n(1) + prefix(25) = 52
+    private const int STRIDE = 52;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -60,7 +57,8 @@ final class Parser
         $parentPid = getmypid();
         $childPids = [];
 
-        for ($i = 0; $i < self::THREADS; $i++) {
+        // Fork children for chunks 1..THREADS-1; parent handles chunk 0 directly
+        for ($i = 1; $i < self::THREADS; $i++) {
             $childPid = pcntl_fork();
             if ($childPid === -1)
                 exit('Fork failed');
@@ -76,11 +74,15 @@ final class Parser
             $childPids[] = $childPid;
         }
 
+        // Parent crunches chunk 0 while children run in parallel
+        [$start, $end] = $boundaries[0];
+        $tally = $this->processChunk($inputPath, $start, $end, $pathMap, $dateMap, $pathCount, $dateCount);
+
         foreach ($childPids as $childPid) {
             pcntl_waitpid($childPid, $status);
         }
 
-        $totals = $this->mergePartials($parentPid, $pathCount, $dateCount);
+        $totals = $this->mergePartials($parentPid, $tally);
         $result = $this->buildOutput($totals, $urls, $dateIndex, $dateCount);
         $this->writeJson($outputPath, $result);
     }
@@ -132,7 +134,7 @@ final class Parser
                 if ($comma === false)
                     break;
                 $discovered[substr($chunk, $pos + self::URL_PREFIX_LEN, $comma - $pos - self::URL_PREFIX_LEN)] = true;
-                $pos = $comma + self::LINE_ADVANCE;
+                $pos = $comma + 27; // comma(1) + datetime(25) + \n(1)
             }
 
             // Stop once a full chunk passes with no new slugs
@@ -154,20 +156,86 @@ final class Parser
         $count = 0;
 
         $daysInMonth = [
-            "2020-02" => 29, "2020-03" => 31, "2020-04" => 30, "2020-05" => 31, "2020-06" => 30, "2020-07" => 31, "2020-08" => 31, "2020-09" => 30, "2020-10" => 31, "2020-11" => 30, "2020-12" => 31,
-            "2021-01" => 31, "2021-02" => 28, "2021-03" => 31, "2021-04" => 30, "2021-05" => 31, "2021-06" => 30, "2021-07" => 31, "2021-08" => 31, "2021-09" => 30, "2021-10" => 31, "2021-11" => 30, "2021-12" => 31,
-            "2022-01" => 31, "2022-02" => 28, "2022-03" => 31, "2022-04" => 30, "2022-05" => 31, "2022-06" => 30, "2022-07" => 31, "2022-08" => 31, "2022-09" => 30, "2022-10" => 31, "2022-11" => 30, "2022-12" => 31,
-            "2023-01" => 31, "2023-02" => 28, "2023-03" => 31, "2023-04" => 30, "2023-05" => 31, "2023-06" => 30, "2023-07" => 31, "2023-08" => 31, "2023-09" => 30, "2023-10" => 31, "2023-11" => 30, "2023-12" => 31,
-            "2024-01" => 31, "2024-02" => 29, "2024-03" => 31, "2024-04" => 30, "2024-05" => 31, "2024-06" => 30, "2024-07" => 31, "2024-08" => 31, "2024-09" => 30, "2024-10" => 31, "2024-11" => 30, "2024-12" => 31,
-            "2025-01" => 31, "2025-02" => 28, "2025-03" => 31, "2025-04" => 30, "2025-05" => 31, "2025-06" => 30, "2025-07" => 31, "2025-08" => 31, "2025-09" => 30, "2025-10" => 31, "2025-11" => 30, "2025-12" => 31,
-            "2026-01" => 31, "2026-02" => 28,
+            '2020-02' => 29,
+            '2020-03' => 31,
+            '2020-04' => 30,
+            '2020-05' => 31,
+            '2020-06' => 30,
+            '2020-07' => 31,
+            '2020-08' => 31,
+            '2020-09' => 30,
+            '2020-10' => 31,
+            '2020-11' => 30,
+            '2020-12' => 31,
+            '2021-01' => 31,
+            '2021-02' => 28,
+            '2021-03' => 31,
+            '2021-04' => 30,
+            '2021-05' => 31,
+            '2021-06' => 30,
+            '2021-07' => 31,
+            '2021-08' => 31,
+            '2021-09' => 30,
+            '2021-10' => 31,
+            '2021-11' => 30,
+            '2021-12' => 31,
+            '2022-01' => 31,
+            '2022-02' => 28,
+            '2022-03' => 31,
+            '2022-04' => 30,
+            '2022-05' => 31,
+            '2022-06' => 30,
+            '2022-07' => 31,
+            '2022-08' => 31,
+            '2022-09' => 30,
+            '2022-10' => 31,
+            '2022-11' => 30,
+            '2022-12' => 31,
+            '2023-01' => 31,
+            '2023-02' => 28,
+            '2023-03' => 31,
+            '2023-04' => 30,
+            '2023-05' => 31,
+            '2023-06' => 30,
+            '2023-07' => 31,
+            '2023-08' => 31,
+            '2023-09' => 30,
+            '2023-10' => 31,
+            '2023-11' => 30,
+            '2023-12' => 31,
+            '2024-01' => 31,
+            '2024-02' => 29,
+            '2024-03' => 31,
+            '2024-04' => 30,
+            '2024-05' => 31,
+            '2024-06' => 30,
+            '2024-07' => 31,
+            '2024-08' => 31,
+            '2024-09' => 30,
+            '2024-10' => 31,
+            '2024-11' => 30,
+            '2024-12' => 31,
+            '2025-01' => 31,
+            '2025-02' => 28,
+            '2025-03' => 31,
+            '2025-04' => 30,
+            '2025-05' => 31,
+            '2025-06' => 30,
+            '2025-07' => 31,
+            '2025-08' => 31,
+            '2025-09' => 30,
+            '2025-10' => 31,
+            '2025-11' => 30,
+            '2025-12' => 31,
+            '2026-01' => 31,
+            '2026-02' => 28,
         ];
 
         foreach ($daysInMonth as $prefix => $dim) {
             for ($d = 1; $d <= $dim; $d++) {
                 $date = $prefix.'-'.($d < 10 ? '0'.$d : (string) $d);
-                $dateMap[$date] = $count;
-                $dateIndex[$count] = $date;
+                $dateMap[substr($date, 3)] = $count; // 7-char key: skip leading "202"
+                $dateIndex[$count] = $date; // full date for output
                 $count++;
             }
         }
@@ -212,13 +280,26 @@ final class Parser
                 fseek($fp, -$tail, SEEK_CUR);
             $remaining -= $lastNewline + 1;
 
-            $pos = 0;
-            while ($pos < $lastNewline) {
-                $comma = strpos($chunk, ',', $pos + self::URL_PREFIX_LEN);
-                $slug = substr($chunk, $pos + self::URL_PREFIX_LEN, $comma - $pos - self::URL_PREFIX_LEN);
-                $date = substr($chunk, $comma + 1, self::DATE_LEN);
-                $counts[$pathMap[$slug] + $dateMap[$date]]++;
-                $pos = $comma + self::LINE_ADVANCE;
+            // $p points past the URL prefix, no per-row +25 offset needed
+            $p = self::URL_PREFIX_LEN;
+            $fence = $lastNewline - 104; // 2 × stride safety margin for unrolled loop
+
+            while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $counts[$pathMap[substr($chunk, $p, $sep - $p)] + $dateMap[substr($chunk, $sep + 4, 7)]]++;
+                $p = $sep + self::STRIDE;
+
+                $sep = strpos($chunk, ',', $p);
+                $counts[$pathMap[substr($chunk, $p, $sep - $p)] + $dateMap[substr($chunk, $sep + 4, 7)]]++;
+                $p = $sep + self::STRIDE;
+            }
+
+            while ($p < $lastNewline) {
+                $sep = strpos($chunk, ',', $p);
+                if ($sep === false)
+                    break;
+                $counts[$pathMap[substr($chunk, $p, $sep - $p)] + $dateMap[substr($chunk, $sep + 4, 7)]]++;
+                $p = $sep + self::STRIDE;
             }
         }
 
@@ -227,21 +308,21 @@ final class Parser
         return $counts;
     }
 
-    private function mergePartials(int $parentPid, int $pathCount, int $dateCount): array
+    private function mergePartials(int $parentPid, array $tally): array
     {
-        $totals = array_fill(0, $pathCount * $dateCount, 0);
         $tmpDir = sys_get_temp_dir();
 
-        for ($i = 0; $i < self::THREADS; $i++) {
+        for ($i = 1; $i < self::THREADS; $i++) {
             $file = "{$tmpDir}/csv_{$parentPid}_{$i}.dat";
-            $partial = unpack('V*', file_get_contents($file));
+            $raw = file_get_contents($file);
             unlink($file);
-            foreach ($partial as $j => $count) {
-                $totals[$j - 1] += $count;
+            $j = 0;
+            foreach (unpack('V*', $raw) as $v) {
+                $tally[$j++] += $v;
             }
         }
 
-        return $totals;
+        return $tally;
     }
 
     private function buildOutput(array $totals, array $urls, array $dateIndex, int $dateCount): array
