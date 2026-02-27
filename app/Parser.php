@@ -292,7 +292,7 @@ final class Parser
         fseek($fh, $from);
 
         $remaining = $until - $from;
-        $bufSize = 4_194_304;
+        $bufSize = 163_840;
 
         while ($remaining > 0) {
             $raw = fread($fh, $remaining > $bufSize ? $bufSize : $remaining);
@@ -314,17 +314,9 @@ final class Parser
             }
 
             $p = 0;
-            $fence = $end - 960;
+            $fence = $end - 720;
 
             while ($p < $fence) {
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
-
-                $nl = strpos($raw, "\n", $p + 52);
-                $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
-                $p = $nl + 1;
-
                 $nl = strpos($raw, "\n", $p + 52);
                 $buckets[$slugIndex[substr($raw, $p + 25, $nl - $p - 51)]] .= $dateChars[substr($raw, $nl - 23, 8)];
                 $p = $nl + 1;
