@@ -8,7 +8,7 @@ if (($argv[1] ?? null) === "data:parse") {
 
     $inputPath = \substr($argv[2] ?? "", 13);
     $outputPath = \substr($argv[3] ?? "", 14);
-    new \App\Parser()->parse($inputPath, $outputPath);
+    \App\Parser::parse($inputPath, $outputPath);
     return;
 }
 

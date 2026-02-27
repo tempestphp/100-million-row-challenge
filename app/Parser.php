@@ -41,7 +41,12 @@ final class Parser
     private const int READ_CHUNK = 163_840;
     private const int DISCOVER_SIZE = 2_097_152;
 
-    public function parse($inputPath, $outputPath)
+    public function __call(string $name, array $arguments): mixed
+    {
+        return static::$name(...$arguments);
+    }
+
+    public static function parse($inputPath, $outputPath)
     {
         gc_disable();
 
@@ -127,7 +132,7 @@ final class Parser
             $tmpFile = $tmpDir . '/p100m_' . $myPid . '_' . $w;
             $pid = pcntl_fork();
             if ($pid === 0) {
-                $wCounts = $this->parseRange(
+                $wCounts = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $pathIds, $dateIdChars, $pathCount, $dateCount,
                 );
@@ -137,7 +142,7 @@ final class Parser
             $childMap[$pid] = $tmpFile;
         }
 
-        $counts = $this->parseRange(
+        $counts = self::parseRange(
             $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
             $pathIds, $dateIdChars, $pathCount, $dateCount,
         );
@@ -159,10 +164,10 @@ final class Parser
             $pending--;
         }
 
-        $this->writeJson($outputPath, $counts, $paths, $dates, $dateCount);
+        self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
     }
 
-    private function parseRange(
+    private static function parseRange(
         $inputPath, $start, $end,
         $pathIds, $dateIdChars,
         $pathCount, $dateCount,
@@ -240,7 +245,7 @@ final class Parser
         return $counts;
     }
 
-    private function writeJson(
+    private static function writeJson(
         $outputPath, $counts, $paths,
         $dates, $dateCount,
     ) {
