@@ -248,7 +248,7 @@ final class Parser
         }
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
+        stream_set_write_buffer($out, 524_288);
 
         fwrite($out, '{');
         $firstSlug = true;
