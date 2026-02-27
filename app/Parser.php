@@ -11,7 +11,7 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const WORKERS = 12;
+    private const WORKERS = 10;
     private const BUF_SIZE = 163_840; // 160 KB — L1-cache-friendly reads
     private const PROBE_SIZE = 2_097_152; // 2 MB warm-up scan
 
@@ -32,7 +32,7 @@ final class Parser
         $dateLabels = [];
         $dateCount = 0;
 
-        for ($y = 20; $y <= 26; $y++) {
+        for ($y = 21; $y <= 26; $y++) {
             for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
                     2 => ($y % 4 === 0) ? 29 : 28,
@@ -40,17 +40,17 @@ final class Parser
                     default => 31,
                 };
                 $ms = ($m < 10 ? '0' : '') . $m;
-                $ymd = $y . '-' . $ms . '-';
+                $ymd = ($y % 10) . '-' . $ms . '-';
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymd . ($d < 10 ? '0' : '') . $d;
                     $dateChars[$key] = chr($dateCount & 0xFF) . chr($dateCount >> 8);
-                    $dateLabels[$dateCount] = '20' . $key;
+                    $dateLabels[$dateCount] = '202' . $key;
                     $dateCount++;
                 }
             }
         }
 
-        // Warm-up scan: discover slugs from first 2 MB
+        // Warm-up scan: discover slugs from first 2 MB (preserves file-order for JSON output)
         $probeSize = min(self::PROBE_SIZE, $fileSize);
         $fh = fopen($inputPath, 'rb');
         $sample = fread($fh, $probeSize);
@@ -72,7 +72,7 @@ final class Parser
                     $slugLabels[$slugCount] = $slug;
                     $slugCount++;
                 }
-                $p = $sep + 52; // comma(1) + timestamp(25) + newline(1) + prefix(25)
+                $p = $sep + 52;
             }
         }
         unset($sample);
@@ -173,10 +173,8 @@ final class Parser
                     }
 
                     $j = 0;
-                    for ($off = 0, $rawLen = strlen($raw); $off < $rawLen; $off += 16384) {
-                        foreach (unpack('v*', substr($raw, $off, 16384)) as $v) {
-                            $counts[$j++] += $v;
-                        }
+                    foreach (unpack('v*', $raw) as $v) {
+                        $counts[$j++] += $v;
                     }
                 }
             }
@@ -270,27 +268,27 @@ final class Parser
             // Hot loop, unrolled 6×
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= ($dateChars[substr($chunk, $sep + 3, 8)] ?? '');
+                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= ($dateChars[substr($chunk, $sep + 3, 8)] ?? '');
+                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= ($dateChars[substr($chunk, $sep + 3, 8)] ?? '');
+                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= ($dateChars[substr($chunk, $sep + 3, 8)] ?? '');
+                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= ($dateChars[substr($chunk, $sep + 3, 8)] ?? '');
+                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= ($dateChars[substr($chunk, $sep + 3, 8)] ?? '');
+                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
                 $p = $sep + 52;
             }
 
@@ -300,7 +298,7 @@ final class Parser
                 if ($sep === false || $sep >= $lastNl) {
                     break;
                 }
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= ($dateChars[substr($chunk, $sep + 3, 8)] ?? '');
+                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
                 $p = $sep + 52;
             }
         }
