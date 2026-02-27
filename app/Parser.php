@@ -40,8 +40,7 @@ final class Parser
         $pids = [];
 
         foreach ($ranges as $index => &$range) {
-            // $tmpFile = tempnam(sys_get_temp_dir(), "parser_worker_{$index}_");
-            $tmpFile = sys_get_temp_dir() . "/parser_worker_{$index}_";
+            $tmpFile = tempnam(sys_get_temp_dir(), "parser_worker_{$index}_");
             $tmpFiles[] = $tmpFile;
             $tmpHandles[] = fopen($tmpFile, 'w+');
         }
@@ -213,20 +212,56 @@ final class Parser
         fclose($tmpHandle);
     }
 
-    private function mergeAndWriteOutput(array $tmpHandles, string $outputPath): void
+    private function mergeAndWriteOutput(array $tmpFiles, string $outputPath): void
     {
         set_error_handler(fn () => true);
         $file = fopen($outputPath, 'w');
         stream_set_write_buffer($file, 0);
 
-        for ($i = 0; $i < 10; $i++) {
-            $h = $tmpHandles[$i];
-            stream_set_read_buffer($h, 0);
-            $stat = fstat($h);
-            rewind($h);
-            $allWorkerResults[] = unserialize(fread($h, $stat['size']));
-            fclose($h);
+        // $f0 = fopen($tmpFiles[0], 'r');
+        // $f1 = fopen($tmpFiles[1], 'r');
+        // $f2 = fopen($tmpFiles[2], 'r');
+        // $f3 = fopen($tmpFiles[3], 'r');
+        // $f4 = fopen($tmpFiles[4], 'r');
+        // $f5 = fopen($tmpFiles[5], 'r');
+        // $f6 = fopen($tmpFiles[6], 'r');
+        // $f7 = fopen($tmpFiles[7], 'r');
+        // $f8 = fopen($tmpFiles[8], 'r');
+        // $f9 = fopen($tmpFiles[9], 'r');
+        // // Load all worker results upfront
+        // $allWorkerResults = [
+        //     unserialize(fread($f0, filesize($tmpFiles[0]))),
+        //     unserialize(fread($f1, filesize($tmpFiles[1]))),
+        //     unserialize(fread($f2, filesize($tmpFiles[2]))),
+        //     unserialize(fread($f3, filesize($tmpFiles[3]))),
+        //     unserialize(fread($f4, filesize($tmpFiles[4]))),
+        //     unserialize(fread($f5, filesize($tmpFiles[5]))),
+        //     unserialize(fread($f6, filesize($tmpFiles[6]))),
+        //     unserialize(fread($f7, filesize($tmpFiles[7]))),
+        //     unserialize(fread($f8, filesize($tmpFiles[8]))),
+        //     unserialize(fread($f9, filesize($tmpFiles[9]))),
+        // ];
+        // fclose($f0);
+        // fclose($f1);
+        // fclose($f2);
+        // fclose($f3);
+        // fclose($f4);
+        // fclose($f5);
+        // fclose($f6);
+        // fclose($f7);
+        // fclose($f8);
+        // fclose($f9);
+        for($i = 0; $i < 10; $i++) {
+            $tmpFile = $tmpFiles[$i];
+            $f = fopen($tmpFile, 'r');
+            $allWorkerResults[] = unserialize(fread($f, filesize($tmpFile)));
+            fclose($f);
+            // unlink($tmpFile);
         }
+        // foreach ($tmpFiles as $tmpFile) {
+        //     $allWorkerResults[] = unserialize(file_get_contents($tmpFile));
+        // //     // unlink($tmpFile);
+        // }
 
         // Collect all unique pathIds — array + union on pathId-keyed arrays
         $pathIds = $allWorkerResults[0] + $allWorkerResults[1] + $allWorkerResults[2] + $allWorkerResults[3] + $allWorkerResults[4] + $allWorkerResults[5] + $allWorkerResults[6] + $allWorkerResults[7] + $allWorkerResults[8] + $allWorkerResults[9];
