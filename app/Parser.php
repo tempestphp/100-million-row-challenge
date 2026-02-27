@@ -53,21 +53,22 @@ final class Parser
             }
         }
 
-        foreach ($pids as $pid) {
-            pcntl_waitpid($pid, $status);
-        }
-
         // Merge
         $finalResult = [];
         $finalOrder = [];
 
+        $pidToIndex = array_combine($pids, array_keys($chunks));
+
         $numChunks = count($chunks);
         for ($i = 0; $i < $numChunks; $i++) {
-            $tempFile = $tempDir . '/w' . $i;
+            $pid = pcntl_wait($status);
+            $workerIndex = $pidToIndex[$pid];
+
+            $tempFile = $tempDir . '/w' . $workerIndex;
             [$workerResult, $workerOrder] = unserialize(file_get_contents($tempFile));
             unlink($tempFile);
 
-            $orderOffset = $i * 1000000000;
+            $orderOffset = $workerIndex * 1000000000;
             foreach ($workerOrder as $path => $localOrd) {
                 $globalOrd = $orderOffset + $localOrd;
                 $finalOrder[$path] = min($finalOrder[$path] ?? PHP_INT_MAX, $globalOrd);
