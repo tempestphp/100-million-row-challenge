@@ -1,6 +1,6 @@
 > [!IMPORTANT]
 > - The challenge is live; you have until March 15, 11:59PM CET to submit your entry. 
-> - Check out [leaderboard.csv](./leaderboard.csv) and [leaderboard-single-thread.csv](./leaderboard-single-thread.csv) for actual results. 
+> - Check out [the Leaderboard](https://marcosmarcolin.github.io/leaderboard-100-million-row-challenge/) (props to [Marcos](https://github.com/marcosmarcolin)). 
 > - Comment on your PR with `/bench` to request a re-run.
 > - [Join our Discord](https://discord.com/channels/1236153076688359495/1476516330017394829) to discuss the challenge with other participants.
     
@@ -128,15 +128,27 @@ All entries must be submitted before March 16, 2026 (so you have until March 15,
 
 #### Where can I see the results?
 
-The benchmark results of each run are stored in [leaderboard.csv](./leaderboard.csv). 
+The benchmark results of each run are stored in [leaderboard.csv](./leaderboard.csv) and [leaderboard-single-thread.csv](./leaderboard-single-thread.csv).
+
+#### What am I allowed to do and what not?
+
+You're encouraged to think outside the box 🙂 That being said: 
+
+- your solution must validate against the real data set (no altering allowed)
+- it must be written only in PHP
+- it may not use tools outside of PHP
+- you may not access the internet from within your script
+- your script may only work within the project's directory
 
 #### What kind of server is used for the benchmark?
 
 The benchmark runs on a Mac Mini M1 with 12GB of RAM of available memory. These PHP extensions are available:
 
 ```txt
-bcmath, bz2, calendar, Core, ctype, curl, date, dba, dom, exif, fileinfo, filter, ftp, gd, gettext, gmp, hash, iconv, igbinary, intl, json, ldap, lexbor, libxml, mbstring, mysqli, mysqlnd, odbc, openssl, pcntl, pcre, PDO, pdo_dblib, pdo_mysql, PDO_ODBC, pdo_pgsql, pdo_sqlite, pgsql, Phar, posix, random, readline, Reflection, session, shmop, SimpleXML, snmp, soap, sockets, sodium, SPL, sqlite3, standard, sysvmsg, sysvsem, sysvshm, tidy, tokenizer, uri, xml, xmlreader, xmlwriter, xsl, Zend OPcache, zip, zlib, Zend OPcache
+bcmath, bz2, calendar, Core, ctype, curl, date, dba, dom, exif, fileinfo, filter, ftp, gd, gettext, gmp, hash, iconv, igbinary, intl, json, ldap, lexbor, libxml, mbstring, mysqli, mysqlnd, odbc, openssl, parallel, pcntl, pcre, PDO, pdo_dblib, pdo_mysql, PDO_ODBC, pdo_pgsql, pdo_sqlite, pgsql, Phar, posix, random, readline, Reflection, session, shmop, SimpleXML, snmp, soap, sockets, sodium, SPL, sqlite3, standard, sysvmsg, sysvsem, sysvshm, tidy, tokenizer, uri, xml, xmlreader, xmlwriter, xsl, Zend OPcache, zip, zlib, Zend OPcache
 ```
+
+![Story and the Server](./.github/stormy.png)
 
 #### How to ensure fair results?
 

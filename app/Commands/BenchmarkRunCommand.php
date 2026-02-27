@@ -63,7 +63,9 @@ final class BenchmarkRunCommand
                     $this->error($e->getMessage());
                 }
 
-                $this->warning('Sleeping for 10 seconds…');
+                $memory = memory_get_usage(true);
+                $formattedMemory = number_format($memory / 1024 / 1024, 2) . 'MB';
+                $this->writeWithTimestamp("<style=\"fg-blue\">[{$formattedMemory}]</style> Sleeping for 10 seconds…");
                 sleep(10);
             }
         } else {
@@ -249,7 +251,7 @@ final class BenchmarkRunCommand
         $benchmarkDir = __DIR__ . '/../../.benchmark/pr-' . $prNumber;
 
         if (is_dir($benchmarkDir)) {
-            $this->prLine($prNumber, "Removing existing benchmark directory...");
+            $this->prLine($prNumber, "Removing existing benchmark directory…");
             exec("rm -rf " . escapeshellarg($benchmarkDir));
         }
 
@@ -276,7 +278,7 @@ final class BenchmarkRunCommand
         $resultFile = __DIR__ . '/../../.benchmark/result-' . $prNumber . '.json';
         $actualPath = __DIR__ . '/../../data/real-data-actual.json';
         $parseCommand = sprintf(
-            './tempest data:parse --input-path="%s" --output-path="%s"',
+            'php -dmax_execution_time=300 tempest data:parse --input-path="%s" --output-path="%s"',
             escapeshellarg(__DIR__ . '/../../data/real-data.csv'),
             escapeshellarg($actualPath),
         );
@@ -502,26 +504,33 @@ final class BenchmarkRunCommand
 
     private function prLine(int $prNumber, string $message): void
     {
-        $this->writeln("<style=\"fg-blue\">[#$prNumber]</style> $message");
+        $this->writeWithTimestamp("<style=\"fg-blue\">[#$prNumber]</style> $message");
     }
 
     private function prInfo(int $prNumber, string $message): void
     {
-        $this->writeln("<style=\"bold fg-blue\">[#$prNumber] $message</style>");
+        $this->writeWithTimestamp("<style=\"bold fg-blue\">[#$prNumber] $message</style>");
     }
 
     private function prSuccess(int $prNumber, string $message): void
     {
-        $this->writeln("<style=\"bold fg-green\">[#$prNumber] $message</style>");
+        $this->writeWithTimestamp("<style=\"bold fg-green\">[#$prNumber] $message</style>");
     }
 
     private function prError(int $prNumber, string $message): void
     {
-        $this->writeln("<style=\"bold fg-red\">[#$prNumber] $message</style>");
+        $this->writeWithTimestamp("<style=\"bold fg-red\">[#$prNumber] $message</style>");
     }
 
     private function prWarning(int $prNumber, string $message): void
     {
-        $this->writeln("<style=\"bold fg-yellow\">[#$prNumber] $message</style>");
+        $this->writeWithTimestamp("<style=\"bold fg-yellow\">[#$prNumber] $message</style>");
+    }
+
+    private function writeWithTimestamp(string $message): void
+    {
+        $time = date('Y-m-d H:i:s');
+
+        $this->writeln("<style=\"dim\">[{$time}]</style> {$message}");
     }
 }
