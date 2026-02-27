@@ -111,7 +111,7 @@ final class Parser
                 continue;
             }
 
-            $leftover  = substr($buf, $lastNL + 1);
+            $leftover = substr($buf, $lastNL + 1);
             $lines = explode("\n", substr($buf, 0, $lastNL + 1));
             $lineCount = count($lines) - 1; // last element is always '' (buf ends with \n)
 
