@@ -4,13 +4,14 @@ namespace App;
 
 final class Parser
 {
-    private const NUM_WORKERS = 8;
+    private const int NUM_WORKERS = 1;
 
     public function parse(string $inputPath, string $outputPath): void
     {
+        ini_set('memory_limit', '1G');
         $fileSize = filesize($inputPath);
 
-        if ($fileSize < 1024 * 1024 * 2 || !function_exists('pcntl_fork')) {
+        if ($fileSize < 1024 * 1024 * 2 || !function_exists('pcntl_fork') || self::NUM_WORKERS === 1) {
             [$result, $order] = $this->processChunk($inputPath, 0, $fileSize);
             $this->writeOutput($result, $order, $outputPath);
             return;
@@ -96,9 +97,8 @@ final class Parser
         $order = [];
         $orderCounter = 0;
         $pos = $start;
-        $maxLineLen = 1024;
 
-        while ($pos < $end && ($line = \stream_get_line($fp, $maxLineLen, "\n")) !== false) {
+        while ($pos < $end && ($line = \stream_get_line($fp, 0, "\n")) !== false) {
             $pos += \strlen($line) + 1;
 
             $commaPos = \strpos($line, ",", 20);
