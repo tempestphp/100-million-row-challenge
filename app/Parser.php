@@ -3,7 +3,6 @@
 namespace App;
 
 use App\Commands\Visit;
-use parallel\Runtime;
 
 use function array_count_values;
 use function array_fill;
@@ -11,6 +10,8 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
+use function file_get_contents;
+use function file_put_contents;
 use function filesize;
 use function fopen;
 use function fread;
@@ -18,7 +19,11 @@ use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
+use function getmypid;
 use function implode;
+use function pack;
+use function pcntl_fork;
+use function pcntl_wait;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -26,9 +31,12 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function sys_get_temp_dir;
+use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
+use const WNOHANG;
 
 final class Parser
 {
@@ -114,90 +122,22 @@ final class Parser
         fclose($bh);
         $boundaries[] = $fileSize;
 
-        $futures = [];
-        $readChunk = self::READ_CHUNK;
+        $tmpDir = sys_get_temp_dir();
+        $myPid = getmypid();
+        $childMap = [];
 
         for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $runtime = new Runtime();
-            $wStart = $boundaries[$w];
-            $wEnd = $boundaries[$w + 1];
-            $futures[] = $runtime->run(static function (
-                string $inputPath, int $start, int $end,
-                array $pathIds, array $dateIdChars,
-                int $pathCount, int $dateCount, int $readChunk,
-            ): array {
-                $buckets = array_fill(0, $pathCount, '');
-                $handle = fopen($inputPath, 'rb');
-                stream_set_read_buffer($handle, 0);
-                fseek($handle, $start);
-                $remaining = $end - $start;
-
-                while ($remaining > 0) {
-                    $toRead = $remaining > $readChunk ? $readChunk : $remaining;
-                    $chunk = fread($handle, $toRead);
-                    $chunkLen = strlen($chunk);
-                    if ($chunkLen === 0) break;
-                    $remaining -= $chunkLen;
-
-                    $lastNl = strrpos($chunk, "\n");
-                    if ($lastNl === false) break;
-
-                    $tail = $chunkLen - $lastNl - 1;
-                    if ($tail > 0) {
-                        fseek($handle, -$tail, SEEK_CUR);
-                        $remaining += $tail;
-                    }
-
-                    $p = 25;
-                    $fence = $lastNl - 720;
-
-                    while ($p < $fence) {
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-
-                        $sep = strpos($chunk, ',', $p);
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-                    }
-
-                    while ($p < $lastNl) {
-                        $sep = strpos($chunk, ',', $p);
-                        if ($sep === false || $sep >= $lastNl) break;
-                        $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                        $p = $sep + 52;
-                    }
-                }
-
-                fclose($handle);
-
-                $counts = array_fill(0, $pathCount * $dateCount, 0);
-                for ($p = 0; $p < $pathCount; $p++) {
-                    if ($buckets[$p] === '') continue;
-                    $offset = $p * $dateCount;
-                    foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
-                        $counts[$offset + $did] += $count;
-                    }
-                }
-
-                return $counts;
-            }, [$inputPath, $wStart, $wEnd, $pathIds, $dateIdChars, $pathCount, $dateCount, $readChunk]);
+            $tmpFile = $tmpDir . '/p100m_' . $myPid . '_' . $w;
+            $pid = pcntl_fork();
+            if ($pid === 0) {
+                $wCounts = $this->parseRange(
+                    $inputPath, $boundaries[$w], $boundaries[$w + 1],
+                    $pathIds, $dateIdChars, $pathCount, $dateCount,
+                );
+                file_put_contents($tmpFile, pack('v*', ...$wCounts));
+                exit(0);
+            }
+            $childMap[$pid] = $tmpFile;
         }
 
         $counts = $this->parseRange(
@@ -205,12 +145,21 @@ final class Parser
             $pathIds, $dateIdChars, $pathCount, $dateCount,
         );
 
-        foreach ($futures as $future) {
-            $wCounts = $future->value();
+        $pending = count($childMap);
+        while ($pending > 0) {
+            $pid = pcntl_wait($status, WNOHANG);
+            if ($pid <= 0) {
+                $pid = pcntl_wait($status);
+            }
+            if (!isset($childMap[$pid])) continue;
+            $tmpFile = $childMap[$pid];
+            $wCounts = unpack('v*', file_get_contents($tmpFile));
+            unlink($tmpFile);
             $j = 0;
             foreach ($wCounts as $v) {
                 $counts[$j++] += $v;
             }
+            $pending--;
         }
 
         $this->writeJson($outputPath, $counts, $paths, $dates, $dateCount);
