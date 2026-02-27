@@ -11,6 +11,8 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
+use function file_get_contents;
+use function file_put_contents;
 use function filesize;
 use function fopen;
 use function fread;
@@ -18,9 +20,9 @@ use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
+use function getmypid;
 use function max;
 use function min;
-use function ord;
 use function pack;
 use function pcntl_fork;
 use function pcntl_waitpid;
@@ -28,24 +30,21 @@ use function str_replace;
 use function strlen;
 use function strpos;
 use function strrpos;
-use function stream_get_contents;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
-use function stream_socket_pair;
 use function substr;
+use function sys_get_temp_dir;
+use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
-use const STREAM_IPPROTO_IP;
-use const STREAM_PF_UNIX;
-use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
     private const URL_PREFIX_LENGTH = 25; // https://stitcher.io/blog/
     private const SAMPLE_BYTES = 2_097_152; // 2 MB probe
-    private const READ_CHUNK_BYTES = 98_304; // tuned chunk size
-    private const DEFAULT_WORKERS = 14;
+    private const READ_CHUNK_BYTES = 196_608; // tuned chunk size
+    private const DEFAULT_WORKERS = 17;
     private const DATE_START_YEAR = 21;
     private const DATE_END_YEAR = 26;
 
@@ -62,7 +61,7 @@ final class Parser
         $readChunkBytes = $this->resolveReadChunkBytes();
         $boundaries = $this->computeBoundaries($inputPath, $fileSize, $workers);
 
-        if ($workers <= 1 || !function_exists('pcntl_fork') || !function_exists('stream_socket_pair')) {
+        if ($workers <= 1 || !function_exists('pcntl_fork')) {
             $counts = $this->crunch(
                 $inputPath,
                 0,
@@ -79,28 +78,18 @@ final class Parser
             return;
         }
 
-        $pipes = [];
         $children = [];
         $chunkCount = count($boundaries) - 1;
+        $tmpPrefix = sys_get_temp_dir() . '/p100m_' . getmypid() . '_';
 
         for ($worker = 0; $worker < $chunkCount - 1; $worker++) {
-            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-
-            if ($pair === false) {
-                break;
-            }
-
             $pid = pcntl_fork();
 
             if ($pid === -1) {
-                fclose($pair[0]);
-                fclose($pair[1]);
                 break;
             }
 
             if ($pid === 0) {
-                fclose($pair[0]);
-
                 $result = $this->crunch(
                     $inputPath,
                     $boundaries[$worker],
@@ -112,21 +101,11 @@ final class Parser
                     $readChunkBytes,
                 );
 
-                $use16Bit = max($result) <= 65_535;
-                fwrite($pair[1], $use16Bit ? "\x00" : "\x01");
-
-                $format = $use16Bit ? 'v*' : 'V*';
-                foreach (array_chunk($result, 8_192) as $batch) {
-                    fwrite($pair[1], pack($format, ...$batch));
-                }
-
-                fclose($pair[1]);
+                file_put_contents($tmpPrefix . $worker, pack('v*', ...$result));
                 exit(0);
             }
 
-            fclose($pair[1]);
-            $pipes[] = $pair[0];
-            $children[] = $pid;
+            $children[] = [$pid, $tmpPrefix . $worker];
         }
 
         $counts = $this->crunch(
@@ -140,28 +119,19 @@ final class Parser
             $readChunkBytes,
         );
 
-        foreach ($pipes as $pipe) {
-            $raw = stream_get_contents($pipe);
-            fclose($pipe);
+        foreach ($children as [$pid, $tmpPath]) {
+            pcntl_waitpid($pid, $status);
 
-            if ($raw === false || $raw === '') {
+            $workerRaw = file_get_contents($tmpPath);
+            if ($workerRaw === false || $workerRaw === '') {
                 continue;
             }
 
-            $rawLength = strlen($raw);
-            $format = ord($raw[0]) === 0 ? 'v*' : 'V*';
-            $bytesPerChunk = $format === 'v*' ? 16_384 : 32_768;
             $index = 0;
-
-            for ($offset = 1; $offset < $rawLength; $offset += $bytesPerChunk) {
-                foreach (unpack($format, substr($raw, $offset, $bytesPerChunk)) as $value) {
-                    $counts[$index++] += $value;
-                }
+            foreach (unpack('v*', $workerRaw) as $value) {
+                $counts[$index++] += $value;
             }
-        }
-
-        foreach ($children as $pid) {
-            pcntl_waitpid($pid, $status);
+            unlink($tmpPath);
         }
 
         $this->writeJson($outputPath, $counts, $slugLabels, $dateLabels, $dateCount);
@@ -177,7 +147,7 @@ final class Parser
             if (function_exists('posix_sysconf')) {
                 $cpuCount = (int) posix_sysconf(POSIX_SC_NPROCESSORS_ONLN);
                 if ($cpuCount > 0) {
-                    $workers = min(14, $cpuCount + 4);
+                    $workers = min(17, $cpuCount + 4);
                 }
             }
         }
