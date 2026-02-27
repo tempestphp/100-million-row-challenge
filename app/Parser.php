@@ -7,13 +7,29 @@ final class Parser
 	public function parse(string $inputPath, string $outputPath): void
 	{
 		$posts = [];
+		$chunk_size = 16 * 1024;
 
+		$start = microtime(true);
 		$handle = fopen($inputPath, "r");
-		while (false !== $line = fgets($handle))
+		stream_set_read_buffer($handle, 0);
+		$last_line = '';
+		while (!feof($handle))
 		{
-			//https://stitcher.io/blog/shorthand-comparisons-in-php,2022-09-10T13:55:25+00:00
-			$path = substr($line, 19, -27);
-			$date = substr($line, -26, 10);
+			$chunk = fread($handle, $chunk_size);
+			$lines = explode("\n", $chunk);
+			$count = count($lines);
+			for ($i = 0; $i < $count; $i++)
+			{
+				if ($i === $count - 1)
+					$last_line = $lines[$i];
+				else
+				{
+					if ($i === 0)
+						$line = $last_line . $lines[$i];
+					else
+						$line = $lines[$i];
+					$path = substr($line, 19, -26);
+					$date = substr($line, -25, 10);
 
 			$posts[$path][] = $date;
 		}
