@@ -55,7 +55,8 @@ final class Parser
         $pathMap = $this->buildPathMap($urls, $dateCount);
         $pathCount = count($urls);
         $parentPid = getmypid();
-        $childPids = [];
+        $childPidToIndex = [];
+        $tmpDir = sys_get_temp_dir();
 
         // Fork children for chunks 1..THREADS-1; parent handles chunk 0 directly
         for ($i = 1; $i < self::THREADS; $i++) {
@@ -67,23 +68,34 @@ final class Parser
                 gc_disable();
                 [$start, $end] = $boundaries[$i];
                 $counts = $this->processChunk($inputPath, $start, $end, $pathMap, $dateMap, $pathCount, $dateCount);
-                file_put_contents(sys_get_temp_dir()."/csv_{$parentPid}_{$i}.dat", pack('V*', ...$counts));
+                file_put_contents("{$tmpDir}/csv_{$parentPid}_{$i}.dat", pack('V*', ...$counts));
                 exit(0);
             }
 
-            $childPids[] = $childPid;
+            $childPidToIndex[$childPid] = $i;
         }
 
         // Parent crunches chunk 0 while children run in parallel
         [$start, $end] = $boundaries[0];
         $tally = $this->processChunk($inputPath, $start, $end, $pathMap, $dateMap, $pathCount, $dateCount);
 
-        foreach ($childPids as $childPid) {
-            pcntl_waitpid($childPid, $status);
+        $pending = self::THREADS - 1;
+        while ($pending > 0) {
+            $pid = pcntl_waitpid(-1, $status); // -1 = get the first to finish
+            if ($pid > 0) {
+                $i = $childPidToIndex[$pid];
+                $file = "{$tmpDir}/csv_{$parentPid}_{$i}.dat";
+                $raw = file_get_contents($file);
+                unlink($file);
+                $j = 0;
+                foreach (unpack('V*', $raw) as $v) {
+                    $tally[$j++] += $v;
+                }
+                $pending--;
+            }
         }
 
-        $totals = $this->mergePartials($parentPid, $tally);
-        $result = $this->buildOutput($totals, $urls, $dateIndex, $dateCount);
+        $result = $this->buildOutput($tally, $urls, $dateIndex, $dateCount);
         $this->writeJson($outputPath, $result);
     }
 
@@ -306,23 +318,6 @@ final class Parser
         fclose($fp);
 
         return $counts;
-    }
-
-    private function mergePartials(int $parentPid, array $tally): array
-    {
-        $tmpDir = sys_get_temp_dir();
-
-        for ($i = 1; $i < self::THREADS; $i++) {
-            $file = "{$tmpDir}/csv_{$parentPid}_{$i}.dat";
-            $raw = file_get_contents($file);
-            unlink($file);
-            $j = 0;
-            foreach (unpack('V*', $raw) as $v) {
-                $tally[$j++] += $v;
-            }
-        }
-
-        return $tally;
     }
 
     private function buildOutput(array $totals, array $urls, array $dateIndex, int $dateCount): array
