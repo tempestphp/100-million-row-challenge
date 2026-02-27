@@ -8,6 +8,7 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
+        throw new \Exception('Nope');
         $csv = fopen($inputPath, 'r');
         $data = [];
 
