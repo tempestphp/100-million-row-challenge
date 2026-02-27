@@ -18,16 +18,19 @@ final class DataParseCommand
         ?string $name = null,
         int $workers = 4,
     ): void {
-        // Spec: 2 vCPUs, 1.5GB RAM max
-        ini_set('memory_limit', '1536M');
-        $startTime = microtime(true);
+        // Spec: 2 vCPUs, 1.5GB RAM max. GC disabled for hot path (no cyclic refs).
+        \ini_set('memory_limit', '1536M');
+        if (\function_exists('gc_disable')) {
+            \gc_disable();
+        }
+        $startTime = \microtime(true);
 
-        new Parser()->parse($inputPath, $outputPath, $workers);
+        new Parser()->parse($inputPath, $outputPath);
 
-        $endTime = microtime(true);
+        $endTime = \microtime(true);
         $executionTime = $endTime - $startTime;
 
-        $name ??= exec('git branch --show-current');
+        $name ??= \exec('git branch --show-current');
 
         $leaderBoardEntry = time() . ',' . $name . ',' . $executionTime;
 

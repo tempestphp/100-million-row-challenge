@@ -2,401 +2,317 @@
 
 namespace App;
 
-use Exception;
+use App\Commands\Visit;
+use parallel\Runtime;
+
+use const SEEK_CUR;
+
 
 final class Parser
 {
-    private const HOST_PREFIX_LEN = 19; // "https://stitcher.io"
-    private const READ_CHUNK = 64 * 1024 * 1024; // 64MB
+    private const int WORKERS = 10;
+    private const int READ_CHUNK = 655_360;
+    private const int DISCOVER_SIZE = 2_097_152;
 
-    public function parse(string $inputPath, string $outputPath, int $workers = 2): void
+    public function parse($inputPath, $outputPath)
     {
-        if (!\function_exists('pcntl_fork') || $workers <= 1) {
-            $this->parseSingle($inputPath, $outputPath);
-            return;
-        }
+        \gc_disable();
 
-        $size = filesize($inputPath);
-        if ($size === false || $size === 0) {
-            $this->writeResult([], [], $outputPath);
-            return;
-        }
+        $fileSize = \filesize($inputPath);
 
-        $readPipes = [];
-        $writePipes = [];
-        for ($i = 0; $i < $workers; $i++) {
-            $pair = @stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            if ($pair === false) {
-                throw new Exception('stream_socket_pair failed');
-            }
-            $readPipes[$i] = $pair[0];
-            $writePipes[$i] = $pair[1];
-        }
-
-        $chunkSize = (int) ($size / $workers);
-        $pids = [];
-        for ($i = 0; $i < $workers; $i++) {
-            $startByte = $i === 0 ? 0 : $chunkSize * $i;
-            $endByte = $i === $workers - 1 ? $size : $chunkSize * ($i + 1);
-            $pid = pcntl_fork();
-            if ($pid === -1) {
-                foreach ($readPipes as $r) {
-                    fclose($r);
-                }
-                foreach ($writePipes as $w) {
-                    fclose($w);
-                }
-                throw new Exception('pcntl_fork failed');
-            }
-            if ($pid === 0) {
-                foreach ($readPipes as $r) {
-                    @fclose($r);
-                }
-                $this->processChunk($startByte, $endByte, $inputPath, $writePipes[$i]);
-                fclose($writePipes[$i]);
-                exit(0);
-            }
-            fclose($writePipes[$i]);
-            $pids[$i] = $pid;
-        }
-
-        $workerData = [];
-        for ($i = 0; $i < $workers; $i++) {
-            $raw = (string) stream_get_contents($readPipes[$i]);
-            fclose($readPipes[$i]);
-            $workerData[] = self::unpackPayload($raw);
-        }
-        foreach ($pids as $pid) {
-            pcntl_waitpid($pid, $status);
-        }
-
-        $pathOrder = $this->buildPathOrder($workerData);
-        $merged = $this->mergeAggregates($pathOrder, $workerData);
-        $this->writeResult($pathOrder, $merged, $outputPath);
-    }
-
-    private static function packPayload(array $payload): string
-    {
-        if (\extension_loaded('igbinary')) {
-            return igbinary_serialize($payload);
-        }
-        if (\extension_loaded('msgpack')) {
-            return msgpack_pack($payload);
-        }
-        return serialize($payload);
-    }
-
-    private static function unpackPayload(string $raw): array
-    {
-        $empty = ['order' => [], 'agg' => []];
-        if ($raw === '') {
-            return $empty;
-        }
-        if (\extension_loaded('igbinary')) {
-            $v = igbinary_unserialize($raw);
-            return \is_array($v) ? $v : $empty;
-        }
-        if (\extension_loaded('msgpack')) {
-            $v = msgpack_unpack($raw);
-            return \is_array($v) ? $v : $empty;
-        }
-        $v = unserialize($raw);
-        return \is_array($v) ? $v : $empty;
-    }
-
-    private function buildPathOrder(array $workerData): array
-    {
-        $orders = array_column($workerData, 'order');
-        if (count($orders) === 1) {
-            $all = $orders[0];
-        } else {
-            $all = $this->mergeSortedByOffset($orders);
-        }
-        $seen = [];
-        $pathOrder = [];
-        foreach ($all as [$path]) {
-            if (!isset($seen[$path])) {
-                $seen[$path] = true;
-                $pathOrder[] = $path;
-            }
-        }
-        return $pathOrder;
-    }
-
-    /** @param array<int, array{0: string, 1: int}> $orders */
-    private function mergeSortedByOffset(array $orders): array
-    {
-        $idx = array_fill(0, count($orders), 0);
-        $result = [];
-        $n = count($orders);
-        while (true) {
-            $minOffset = PHP_INT_MAX;
-            $minK = -1;
-            for ($k = 0; $k < $n; $k++) {
-                $i = $idx[$k];
-                if ($i < count($orders[$k]) && $orders[$k][$i][1] < $minOffset) {
-                    $minOffset = $orders[$k][$i][1];
-                    $minK = $k;
+        $dIdx = [];
+        $dKeys = [];
+        $dCnt = 0;
+        for ($y = 20; $y <= 26; $y++) {
+            for ($m = 1; $m <= 12; $m++) {
+                $maxD = match ($m) {
+                    2 => (($y + 2000) % 4 === 0) ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+                $mStr = ($m < 10 ? '0' : '') . $m;
+                $ymStr = $y . '-' . $mStr . '-';
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $key = $ymStr . (($d < 10 ? '0' : '') . $d);
+                    $dIdx[$key] = $dCnt;
+                    $dKeys[$dCnt] = $key;
+                    $dCnt++;
                 }
             }
-            if ($minK === -1) {
-                break;
-            }
-            $result[] = $orders[$minK][$idx[$minK]];
-            $idx[$minK]++;
         }
-        return $result;
-    }
 
-    private function processChunk(int $startByte, int $endByte, string $inputPath, $writeStream): void
-    {
-        $handle = fopen($inputPath, 'r');
-        if ($handle === false) {
-            fwrite($writeStream, self::packPayload(['order' => [], 'agg' => []]));
-            return;
+        $dBin = [];
+        foreach ($dIdx as $date => $id) {
+            $dBin[$date] = \chr($id & 0xFF) . \chr($id >> 8);
         }
-        stream_set_read_buffer($handle, self::READ_CHUNK);
-        if ($startByte > 0) {
-            fseek($handle, $startByte, SEEK_SET);
-            while (true) {
-                $block = fread($handle, 8192);
-                if ($block === false || $block === '') {
-                    break;
-                }
-                $nl = strpos($block, "\n");
-                if ($nl !== false) {
-                    fseek($handle, $startByte + $nl + 1, SEEK_SET);
-                    $startByte = $startByte + $nl + 1;
-                    break;
-                }
-                $startByte += strlen($block);
+
+        $handle = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($handle, 0);
+        $warmUpSize = $fileSize > self::DISCOVER_SIZE ? self::DISCOVER_SIZE : $fileSize;
+        $raw = \fread($handle, $warmUpSize);
+        \fclose($handle);
+
+        $pIdx = [];
+        $pKeys = [];
+        $pCnt = 0;
+        $pos = 0;
+        $lastNl = \strrpos($raw, "\n");
+
+        while ($pos < $lastNl) {
+            $nlPos = \strpos($raw, "\n", $pos + 52);
+            if ($nlPos === false) break;
+
+            $slug = \substr($raw, $pos + 25, $nlPos - $pos - 51);
+            if (!isset($pIdx[$slug])) {
+                $pIdx[$slug] = $pCnt;
+                $pKeys[$pCnt] = $slug;
+                $pCnt++;
             }
-            if ($startByte >= $endByte) {
-                fclose($handle);
-                fwrite($writeStream, self::packPayload(['order' => [], 'agg' => []]));
-                return;
+
+            $pos = $nlPos + 1;
+        }
+        unset($raw);
+
+        foreach (Visit::all() as $visit) {
+            $slug = \substr($visit->uri, 25);
+            if (!isset($pIdx[$slug])) {
+                $pIdx[$slug] = $pCnt;
+                $pKeys[$pCnt] = $slug;
+                $pCnt++;
             }
         }
-        $aggregate = [];
-        $order = [];
-        $seen = [];
-        $lastPath = null;
-        $lastRef = null;
-        $filePos = $startByte;
-        $remainder = '';
-        while (true) {
-            $chunk = fread($handle, self::READ_CHUNK);
-            if ($chunk === false) {
-                break;
-            }
-            $buf = $remainder . $chunk;
-            $remainder = '';
-            $len = strlen($buf);
-            $chunkStart = $filePos;
-            $start = 0;
-            while ($start < $len) {
-                $nl = strpos($buf, "\n", $start);
-                if ($nl === false) {
-                    $remainder = substr($buf, $start);
-                    break;
-                }
-                $lineStart = $start;
-                $lineLen = $nl - $start;
-                $lineStartInFile = $chunkStart + $lineStart;
-                $start = $nl + 1;
-                if ($lineStartInFile >= $endByte) {
-                    $remainder = substr($buf, $lineStart);
-                    break 2;
-                }
-                if ($lineLen >= self::HOST_PREFIX_LEN + 12) {
-                    $pathStart = $lineStart + self::HOST_PREFIX_LEN;
-                    $commaPos = strpos($buf, ',', $pathStart);
-                    if ($commaPos !== false && $commaPos < $lineStart + $lineLen) {
-                        $path = substr($buf, $pathStart, $commaPos - $pathStart);
-                        $d = substr($buf, $commaPos + 1, 10);
-                        $dateInt = ((int) substr($d, 0, 4)) * 10000 + ((int) substr($d, 5, 2)) * 100 + (int) substr($d, 8, 2);
-                        if ($path !== $lastPath) {
-                            $lastPath = $path;
-                            if (!isset($aggregate[$path])) {
-                                $aggregate[$path] = [];
-                            }
-                            $lastRef = &$aggregate[$path];
-                            if (!isset($seen[$path])) {
-                                $seen[$path] = true;
-                                $order[] = [$path, $lineStartInFile];
-                            }
-                        }
-                        if (!isset($lastRef[$dateInt])) {
-                            $lastRef[$dateInt] = 0;
-                        }
-                        $lastRef[$dateInt]++;
+
+        $cuts = [0];
+        $bh = \fopen($inputPath, 'rb');
+        for ($i = 1; $i < self::WORKERS; $i++) {
+            \fseek($bh, (int) ($fileSize * $i / self::WORKERS));
+            \fgets($bh);
+            $cuts[] = \ftell($bh);
+        }
+        \fclose($bh);
+        $cuts[] = $fileSize;
+
+        $jobs = [];
+        $chunkSize = self::READ_CHUNK;
+
+        for ($w = 0; $w < self::WORKERS - 1; $w++) {
+            $runtime = new Runtime();
+            $wStart = $cuts[$w];
+            $wEnd = $cuts[$w + 1];
+            $jobs[] = $runtime->run(static function (
+                string $inputPath, int $start, int $end,
+                array $pIdx, array $dBin,
+                int $pCnt, int $dCnt, int $chunkSize,
+            ): array {
+                \gc_disable();
+                $buckets = \array_fill(0, $pCnt, '');
+                $handle = \fopen($inputPath, 'rb');
+                \stream_set_read_buffer($handle, 0);
+                \fseek($handle, $start);
+                $remaining = $end - $start;
+
+                while ($remaining > 0) {
+                    $toRead = $remaining > $chunkSize ? $chunkSize : $remaining;
+                    $chunk = \fread($handle, $toRead);
+                    $chunkLen = \strlen($chunk);
+                    if ($chunkLen === 0) break;
+                    $remaining -= $chunkLen;
+
+                    $lastNl = \strrpos($chunk, "\n");
+                    if ($lastNl === false) break;
+
+                    $tail = $chunkLen - $lastNl - 1;
+                    if ($tail > 0) {
+                        \fseek($handle, -$tail, SEEK_CUR);
+                        $remaining += $tail;
+                    }
+
+                    $p = 25;
+                    $fence = $lastNl - 720;
+
+                    while ($p < $fence) {
+                        $sep = \strpos($chunk, ',', $p);
+                        $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                        $p = $sep + 52;
+
+                        $sep = \strpos($chunk, ',', $p);
+                        $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                        $p = $sep + 52;
+
+                        $sep = \strpos($chunk, ',', $p);
+                        $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                        $p = $sep + 52;
+
+                        $sep = \strpos($chunk, ',', $p);
+                        $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                        $p = $sep + 52;
+
+                        $sep = \strpos($chunk, ',', $p);
+                        $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                        $p = $sep + 52;
+
+                        $sep = \strpos($chunk, ',', $p);
+                        $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                        $p = $sep + 52;
+                    }
+
+                    while ($p < $lastNl) {
+                        $sep = \strpos($chunk, ',', $p);
+                        if ($sep === false || $sep >= $lastNl) break;
+                        $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                        $p = $sep + 52;
                     }
                 }
-            }
-            $filePos += $len;
-            if ($chunk === '') {
-                break;
-            }
-        }
-        unset($lastRef);
-        fclose($handle);
-        $aggOut = [];
-        foreach ($aggregate as $path => $dates) {
-            ksort($dates);
-            $aggOut[$path] = [];
-            foreach ($dates as $dk => $c) {
-                $aggOut[$path][] = [$dk, $c];
-            }
-        }
-        fwrite($writeStream, self::packPayload(['order' => $order, 'agg' => $aggOut]));
-    }
 
-    /**
-     * @param array<int, array{0: int, 1: int}> $lists sorted by [0] (dateKey)
-     * @return array<int, int> dateKey => count
-     */
-    private static function mergeSortedDateCounts(array $lists): array
-    {
-        $lists = array_values(array_filter($lists, fn ($l) => $l !== []));
-        if ($lists === []) {
-            return [];
-        }
-        $idx = array_fill(0, count($lists), 0);
-        $result = [];
-        $n = count($lists);
-        while (true) {
-            $minKey = null;
-            for ($k = 0; $k < $n; $k++) {
-                $i = $idx[$k];
-                if ($i < count($lists[$k])) {
-                    $key = $lists[$k][$i][0];
-                    if ($minKey === null || $key < $minKey) {
-                        $minKey = $key;
+                \fclose($handle);
+
+                $totals = \array_fill(0, $pCnt * $dCnt, 0);
+                for ($p = 0; $p < $pCnt; $p++) {
+                    if ($buckets[$p] === '') continue;
+                    $offset = $p * $dCnt;
+                    foreach (\array_count_values(\unpack('v*', $buckets[$p])) as $did => $count) {
+                        $totals[$offset + $did] += $count;
                     }
                 }
-            }
-            if ($minKey === null) {
-                break;
-            }
-            $sum = 0;
-            for ($k = 0; $k < $n; $k++) {
-                $i = $idx[$k];
-                if ($i < count($lists[$k]) && $lists[$k][$i][0] === $minKey) {
-                    $sum += $lists[$k][$i][1];
-                    $idx[$k]++;
-                }
-            }
-            $result[$minKey] = $sum;
+
+                return $totals;
+            }, [$inputPath, $wStart, $wEnd, $pIdx, $dBin, $pCnt, $dCnt, $chunkSize]);
         }
-        return $result;
+
+        $totals = $this->parseRange(
+            $inputPath, $cuts[self::WORKERS - 1], $cuts[self::WORKERS],
+            $pIdx, $dBin, $pCnt, $dCnt,
+        );
+
+        foreach ($jobs as $future) {
+            $wCounts = $future->value();
+            $j = 0;
+            foreach ($wCounts as $v) {
+                $totals[$j++] += $v;
+            }
+        }
+
+        $this->writeJson($outputPath, $totals, $pKeys, $dKeys, $dCnt);
     }
 
-    private function mergeAggregates(array $pathOrder, array $workerData): array
-    {
-        $merged = [];
-        foreach ($pathOrder as $path) {
-            $lists = [];
-            foreach ($workerData as $w) {
-                if (isset($w['agg'][$path])) {
-                    $lists[] = $w['agg'][$path];
-                }
+    private function parseRange(
+        $inputPath, $start, $end,
+        $pIdx, $dBin,
+        $pCnt, $dCnt,
+    ) {
+        $buckets = \array_fill(0, $pCnt, '');
+        $handle = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($handle, 0);
+        \fseek($handle, $start);
+        $remaining = $end - $start;
+
+        while ($remaining > 0) {
+            $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
+            $chunk = \fread($handle, $toRead);
+            $chunkLen = \strlen($chunk);
+            if ($chunkLen === 0) break;
+            $remaining -= $chunkLen;
+
+            $lastNl = \strrpos($chunk, "\n");
+            if ($lastNl === false) break;
+
+            $tail = $chunkLen - $lastNl - 1;
+            if ($tail > 0) {
+                \fseek($handle, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
-            $merged[$path] = self::mergeSortedDateCounts($lists);
+
+            $p = 25;
+            $fence = $lastNl - 720;
+
+            while ($p < $fence) {
+                $sep = \strpos($chunk, ',', $p);
+                $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = \strpos($chunk, ',', $p);
+                $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = \strpos($chunk, ',', $p);
+                $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = \strpos($chunk, ',', $p);
+                $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = \strpos($chunk, ',', $p);
+                $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = \strpos($chunk, ',', $p);
+                $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+            }
+
+            while ($p < $lastNl) {
+                $sep = \strpos($chunk, ',', $p);
+                if ($sep === false || $sep >= $lastNl) break;
+                $buckets[$pIdx[\substr($chunk, $p, $sep - $p)]] .= $dBin[\substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+            }
         }
-        return $merged;
+
+        \fclose($handle);
+
+        $totals = \array_fill(0, $pCnt * $dCnt, 0);
+        for ($p = 0; $p < $pCnt; $p++) {
+            if ($buckets[$p] === '') continue;
+            $offset = $p * $dCnt;
+            foreach (\array_count_values(\unpack('v*', $buckets[$p])) as $did => $count) {
+                $totals[$offset + $did] += $count;
+            }
+        }
+
+        return $totals;
     }
 
-    private const WRITE_BUF_SIZE = 1024 * 1024; // 1MB flush
+    private function writeJson(
+        $outputPath, $totals, $pKeys,
+        $dKeys, $dCnt,
+    ) {
+        $out = \fopen($outputPath, 'wb');
+        \stream_set_write_buffer($out, 1_048_576);
+        \fwrite($out, '{');
 
-    private function writeResult(array $pathOrder, array $merged, string $outputPath): void
-    {
-        $out = fopen($outputPath, 'w');
-        if ($out === false) {
-            throw new Exception("Could not write output: {$outputPath}");
+        $datePrefixes = [];
+        for ($d = 0; $d < $dCnt; $d++) {
+            $datePrefixes[$d] = '        "20' . $dKeys[$d] . '": ';
         }
-        stream_set_write_buffer($out, 2 * 1024 * 1024);
-        $pathsToWrite = array_filter($pathOrder, fn ($p) => isset($merged[$p]));
-        $numPaths = count($pathsToWrite);
-        $idx = 0;
-        $buf = "{\n";
-        foreach ($pathsToWrite as $path) {
-            $dates = $merged[$path];
-            $escapedPath = str_replace(['\\', '"', '/'], ['\\\\', '\\"', '\\/'], $path);
-            $block = '    "' . $escapedPath . '": {' . "\n";
-            $lines = [];
-            foreach ($dates as $dateKey => $count) {
-                $dateStr = \is_int($dateKey)
-                    ? sprintf('%04d-%02d-%02d', (int) ($dateKey / 10000), (int) (($dateKey % 10000) / 100), $dateKey % 100)
-                    : $dateKey;
-                $lines[] = '        "' . $dateStr . '": ' . $count;
-            }
-            $block .= implode(",\n", $lines) . "\n";
-            $idx++;
-            $block .= '    }' . ($idx < $numPaths ? ",\n" : "\n");
-            $buf .= $block;
-            if (strlen($buf) >= self::WRITE_BUF_SIZE) {
-                fwrite($out, $buf);
-                $buf = '';
-            }
-        }
-        fwrite($out, $buf . '}');
-        fclose($out);
-    }
 
-    private function parseSingle(string $inputPath, string $outputPath): void
-    {
-        $handle = fopen($inputPath, 'r');
-        if ($handle === false) {
-            throw new Exception("Could not open input: {$inputPath}");
+        $pCnt = \count($pKeys);
+        $escapedPaths = [];
+        for ($p = 0; $p < $pCnt; $p++) {
+            $escapedPaths[$p] = "\"\\/blog\\/" . \str_replace('/', '\\/', $pKeys[$p]) . "\"";
         }
-        stream_set_read_buffer($handle, self::READ_CHUNK);
-        $aggregate = [];
-        $remainder = '';
-        while (true) {
-            $chunk = fread($handle, self::READ_CHUNK);
-            if ($chunk === false) {
-                break;
+
+        $firstPath = true;
+
+        for ($p = 0; $p < $pCnt; $p++) {
+            $base = $p * $dCnt;
+            $dateEntries = [];
+
+            for ($d = 0; $d < $dCnt; $d++) {
+                $count = $totals[$base + $d];
+                if ($count === 0) continue;
+                $dateEntries[] = $datePrefixes[$d] . $count;
             }
-            $buf = $remainder . $chunk;
-            $remainder = '';
-            $len = strlen($buf);
-            $start = 0;
-            while ($start < $len) {
-                $nl = strpos($buf, "\n", $start);
-                if ($nl === false) {
-                    $remainder = substr($buf, $start);
-                    break;
-                }
-                $lineStart = $start;
-                $lineLen = $nl - $start;
-                $start = $nl + 1;
-                if ($lineLen < self::HOST_PREFIX_LEN + 12) {
-                    continue;
-                }
-                $commaPos = strpos($buf, ',', $lineStart + self::HOST_PREFIX_LEN);
-                if ($commaPos === false || $commaPos >= $lineStart + $lineLen) {
-                    continue;
-                }
-                $path = substr($buf, $lineStart + self::HOST_PREFIX_LEN, $commaPos - $lineStart - self::HOST_PREFIX_LEN);
-                $date = substr($buf, $commaPos + 1, 10);
-                $aggregate[$path][$date] = ($aggregate[$path][$date] ?? 0) + 1;
-            }
-            if ($chunk === '') {
-                break;
-            }
+
+            if ($dateEntries === []) continue;
+
+            $buf = $firstPath ? "\n    " : ",\n    ";
+            $firstPath = false;
+            $buf .= $escapedPaths[$p] . ": {\n" . \implode(",\n", $dateEntries) . "\n    }";
+            \fwrite($out, $buf);
         }
-        if ($remainder !== '' && strlen($remainder) >= self::HOST_PREFIX_LEN + 12) {
-            $commaPos = strpos($remainder, ',', self::HOST_PREFIX_LEN);
-            if ($commaPos !== false) {
-                $path = substr($remainder, self::HOST_PREFIX_LEN, $commaPos - self::HOST_PREFIX_LEN);
-                $date = substr($remainder, $commaPos + 1, 10);
-                $aggregate[$path][$date] = ($aggregate[$path][$date] ?? 0) + 1;
-            }
-        }
-        fclose($handle);
-        foreach ($aggregate as $path => $dates) {
-            ksort($aggregate[$path]);
-        }
-        $this->writeResult(array_keys($aggregate), $aggregate, $outputPath);
+
+        \fwrite($out, "\n}");
+        \fclose($out);
     }
 }
