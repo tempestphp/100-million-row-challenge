@@ -161,7 +161,7 @@ final class Parser
     /**
      * @return ($tmpFile is null ? array<int, array<int, int>> : void)
      */
-    private function parseRange(string $inputPath, int $start, int $end, ?string $tmpFile = null, int $workerIndex = -1): array|null
+    private function parseRange(string $inputPath, int $start, int $end, ?string $tmpFile = null, int $workerIndex = -1): void
     {
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 0);
