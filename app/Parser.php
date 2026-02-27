@@ -95,11 +95,13 @@ final class Parser
             if ($nlPos === false) break;
 
             $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
-            if (!isset($pathIds[$slug])) {
-                $pathIds[$slug] = $pathCount;
-                $paths[$pathCount] = $slug;
-                $pathCount++;
+            if (isset($pathIds[$slug])) {
+                $pos = $nlPos + 1;
+                continue;
             }
+            $pathIds[$slug] = $pathCount;
+            $paths[$pathCount] = $slug;
+            $pathCount++;
 
             $pos = $nlPos + 1;
         }
@@ -107,11 +109,12 @@ final class Parser
 
         foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, 25);
-            if (!isset($pathIds[$slug])) {
-                $pathIds[$slug] = $pathCount;
-                $paths[$pathCount] = $slug;
-                $pathCount++;
+            if (isset($pathIds[$slug])) {
+                continue;
             }
+            $pathIds[$slug] = $pathCount;
+            $paths[$pathCount] = $slug;
+            $pathCount++;
         }
 
         $boundaries = [0];
@@ -153,15 +156,16 @@ final class Parser
             if ($pid <= 0) {
                 $pid = pcntl_wait($status);
             }
-            if (!isset($childMap[$pid])) continue;
-            $tmpFile = $childMap[$pid];
-            $wCounts = unpack('v*', file_get_contents($tmpFile));
-            unlink($tmpFile);
-            $j = 0;
-            foreach ($wCounts as $v) {
-                $counts[$j++] += $v;
+            if (isset($childMap[$pid])) {
+                $tmpFile = $childMap[$pid];
+                $wCounts = unpack('v*', file_get_contents($tmpFile));
+                unlink($tmpFile);
+                $j = 0;
+                foreach ($wCounts as $v) {
+                    $counts[$j++] += $v;
+                }
+                $pending--;
             }
-            $pending--;
         }
 
         self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
