@@ -7,7 +7,7 @@ use Generator;
 
 final class Parser
 {
-    private const int CHUNK_SIZE = 1024 * 1024 * 70;
+    private const int CHUNK_SIZE = 1024 * 1024 * 50;
     private static array $urls = [];
 
     public function parse(string $inputPath, string $outputPath): void
@@ -92,9 +92,9 @@ final class Parser
             ksort($dates);
 
             if ($isFirst) {
-                fwrite($fileOutput, '    '.$escapedPath.': {');
+                $content = '    '.$escapedPath.': {';
             } else {
-                fwrite($fileOutput, ",\n".'    '.$escapedPath.': {');
+                $content = ",\n".'    '.$escapedPath.': {';
             }
 
             $dateKeys = array_keys($dates);
@@ -102,10 +102,10 @@ final class Parser
 
             foreach ($dateKeys as $i => $date) {
                 $comma = $i === $last ? '' : ',';
-                fwrite($fileOutput, "\n        " . '"' . $date . '": ' . $dates[$date] . $comma);
+                $content .= "\n        " . '"' . $date . '": ' . $dates[$date] . $comma;
             }
 
-            fwrite($fileOutput, "\n    }");
+            fwrite($fileOutput, $content."\n    }");
             $isFirst = false;
         }
 
