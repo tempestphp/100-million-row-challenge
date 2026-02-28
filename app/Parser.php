@@ -8,20 +8,12 @@ use function array_fill;
 use function chr;
 use function count;
 use function fclose;
-use function fgets;
-use function file_get_contents;
-use function file_put_contents;
 use function fopen;
 use function fread;
 use function fseek;
-use function ftell;
 use function fwrite;
 use function gc_disable;
-use function getmypid;
 use function implode;
-use function pack;
-use function pcntl_fork;
-use function pcntl_wait;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -29,15 +21,11 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function sys_get_temp_dir;
-use function unlink;
 use function unpack;
 use const SEEK_CUR;
-use const WNOHANG;
 
 final class Parser
 {
-    private const int WORKERS = 10;
     private const int READ_CHUNK = 163_840;
     private const int DISCOVER_SIZE = 2_097_152;
 
@@ -116,55 +104,10 @@ final class Parser
             $pathCount++;
         }
 
-        $boundaries = [0];
-        $bh = fopen($inputPath, 'rb');
-        for ($i = 1; $i < self::WORKERS; $i++) {
-            fseek($bh, (int) ($fileSize * $i / self::WORKERS));
-            fgets($bh);
-            $boundaries[] = ftell($bh);
-        }
-        fclose($bh);
-        $boundaries[] = $fileSize;
-
-        $tmpDir = sys_get_temp_dir();
-        $myPid = getmypid();
-        $childMap = [];
-
-        for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
-            $pid = pcntl_fork();
-            if ($pid === 0) {
-                $wCounts = self::parseRange(
-                    $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $pathIds, $dateIdChars, $pathCount, $dateCount,
-                );
-                file_put_contents($tmpFile, pack('v*', ...$wCounts));
-                exit(0);
-            }
-            $childMap[$pid] = $tmpFile;
-        }
-
         $counts = self::parseRange(
-            $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
+            $inputPath, 0, $fileSize,
             $pathIds, $dateIdChars, $pathCount, $dateCount,
         );
-
-        $pending = count($childMap);
-        while ($pending > 0) {
-            $pid = pcntl_wait($status, WNOHANG);
-            if ($pid <= 0) {
-                $pid = pcntl_wait($status);
-            }
-            $tmpFile = $childMap[$pid];
-            $wCounts = unpack('v*', file_get_contents($tmpFile));
-            unlink($tmpFile);
-            $j = 0;
-            foreach ($wCounts as $v) {
-                $counts[$j] += $v;
-                $j++;
-            }
-            $pending--;
-        }
 
         self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
     }
