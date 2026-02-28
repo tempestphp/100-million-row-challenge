@@ -40,24 +40,27 @@ final class Parser
             return;
         }
 
-        // $tmpFiles = [];
-        // $tmpHandles = [];
-        $pids = [];
-
-        // var_dump($ranges, $this->workers);
-        // exit;
-        foreach ($ranges as $index => &$range) {
-            $tmpFile = tempnam(sys_get_temp_dir(), "parser_worker_{$index}_");
-            $this->tmpFiles[] = $tmpFile;
-            $this->tmpHandles[] = fopen($tmpFile, 'w+');
+        $workerCount = count($ranges);
+        $socketPairs = [];
+        for ($i = 0; $i < $workerCount; $i++) {
+            $socketPairs[$i] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
         }
 
+        $pids = [];
         foreach ($ranges as $index => &$range) {
             $pid = pcntl_fork();
 
             if ($pid === 0) {
+                // Child: close all read ends + other workers' write ends
+                foreach ($socketPairs as $i => $pair) {
+                    fclose($pair[0]);
+                    if ($i !== $index) {
+                        fclose($pair[1]);
+                    }
+                }
+
                 try {
-                    $this->parseRange($inputPath, $range['start'], $range['end'], $index);
+                    $this->parseRange($inputPath, $range['start'], $range['end'], $socketPairs[$index][1]);
                     exit(0);
                 } catch (\Throwable $e) {
                     fwrite(STDERR, "[parser-worker-error] {$e->getMessage()}\n");
@@ -68,11 +71,45 @@ final class Parser
             $pids[] = $pid;
         }
 
+        // Parent: close all write ends after all forks
+        foreach ($socketPairs as $pair) {
+            fclose($pair[1]);
+        }
+
+        // Parent: read from all sockets concurrently
+        $readEnds = [];
+        foreach ($socketPairs as $i => $pair) {
+            $readEnds[$i] = $pair[0];
+            stream_set_blocking($pair[0], false);
+        }
+
+        $buffers = array_fill(0, $workerCount, '');
+        $active = $readEnds;
+
+        while (!empty($active)) {
+            $read = array_values($active);
+            $write = null;
+            $except = null;
+            stream_select($read, $write, $except, 30);
+
+            foreach ($read as $socket) {
+                $idx = array_search($socket, $active, true);
+                $chunk = fread($socket, 2097152);
+                if ($chunk !== '' && $chunk !== false) {
+                    $buffers[$idx] .= $chunk;
+                }
+                if (feof($socket)) {
+                    fclose($socket);
+                    unset($active[$idx]);
+                }
+            }
+        }
+
         foreach ($pids as $pid) {
             pcntl_waitpid($pid, $status);
         }
 
-        $this->mergeAndWriteOutput($outputPath);
+        $this->mergeAndWriteOutput($outputPath, $buffers);
     }
 
     private function parseSingleRange(string $inputPath, string $outputPath): void
@@ -172,13 +209,13 @@ final class Parser
     /**
      * @return ($tmpFile is null ? array<int, array<int, int>> : void)
      */
-    private function parseRange(string $inputPath, int $start, int $end, $index): void
+    private function parseRange(string $inputPath, int $start, int $end, $socket): void
     {
+        set_error_handler(fn () => true);
         $t0 = hrtime(true);
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 0);
         fseek($input, $start);
-
 
         $pathIdByPath = &$this->pathIdByPath;
         $countsByPath = $this->paths;
@@ -204,33 +241,40 @@ final class Parser
             $remaining -= $chunkSize;
             $lineStart = 0;
 
-            while (($newlinePos = strpos($buffer, "\n", $lineStart)) !== false) {
-                $row = &$countsByPath[$pathIdByPath[substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51)]];
+            while (($newlinePos = strpos($buffer, "\n", $lineStart))) {
+                $pathId = $pathIdByPath[substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51)];
                 $dateKey = $dateKeyByString[substr($buffer, $newlinePos - 22, 7)];
                 $lineStart = $newlinePos + 1;
-                $row[$dateKey] = ($row[$dateKey] ?? 0) + 1;
+                $countsByPath[$pathId][$dateKey]++;
             }
         }
 
         fclose($input);
-        file_put_contents($this->tmpFiles[$index], serialize($countsByPath));
-        echo "[worker {$index}] parseRange time: " . ((hrtime(true) - $t0) / 1e9) * 1000 . " ms" . PHP_EOL;
+        $data = function_exists('igbinary_serialize') ? igbinary_serialize($countsByPath) : serialize($countsByPath);
+        $len = strlen($data);
+        $written = 0;
+        while ($written < $len) {
+            $w = fwrite($socket, substr($data, $written, 8_388_608));
+            if ($w === false || $w === 0) {
+                break;
+            }
+            $written += $w;
+        }
+        fclose($socket);
+        echo "[worker] parseRange time: " . ((hrtime(true) - $t0) / 1e9) * 1000 . " ms" . PHP_EOL;
     }
 
-    private function mergeAndWriteOutput(string $outputPath): void
+    private function mergeAndWriteOutput(string $outputPath, array &$buffers): void
     {
         $startTime = microtime(true);
         set_error_handler(fn () => true);
         $file = fopen($outputPath, 'w');
         stream_set_write_buffer($file, 0);
 
-        for($i = 0; $i < $this->workers; $i++) {
-            $allWorkerResults[] = unserialize(file_get_contents($this->tmpFiles[$i]));
-            var_dump(filesize($this->tmpFiles[$i]));
-
-            unlink($this->tmpFiles[$i]);
+        $unserialize = function_exists('igbinary_unserialize') ? 'igbinary_unserialize' : 'unserialize';
+        foreach ($buffers as $buf) {
+            $allWorkerResults[] = $unserialize($buf);
         }
-exit;
         $dateLinePrefix = &$this->generatedDateLinePrefix;
         $pathLinePrefix = &$this->pathLinePrefix;
         $pathCount = $this->pathCount;
@@ -239,17 +283,13 @@ exit;
         fwrite($file, '{' . PHP_EOL);
 
         for ($pathId = 0; $pathId <= $lastPathId; $pathId++) {
-            // Collect all date keys across workers
             $dateCounts = $allWorkerResults[0][$pathId];
             for ($w = 1; $w < $this->workers; ++$w) {
-                $dateCounts += $allWorkerResults[$w][$pathId];
-            }
-
-            for ($w = 0; $w < $this->workers; ++$w) {
                 foreach ($allWorkerResults[$w][$pathId] as $dateKey => $count) {
                     $dateCounts[$dateKey] += $count;
                 }
             }
+
             ksort($dateCounts, SORT_NUMERIC);
             $dateCount = count($dateCounts);
 
