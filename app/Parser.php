@@ -80,7 +80,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $warmUpSize = $fileSize > self::DISCOVER_SIZE ? self::DISCOVER_SIZE : $fileSize;
+        $warmUpSize = self::DISCOVER_SIZE;
         $raw = fread($handle, $warmUpSize);
         fclose($handle);
 
@@ -92,7 +92,6 @@ final class Parser
 
         while ($pos < $lastNl) {
             $nlPos = strpos($raw, "\n", $pos + 52);
-            if ($nlPos === false) break;
 
             $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
             if (isset($pathIds[$slug])) {
@@ -187,7 +186,6 @@ final class Parser
             $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
             $chunk = fread($handle, $toRead);
             $chunkLen = strlen($chunk);
-            if ($chunkLen === 0) break;
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
@@ -226,7 +224,7 @@ final class Parser
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                if ($sep === false || $sep >= $lastNl) break;
+                if ($sep >= $lastNl) break;
                 $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
