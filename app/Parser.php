@@ -13,7 +13,7 @@ final class Parser
             $tmp = tmpfile();
             $pid = pcntl_fork();
             if ($pid === 0) {
-                $f = fopen($inputPath, 'rnb');
+                $f = fopen($inputPath, 'rb');
                 $job = $this->parseChunk($f, $i, $chunk);
                 fwrite($tmp, igbinary_serialize($job));
                 die; // children work is done, parachute
@@ -39,8 +39,7 @@ final class Parser
         $r = [];
         foreach ($h as $k => &$v) {
             ksort($v);
-            preg_match('@://[^/]+(/.*)@', $k, $m);
-            $r[$m[1]] = $v;
+            $r[strstr($k, '/')] = $v;
         };
         
 
@@ -56,7 +55,7 @@ final class Parser
 
         $h = [];
         while ($chunk > 0 && $v = fgets($f)) {
-            $k = substr($v, 0, -27);
+            $k = substr($v, 12, -27);
             $d = substr($v, -26, 10);
             $h[$k][] = $d;
             $chunk -= strlen($v);
