@@ -17,19 +17,17 @@ final class Parser
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 4 * 2^10 * 2^10);
 
-        $paths = [];
+        while ($line = fgets($input)) {
+            $commaPos = strpos($line, ',');
 
-        while ($csvRow = fgetcsv($input, escape: '')) {
-            $urlInput = $csvRow[0];
-            $dateInput = $csvRow[1];
+            $path = substr($line, 19, $commaPos - 19);
 
-            $path = $paths[$urlInput] ??= $this->parsePathFromUrl($urlInput);
+            $date = substr($line, $commaPos + 1, 10);
 
             $output[$path] ??= [];
 
-            $formattedDate = $this->parseDate($dateInput);
-            $output[$path][$formattedDate] ??= 0;
-            $output[$path][$formattedDate]++;
+            $output[$path][$date] ??= 0;
+            $output[$path][$date]++;
         }
 
         foreach ($output as &$data) {
@@ -38,15 +36,5 @@ final class Parser
 
         $json = json_encode($output, flags: JSON_PRETTY_PRINT);
         file_put_contents($outputPath, $json);
-    }
-
-    private function parsePathFromUrl(string $urlInput): mixed
-    {
-        return parse_url($urlInput, PHP_URL_PATH);
-    }
-
-    private function parseDate(string $dateInput): string
-    {
-        return substr($dateInput, 0, 10);
     }
 }
