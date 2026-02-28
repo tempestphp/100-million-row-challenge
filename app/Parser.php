@@ -2,28 +2,24 @@
 
 namespace App;
 
-use RuntimeException;
-
 final class Parser
 {
-    private const string DOMAIN = 'https://stitcher.io';
     private const string EOL = "\n";
     private array $output = [];
 
     public function parse(string $inputPath, string $outputPath): void
     {
         $handle = fopen($inputPath, 'r');
-        while ($line = fgetcsv($handle, null, ',', '"', '\\')) {
-            if (count($line) !== 2) {
-                throw new RuntimeException('invalid data! ' . implode(',', $line));
-            }
+        while ($line = fgets($handle)) {
+            $matches = [];
+            preg_match('/io(.+),(.+)T/', $line, $matches);
+            $url = $matches[1];
+            $timestamp = $matches[2];
 
-            [$url, $timestamp] = $line;
-            $timestampDate = substr($timestamp,0 , strpos($timestamp, 'T'));
-            if (isset($this->output[$url][$timestampDate])) {
-                $this->output[$url][$timestampDate]++;
+            if (isset($this->output[$url][$timestamp])) {
+                $this->output[$url][$timestamp]++;
             } else {
-                $this->output[$url][$timestampDate] = 1;
+                $this->output[$url][$timestamp] = 1;
             }
         }
         fclose($handle);
@@ -42,24 +38,8 @@ final class Parser
         $j = 0;
         $urlCount = count($this->output);
         foreach ($this->output as $url => $timestamps) {
-            // Format url and write
-            $urlLine = str_replace([self::DOMAIN, '/'], ['', '\/'], $url);
-            $urlLine = '    "' . $urlLine . '": {';
-            fwrite($handle, $urlLine . self::EOL);
-
-            // Sort timestamps
-            ksort($timestamps);
-            $i = 0;
-            $timestampCount = count($timestamps);
-            foreach ($timestamps as $timestamp => $count) {
-                // Format timestamp lines and write
-                if (++$i === $timestampCount) {
-                    $timestampLine = sprintf('        "%s": %d', $timestamp, $count);
-                } else {
-                    $timestampLine = sprintf('        "%s": %d,', $timestamp, $count);
-                }
-                fwrite($handle, $timestampLine . self::EOL);
-            }
+            $this->writeUrl($handle, $url);
+            $this->writeTimestamps($handle, $timestamps);
 
             // Close timestamps line block
             if (++$j === $urlCount) {
@@ -72,5 +52,30 @@ final class Parser
         // Close url line block
         fwrite($handle, '}');
         fclose($handle);
+    }
+
+    private function writeUrl($handle, string $url): void
+    {
+        // Format url and write
+        $urlLine = str_replace('/', '\/', $url);
+        $urlLine = '    "' . $urlLine . '": {';
+        fwrite($handle, $urlLine . self::EOL);
+    }
+
+    private function writeTimestamps($handle, array $timestamps): void
+    {
+        // Sort timestamps
+        ksort($timestamps);
+        $i = 0;
+        $timestampCount = count($timestamps);
+        foreach ($timestamps as $timestamp => $count) {
+            // Format timestamp lines and write
+            if (++$i === $timestampCount) {
+                $timestampLine = sprintf('        "%s": %d', $timestamp, $count);
+            } else {
+                $timestampLine = sprintf('        "%s": %d,', $timestamp, $count);
+            }
+            fwrite($handle, $timestampLine . self::EOL);
+        }
     }
 }
