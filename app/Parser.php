@@ -6,7 +6,7 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        $ncpu = 16;
+        $ncpu = 8;
         $chunk = floor(filesize($inputPath) / $ncpu);
         $children = [];
         for ($i=0; $i < $ncpu; $i++) {
