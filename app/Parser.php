@@ -23,7 +23,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int READ_CHUNK = 1_048_576;
+    private const int READ_CHUNK = 327_680;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function __call(string $name, array $arguments): mixed
