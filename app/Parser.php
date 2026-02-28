@@ -55,7 +55,11 @@ final class Parser
                 },
             );
 
-        $content = Sequence::lazyStartingWith(...\array_values($outputs))
+        $content = Sequence::lazy(static function() use ($outputs) {
+            foreach ($outputs as $output) {
+                yield $output;
+            }
+        })
             ->flatMap(static function($output) {
                 \fseek($output, 0);
                 $path = \fgets($output);
