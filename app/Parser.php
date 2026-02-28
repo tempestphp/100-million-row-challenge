@@ -75,10 +75,7 @@ final class Parser
 
                 \ksort($dates);
 
-                $path = Str::of($path)
-                    ->dropEnd(1)
-                    ->map(static fn($string) => \json_encode('/blog/'.$string))
-                    ->toString();
+                $path = Str::of($path)->dropEnd(1)->toString();
 
                 return Sequence::of(...$dates)
                     ->map(static function($date) {
@@ -87,7 +84,7 @@ final class Parser
                         return '    "'.$date.'": '.$count.',';
                     })
                     ->add('},')
-                    ->prepend(Sequence::of($path.': {'));
+                    ->prepend(Sequence::of('"\\/blog\\/'.$path.'": {'));
             })
             ->map(static fn($line) => '    '.$line."\n")
             ->prepend(Sequence::of('{'."\n"))
