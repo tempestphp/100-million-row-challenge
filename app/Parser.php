@@ -108,7 +108,7 @@ final class Parser
                         }
                     }
                     if ($needsSort) {
-                        \ksort($existing, SORT_STRING);
+                        \ksort($existing, SORT_NUMERIC);
                     }
                     unset($existing);
                 }
@@ -131,48 +131,41 @@ final class Parser
         $result = [];
         $order = [];
         $orderCounter = 0;
-        $pos = $start;
-        $chunkSize = 128 * 1024 * 1024; // 128MB
+        $dateCache = [];
 
-        while ($pos < $end) {
-            $readTo = \min($pos + $chunkSize, $end);
-            $bytesToRead = $readTo - $pos;
-            $buffer = \fread($fp, $bytesToRead);
-            if ($buffer === false || $buffer === '') {
+        $bytesRead = 0;
+        $totalBytes = $end - $start;
+
+        while (($line = \fgets($fp)) !== false) {
+            $bytesRead += \strlen($line);
+
+            $path = \substr($line, 19, -27); // 19 = strlen('https://stitcher.io')
+            $dateStr = \substr($line, -26, 10);
+
+            if (!isset($dateCache[$dateStr])) {
+                $dateCache[$dateStr] = (int) \str_replace('-', '', $dateStr);
+            }
+            $dateInt = $dateCache[$dateStr];
+
+            $order[$path] ??= ++$orderCounter;
+
+            // Fast hash lookup
+            if (isset($result[$path][$dateInt])) {
+                $result[$path][$dateInt]++;
+            } else {
+                $result[$path][$dateInt] = 1;
+            }
+
+            if ($bytesRead >= $totalBytes) {
                 break;
             }
-
-            if ($readTo < $end) {
-                $extra = \fgets($fp);
-                if ($extra !== false) {
-                    $buffer .= $extra;
-                }
-            }
-
-            $pos += \strlen($buffer);
-
-            if (\preg_match_all('/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/m', $buffer, $matches)) {
-                $paths = $matches[1];
-                $dates = $matches[2];
-                $count = \count($paths);
-
-                for ($i = 0; $i < $count; ++$i) {
-                    $path = $paths[$i];
-                    $date = $dates[$i];
-
-                    $order[$path] ??= ++$orderCounter;
-                    $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
-                }
-            }
-
-            unset($buffer, $matches, $paths, $dates);
         }
 
         \fclose($fp);
 
-        // Pre-sort dates in worker
+        // Pre-sort dates in worker (Numeric sort because keys are integers)
         foreach ($result as &$dates) {
-            \ksort($dates, SORT_STRING);
+            \ksort($dates, SORT_NUMERIC);
         }
         unset($dates);
 
@@ -188,7 +181,17 @@ final class Parser
         $ordered = [];
         foreach (\array_keys($order) as $path) {
             if (isset($result[$path])) {
-                $ordered[$path] = $result[$path];
+                $formattedDates = [];
+                foreach ($result[$path] as $dateInt => $count) {
+                    // Use math to extract YYYY, MM, DD
+                    $d = $dateInt % 100;
+                    $m = \intdiv($dateInt, 100) % 100;
+                    $y = \intdiv($dateInt, 10000);
+
+                    $formattedKey = \sprintf('%04d-%02d-%02d', $y, $m, $d);
+                    $formattedDates[$formattedKey] = $count;
+                }
+                $ordered[$path] = $formattedDates;
             }
         }
 
