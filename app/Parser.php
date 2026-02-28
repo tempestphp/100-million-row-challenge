@@ -130,47 +130,58 @@ final class Parser
         fclose($bh);
         $boundaries[] = $fileSize;
 
-        // Fork workers
+        // Fork workers (or single-process fallback on Windows)
+        $canFork = function_exists('pcntl_fork');
         $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
         $childMap = [];
 
-        for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
-            $pid = pcntl_fork();
-            if ($pid === 0) {
-                $wCounts = self::parseRange(
-                    $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $pathIds, $dateIdChars, $pathCount, $dateCount,
-                );
-                file_put_contents($tmpFile, pack('v*', ...$wCounts));
-                exit(0);
+        if ($canFork) {
+            for ($w = 0; $w < self::WORKERS - 1; $w++) {
+                $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
+                $pid = pcntl_fork();
+                if ($pid === 0) {
+                    $wCounts = self::parseRange(
+                        $inputPath, $boundaries[$w], $boundaries[$w + 1],
+                        $pathIds, $dateIdChars, $pathCount, $dateCount,
+                    );
+                    file_put_contents($tmpFile, pack('v*', ...$wCounts));
+                    exit(0);
+                }
+                $childMap[$pid] = $tmpFile;
             }
-            $childMap[$pid] = $tmpFile;
         }
 
-        // Main thread processes last chunk
-        $counts = self::parseRange(
-            $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
-            $pathIds, $dateIdChars, $pathCount, $dateCount,
-        );
+        if ($canFork) {
+            // Main thread processes last chunk
+            $counts = self::parseRange(
+                $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
+                $pathIds, $dateIdChars, $pathCount, $dateCount,
+            );
 
-        // Merge results with WNOHANG polling
-        $pending = count($childMap);
-        while ($pending > 0) {
-            $pid = pcntl_wait($status, WNOHANG);
-            if ($pid <= 0) {
-                $pid = pcntl_wait($status);
+            // Merge results with WNOHANG polling
+            $pending = count($childMap);
+            while ($pending > 0) {
+                $pid = pcntl_wait($status, WNOHANG);
+                if ($pid <= 0) {
+                    $pid = pcntl_wait($status);
+                }
+                $tmpFile = $childMap[$pid];
+                $wCounts = unpack('v*', file_get_contents($tmpFile));
+                unlink($tmpFile);
+                $j = 0;
+                foreach ($wCounts as $v) {
+                    $counts[$j] += $v;
+                    $j++;
+                }
+                $pending--;
             }
-            $tmpFile = $childMap[$pid];
-            $wCounts = unpack('v*', file_get_contents($tmpFile));
-            unlink($tmpFile);
-            $j = 0;
-            foreach ($wCounts as $v) {
-                $counts[$j] += $v;
-                $j++;
-            }
-            $pending--;
+        } else {
+            // Single-process fallback (Windows)
+            $counts = self::parseRange(
+                $inputPath, 0, $fileSize,
+                $pathIds, $dateIdChars, $pathCount, $dateCount,
+            );
         }
 
         self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
@@ -204,7 +215,7 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 480; // 8 lines * ~60 chars
+            $fence = $lastNl - 800; // 8 lines * ~100 chars max
 
             // Unrolled loop: 8 lines per iteration
             while ($p < $fence) {
