@@ -23,7 +23,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int READ_CHUNK = 2_097_152;
+    private const int READ_CHUNK = 163_840;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function __call(string $name, array $arguments): mixed
@@ -95,11 +95,6 @@ final class Parser
             $pathCount++;
         }
 
-        $pathBase = [];
-        foreach ($pathIds as $slug => $id) {
-            $pathBase[$slug] = $id * $dateCount;
-        }
-
         $counts = array_fill(0, $pathCount * $dateCount, 0);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -125,29 +120,29 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] * $dateCount + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] * $dateCount + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] * $dateCount + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] * $dateCount + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] * $dateCount + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                $counts[$pathIds[substr($chunk, $p, $sep - $p)] * $dateCount + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
             }
         }
