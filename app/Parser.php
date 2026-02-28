@@ -1,1 +1,266 @@
-<?php namespace App;use App\Commands\Visit;final class Parser{public function parse($a,$b){$s=\filesize($a);$k=16;[$m,$w,$pc,$dc,$dm,$dn]=self::r($a,$s);$dp=[];for($d=0;$d<$dn;$d++){$dp[$d]="        \"{$dm[$d]}\": ";}$pp=[];for($p=0;$p<$pc;$p++){$pp[$p]="\n    \"\\/blog\\/".\str_replace('/','\\/',$w[$p])."\": {";}$bn=[0];$h=\fopen($a,'rb');for($i=1;$i<$k;$i++){\fseek($h,\intdiv($s*$i,$k));\fgets($h);$bn[]=\ftell($h);}$bn[]=$s;\fclose($h);$tp=\sys_get_temp_dir().'/p_'.\getmypid();$qf=$tp.'_q';\file_put_contents($qf,\pack('V',0));$ps=[];for($i=0;$i<7;$i++){$pid=\pcntl_fork();if($pid===-1)continue;if($pid===0){$bk=\array_fill(0,$pc,'');$fh=\fopen($a,'rb');\stream_set_read_buffer($fh,0);$q=\fopen($qf,'c+b');while(true){$ci=self::g($q,$k);if($ci===-1)break;self::f($fh,$bn[$ci],$bn[$ci+1],$m,$dc,$bk);}\fclose($q);\fclose($fh);$ct=self::z($bk,$pc,$dn);\file_put_contents($tp."_{$i}",\pack('V*',...$ct));exit(0);}$ps[$i]=$pid;}$bk=\array_fill(0,$pc,'');$fh=\fopen($a,'rb');\stream_set_read_buffer($fh,0);$q=\fopen($qf,'c+b');while(true){$ci=self::g($q,$k);if($ci===-1)break;self::f($fh,$bn[$ci],$bn[$ci+1],$m,$dc,$bk);}\fclose($q);\fclose($fh);$ct=self::z($bk,$pc,$dn);while($ps){$pid=\pcntl_wait($st);$i=\array_search($pid,$ps,true);if($i===false)continue;unset($ps[$i]);$v=$tp."_{$i}";$rw=\file_get_contents($v);\unlink($v);$cc=\unpack('V*',$rw);$j=0;foreach($cc as $vl){$ct[$j++]+=$vl;}}\unlink($qf);$o=\fopen($b,'wb');\stream_set_write_buffer($o,1_048_576);$bf='{';$fp=true;$bs=0;for($p=0;$p<$pc;$p++){$db='';$sp="\n";for($d=0;$d<$dn;$d++){$n=$ct[$bs+$d];if($n===0)continue;$db.=$sp.$dp[$d].$n;$sp=",\n";}if($db==='')continue;$bf.=($fp?'':',').$pp[$p].$db."\n    }";$fp=false;if(\strlen($bf)>65536){\fwrite($o,$bf);$bf='';}$bs+=$dn;}\fwrite($o,$bf."\n}");\fclose($o);}private static function r($a,$s){$h=\fopen($a,'rb');\stream_set_read_buffer($h,0);$ch=\fread($h,\min($s,204800));\fclose($h);$ln=\strrpos($ch,"\n");$m=[];$pc=0;$mn='9999-99-99';$mx='0000-00-00';$ps=0;while($ps<$ln){$nl=\strpos($ch,"\n",$ps+54);if($nl===false)break;$pt=\substr($ch,$ps+25,$nl-$ps-51);if(!isset($m[$pt])){$m[$pt]=$pc++;}$dt=\substr($ch,$nl-25,10);if($dt<$mn)$mn=$dt;if($dt>$mx)$mx=$dt;$ps=$nl+1;}foreach(Visit::all() as $v){$pt=\substr($v->uri,25);if(!isset($m[$pt])){$m[$pt]=$pc++;}}$w=\array_keys($m);$dc=[];$dm=[];$dn=0;$ts=\strtotime($mn)-86400*7;$te=\strtotime($mx)+86400*7;while($ts<=$te){$fl=\date('Y-m-d',$ts);$dc[\substr($fl,3)]=\pack('v',$dn);$dm[$dn]=$fl;$dn++;$ts+=86400;}return[$m,$w,$pc,$dc,$dm,$dn];}private static function g($f,$k){\flock($f,\LOCK_EX);\fseek($f,0);$x=\unpack('V',\fread($f,4))[1];if($x>=$k){\flock($f,\LOCK_UN);return-1;}\fseek($f,0);\fwrite($f,\pack('V',$x+1));\fflush($f);\flock($f,\LOCK_UN);return $x;}private static function f($h,$st,$en,&$m,&$dc,&$bk){\fseek($h,$st);$bp=0;$tp=$en-$st;while($bp<$tp){$rm=$tp-$bp;$ch=\fread($h,$rm>131072?131072:$rm);if(!$ch)break;$ln=\strrpos($ch,"\n");if($ln===false)continue;$tl=\strlen($ch)-$ln-1;if($tl>0){\fseek($h,-$tl,SEEK_CUR);}$bp+=$ln+1;$p=25;$lm=$ln-600;while($p<$lm){$c=\strpos($ch,",",$p);$bk[$m[\substr($ch,$p,$c-$p)]].=$dc[\substr($ch,$c+4,7)];$p=$c+52;$c=\strpos($ch,",",$p);$bk[$m[\substr($ch,$p,$c-$p)]].=$dc[\substr($ch,$c+4,7)];$p=$c+52;$c=\strpos($ch,",",$p);$bk[$m[\substr($ch,$p,$c-$p)]].=$dc[\substr($ch,$c+4,7)];$p=$c+52;$c=\strpos($ch,",",$p);$bk[$m[\substr($ch,$p,$c-$p)]].=$dc[\substr($ch,$c+4,7)];$p=$c+52;}while($p<$ln){$c=\strpos($ch,",",$p);if($c===false||$c>=$ln)break;$bk[$m[\substr($ch,$p,$c-$p)]].=$dc[\substr($ch,$c+4,7)];$p=$c+52;}}}private static function z(&$bk,$pc,$dn){$ct=\array_fill(0,$pc*$dn,0);$bs=0;foreach($bk as $b){if($b!==''){foreach(\array_count_values(\unpack('v*',$b)) as $di=>$n){$ct[$bs+$di]+=$n;}}$bs+=$dn;}return $ct;}}
+<?php
+
+namespace App;
+
+use App\Commands\Visit;
+
+final class Parser
+{
+    public function parse($inputPath, $outputPath)
+    {
+        $fileSize = \filesize($inputPath);
+        $numChunks = 16;
+
+        [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount] = self::discover($inputPath, $fileSize);
+
+        // Pre-build output strings
+        $datePrefixes = [];
+        for ($d = 0; $d < $dateCount; $d++) {
+            $datePrefixes[$d] = "        \"{$dateMap[$d]}\": ";
+        }
+        $pathPrefixes = [];
+        for ($p = 0; $p < $pathCount; $p++) {
+            $pathPrefixes[$p] = "\n    \"\\/blog\\/" . \str_replace('/', '\\/', $pathMap[$p]) . "\": {";
+        }
+
+        // Find chunk boundaries aligned to newlines (many small chunks for work-stealing)
+        $boundaries = [0];
+        $handle = \fopen($inputPath, 'rb');
+        for ($i = 1; $i < $numChunks; $i++) {
+            \fseek($handle, \intdiv($fileSize * $i, $numChunks));
+            \fgets($handle);
+            $boundaries[] = \ftell($handle);
+        }
+        $boundaries[] = $fileSize;
+        \fclose($handle);
+
+        // Work-stealing queue: shared file with atomic counter
+        $tmpPrefix = \sys_get_temp_dir() . '/parse_' . \getmypid();
+        $queueFile = $tmpPrefix . '_queue';
+        \file_put_contents($queueFile, \pack('V', 0));
+
+        // Fork child workers
+        $pids = [];
+        for ($i = 0; $i < 7; $i++) {
+            $pid = \pcntl_fork();
+            if ($pid === -1) continue;
+            if ($pid === 0) {
+                $buckets = \array_fill(0, $pathCount, '');
+                $fh = \fopen($inputPath, 'rb');
+                \stream_set_read_buffer($fh, 0);
+                $qf = \fopen($queueFile, 'c+b');
+                while (true) {
+                    $ci = self::grabChunk($qf, $numChunks);
+                    if ($ci === -1) break;
+                    self::fillBuckets($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
+                }
+                \fclose($qf);
+                \fclose($fh);
+                $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
+                \file_put_contents($tmpPrefix . "_{$i}", \pack('V*', ...$counts));
+                exit(0);
+            }
+            $pids[$i] = $pid;
+        }
+
+        // Parent also steals work
+        $buckets = \array_fill(0, $pathCount, '');
+        $fh = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($fh, 0);
+        $qf = \fopen($queueFile, 'c+b');
+        while (true) {
+            $ci = self::grabChunk($qf, $numChunks);
+            if ($ci === -1) break;
+            self::fillBuckets($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
+        }
+        \fclose($qf);
+        \fclose($fh);
+        $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
+
+        // Wait for children and merge
+        while ($pids) {
+            $pid = \pcntl_wait($status);
+            $i = \array_search($pid, $pids, true);
+            if ($i === false) continue;
+            unset($pids[$i]);
+            $f = $tmpPrefix . "_{$i}";
+            $raw = \file_get_contents($f);
+            \unlink($f);
+            $childCounts = \unpack('V*', $raw);
+            $j = 0;
+            foreach ($childCounts as $val) {
+                $counts[$j++] += $val;
+            }
+        }
+        \unlink($queueFile);
+
+        // Write JSON
+        $out = \fopen($outputPath, 'wb');
+        \stream_set_write_buffer($out, 1_048_576);
+        $buf = '{';
+
+        $firstPath = true;
+        $base = 0;
+        for ($p = 0; $p < $pathCount; $p++) {
+
+            $dateBuf = '';
+            $sep = "\n";
+            for ($d = 0; $d < $dateCount; $d++) {
+                $n = $counts[$base + $d];
+                if ($n === 0) continue;
+                $dateBuf .= $sep . $datePrefixes[$d] . $n;
+                $sep = ",\n";
+            }
+
+            if ($dateBuf === '') continue;
+
+            $buf .= ($firstPath ? '' : ',') . $pathPrefixes[$p] . $dateBuf . "\n    }";
+            $firstPath = false;
+
+            if (\strlen($buf) > 65536) {
+                \fwrite($out, $buf);
+                $buf = '';
+            }
+            $base += $dateCount;
+        }
+
+        \fwrite($out, $buf . "\n}");
+        \fclose($out);
+    }
+
+    private static function discover($inputPath, $fileSize)
+    {
+        $handle = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($handle, 0);
+        $chunk = \fread($handle, \min($fileSize, 204800));
+        \fclose($handle);
+
+        $lastNl = \strrpos($chunk, "\n");
+        $pathIds = [];
+        $pathCount = 0;
+        $minDate = '9999-99-99';
+        $maxDate = '0000-00-00';
+        $pos = 0;
+
+        while ($pos < $lastNl) {
+            $nlPos = \strpos($chunk, "\n", $pos + 54);
+            if ($nlPos === false) break;
+
+            $pathStr = \substr($chunk, $pos + 25, $nlPos - $pos - 51);
+            if (!isset($pathIds[$pathStr])) {
+                $pathIds[$pathStr] = $pathCount++;
+            }
+
+            $date = \substr($chunk, $nlPos - 25, 10);
+            if ($date < $minDate) $minDate = $date;
+            if ($date > $maxDate) $maxDate = $date;
+
+            $pos = $nlPos + 1;
+        }
+
+        foreach (Visit::all() as $visit) {
+            $pathStr = \substr($visit->uri, 25);
+            if (!isset($pathIds[$pathStr])) {
+                $pathIds[$pathStr] = $pathCount++;
+            }
+        }
+
+        $pathMap = \array_keys($pathIds);
+
+        $dateChars = [];
+        $dateMap = [];
+        $dateCount = 0;
+        $ts = \strtotime($minDate) - 86400 * 7;
+        $end = \strtotime($maxDate) + 86400 * 7;
+        while ($ts <= $end) {
+            $full = \date('Y-m-d', $ts);
+            $dateChars[\substr($full, 3)] = \pack('v', $dateCount);
+            $dateMap[$dateCount] = $full;
+            $dateCount++;
+            $ts += 86400;
+        }
+
+        return [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount];
+    }
+
+    private static function grabChunk($f, $numChunks)
+    {
+        \flock($f, \LOCK_EX);
+        \fseek($f, 0);
+        $idx = \unpack('V', \fread($f, 4))[1];
+        if ($idx >= $numChunks) {
+            \flock($f, \LOCK_UN);
+            return -1;
+        }
+        \fseek($f, 0);
+        \fwrite($f, \pack('V', $idx + 1));
+        \fflush($f);
+        \flock($f, \LOCK_UN);
+        return $idx;
+    }
+
+    private static function fillBuckets($handle, $start, $end, &$pathIds, &$dateChars, &$buckets)
+    {
+        \fseek($handle, $start);
+
+        $bytesProcessed = 0;
+        $toProcess = $end - $start;
+
+        while ($bytesProcessed < $toProcess) {
+            $remaining = $toProcess - $bytesProcessed;
+            $chunk = \fread($handle, $remaining > 131072 ? 131072 : $remaining);
+            if (!$chunk) break;
+
+            $lastNl = \strrpos($chunk, "\n");
+            if ($lastNl === false) continue;
+
+            $tail = \strlen($chunk) - $lastNl - 1;
+            if ($tail > 0) {
+                \fseek($handle, -$tail, SEEK_CUR);
+            }
+            $bytesProcessed += $lastNl + 1;
+
+            $p = 25;
+            $limit = $lastNl - 600;
+            while ($p < $limit) {
+                $c = \strpos($chunk, ",", $p);
+                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $p = $c + 52;
+
+                $c = \strpos($chunk, ",", $p);
+                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $p = $c + 52;
+
+                $c = \strpos($chunk, ",", $p);
+                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $p = $c + 52;
+
+                $c = \strpos($chunk, ",", $p);
+                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $p = $c + 52;
+            }
+            while ($p < $lastNl) {
+                $c = \strpos($chunk, ",", $p);
+                if ($c === false || $c >= $lastNl) break;
+                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $p = $c + 52;
+            }
+        }
+    }
+
+    private static function bucketsToCounts(&$buckets, $pathCount, $dateCount)
+    {
+        $counts = \array_fill(0, $pathCount * $dateCount, 0);
+        $base = 0;
+        foreach ($buckets as $bucket) {
+            if ($bucket !== '') {
+                foreach (\array_count_values(\unpack('v*', $bucket)) as $dateId => $n) {
+                    $counts[$base + $dateId] += $n;
+                }
+            }
+            $base += $dateCount;
+        }
+        return $counts;
+    }
+
+}
