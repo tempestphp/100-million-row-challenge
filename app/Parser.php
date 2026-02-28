@@ -22,13 +22,22 @@ final class Parser
             $pathPrefixes[$p] = "\n    \"\\/blog\\/" . \str_replace('/', '\\/', $pathMap[$p]) . "\": {";
         }
 
-        // Single-thread: process entire file
-        $buckets = \array_fill(0, $pathCount, '');
+        // Remap pathIds to base offsets and dateChars to integer indices
+        $pathBases = [];
+        foreach ($pathIds as $k => $v) {
+            $pathBases[$k] = $v * $dateCount;
+        }
+        $dateInts = [];
+        foreach ($dateChars as $k => $v) {
+            $dateInts[$k] = \unpack('v', $v)[1];
+        }
+
+        // Single-thread: direct increment
+        $counts = \array_fill(0, $pathCount * $dateCount, 0);
         $fh = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($fh, 0);
-        self::fillBuckets($fh, 0, $fileSize, $pathIds, $dateChars, $buckets);
+        self::fillBuckets($fh, 0, $fileSize, $pathBases, $dateInts, $counts);
         \fclose($fh);
-        $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
 
         // Write JSON
         $out = \fopen($outputPath, 'wb');
@@ -119,7 +128,7 @@ final class Parser
         return [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount];
     }
 
-    private static function fillBuckets($handle, $start, $end, &$pathIds, &$dateChars, &$buckets)
+    private static function fillBuckets($handle, $start, $end, &$pathBases, &$dateInts, &$counts)
     {
         \fseek($handle, $start);
 
@@ -128,7 +137,7 @@ final class Parser
 
         while ($bytesProcessed < $toProcess) {
             $remaining = $toProcess - $bytesProcessed;
-            $chunk = \fread($handle, $remaining > 131072 ? 131072 : $remaining);
+            $chunk = \fread($handle, $remaining > 1048576 ? 1048576 : $remaining);
             if (!$chunk) break;
 
             $lastNl = \strrpos($chunk, "\n");
@@ -144,43 +153,28 @@ final class Parser
             $limit = $lastNl - 600;
             while ($p < $limit) {
                 $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $counts[$pathBases[\substr($chunk, $p, $c - $p)] + $dateInts[\substr($chunk, $c + 4, 7)]]++;
                 $p = $c + 52;
 
                 $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $counts[$pathBases[\substr($chunk, $p, $c - $p)] + $dateInts[\substr($chunk, $c + 4, 7)]]++;
                 $p = $c + 52;
 
                 $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $counts[$pathBases[\substr($chunk, $p, $c - $p)] + $dateInts[\substr($chunk, $c + 4, 7)]]++;
                 $p = $c + 52;
 
                 $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $counts[$pathBases[\substr($chunk, $p, $c - $p)] + $dateInts[\substr($chunk, $c + 4, 7)]]++;
                 $p = $c + 52;
             }
             while ($p < $lastNl) {
                 $c = \strpos($chunk, ",", $p);
                 if ($c === false || $c >= $lastNl) break;
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $counts[$pathBases[\substr($chunk, $p, $c - $p)] + $dateInts[\substr($chunk, $c + 4, 7)]]++;
                 $p = $c + 52;
             }
         }
-    }
-
-    private static function bucketsToCounts(&$buckets, $pathCount, $dateCount)
-    {
-        $counts = \array_fill(0, $pathCount * $dateCount, 0);
-        $base = 0;
-        foreach ($buckets as $bucket) {
-            if ($bucket !== '') {
-                foreach (\array_count_values(\unpack('v*', $bucket)) as $dateId => $n) {
-                    $counts[$base + $dateId] += $n;
-                }
-            }
-            $base += $dateCount;
-        }
-        return $counts;
     }
 
 }
