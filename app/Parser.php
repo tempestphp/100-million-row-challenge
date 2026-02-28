@@ -8,7 +8,7 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const WORKERS = 9;
+    private const WORKERS = 12;
     private const BUF_SIZE = 524288; // 512 KB — fewer fread syscalls
     private const PROBE_SIZE = 2_097_152; // 2 MB warm-up scan
 
@@ -59,17 +59,17 @@ final class Parser
 
         $lastNlW = strrpos($sample, "\n");
         if ($lastNlW !== false) {
-            $p = 25; // skip 'https://stitcher.io/blog/'
+            $p = 0;
             while ($p < $lastNlW) {
-                $sep = strpos($sample, ',', $p);
-                if ($sep === false) break;
-                $slug = substr($sample, $p, $sep - $p);
+                $nlPos = strpos($sample, "\n", $p + 55);
+                if ($nlPos === false) break;
+                $slug = substr($sample, $p + 25, $nlPos - $p - 51);
                 if (!isset($slugIds[$slug])) {
                     $slugIds[$slug] = $slugCount;
                     $slugLabels[$slugCount] = $slug;
                     $slugCount++;
                 }
-                $p = $sep + 52;
+                $p = $nlPos + 1;
             }
         }
         unset($sample);
@@ -223,44 +223,42 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $p = 25; // slug starts 25 bytes into each line
-            $fence = $lastNl - 720; // 6 × max-line guard for unrolled loop
+            $p = 0; // line starts (each chunk begins at a line boundary)
+            $fence = $lastNl - 720; // 6 × ~120-byte max-line guard
 
             // Hot loop, unrolled 6×
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
-                $p = $sep + 52;
+                $nlPos = strpos($chunk, "\n", $p + 55);
+                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $p = $nlPos + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
-                $p = $sep + 52;
+                $nlPos = strpos($chunk, "\n", $p + 55);
+                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $p = $nlPos + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
-                $p = $sep + 52;
+                $nlPos = strpos($chunk, "\n", $p + 55);
+                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $p = $nlPos + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
-                $p = $sep + 52;
+                $nlPos = strpos($chunk, "\n", $p + 55);
+                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $p = $nlPos + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
-                $p = $sep + 52;
+                $nlPos = strpos($chunk, "\n", $p + 55);
+                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $p = $nlPos + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
-                $p = $sep + 52;
+                $nlPos = strpos($chunk, "\n", $p + 55);
+                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $p = $nlPos + 1;
             }
 
             // Tail: handle remaining lines near end of buffer
             while ($p < $lastNl) {
-                $sep = strpos($chunk, ',', $p);
-                if ($sep === false || $sep >= $lastNl) {
-                    break;
-                }
-                $buckets[$slugIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 4, 7)];
-                $p = $sep + 52;
+                $nlPos = strpos($chunk, "\n", $p + 55);
+                if ($nlPos === false || $nlPos > $lastNl) break;
+                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $p = $nlPos + 1;
             }
         }
 
