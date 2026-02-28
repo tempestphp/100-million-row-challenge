@@ -3,9 +3,7 @@
 namespace App;
 
 use App\Commands\Visit;
-use function array_count_values;
 use function array_fill;
-use function chr;
 use function count;
 use function fclose;
 use function fopen;
@@ -21,12 +19,11 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function unpack;
 use const SEEK_CUR;
 
 final class Parser
 {
-    private const int READ_CHUNK = 163_840;
+    private const int READ_CHUNK = 2_097_152;
     private const int DISCOVER_SIZE = 2_097_152;
 
     public function __call(string $name, array $arguments): mixed
@@ -61,15 +58,9 @@ final class Parser
             }
         }
 
-        $dateIdChars = [];
-        foreach ($dateIds as $date => $id) {
-            $dateIdChars[$date] = chr($id & 0xFF) . chr($id >> 8);
-        }
-
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $warmUpSize = self::DISCOVER_SIZE;
-        $raw = fread($handle, $warmUpSize);
+        $raw = fread($handle, self::DISCOVER_SIZE);
         fclose($handle);
 
         $pathIds = [];
@@ -104,24 +95,15 @@ final class Parser
             $pathCount++;
         }
 
-        $counts = self::parseRange(
-            $inputPath, 0, $fileSize,
-            $pathIds, $dateIdChars, $pathCount, $dateCount,
-        );
+        $pathBase = [];
+        foreach ($pathIds as $slug => $id) {
+            $pathBase[$slug] = $id * $dateCount;
+        }
 
-        self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
-    }
-
-    private static function parseRange(
-        $inputPath, $start, $end,
-        $pathIds, $dateIdChars,
-        $pathCount, $dateCount,
-    ) {
-        $buckets = array_fill(0, $pathCount, '');
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        fseek($handle, $start);
-        $remaining = $end - $start;
+        $remaining = $fileSize;
 
         while ($remaining > 0) {
             $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
@@ -143,45 +125,36 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $counts[$pathBase[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
                 $p = $sep + 52;
             }
         }
 
         fclose($handle);
 
-        $counts = array_fill(0, $pathCount * $dateCount, 0);
-        for ($p = 0; $p < $pathCount; $p++) {
-            if ($buckets[$p] === '') continue;
-            $offset = $p * $dateCount;
-            foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
-                $counts[$offset + $did] += $count;
-            }
-        }
-
-        return $counts;
+        self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
     }
 
     private static function writeJson(
