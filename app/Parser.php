@@ -15,6 +15,7 @@ final class Parser
         $output = [];
 
         $input = fopen($inputPath, 'r');
+        stream_set_read_buffer($input, 4 * 2^10 * 2^10);
 
         $paths = [];
 
