@@ -37,7 +37,7 @@ use const WNOHANG;
 
 final class Parser
 {
-    private const int WORKERS = 8;
+    private const int WORKERS = 10;
     private const int READ_CHUNK = 163_840;
     private const int DISCOVER_SIZE = 2_097_152;
 
