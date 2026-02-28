@@ -38,12 +38,15 @@ final class Parser
         $queueFile = $tmpPrefix . '_queue';
         \file_put_contents($queueFile, \pack('V', 0));
 
-        // Fork child workers
+        // Fork child workers with socket pairs
         $pids = [];
+        $sockets = [];
         for ($i = 0; $i < 7; $i++) {
+            \socket_create_pair(\AF_UNIX, \SOCK_STREAM, 0, $pair);
             $pid = \pcntl_fork();
-            if ($pid === -1) continue;
+            if ($pid === -1) { \socket_close($pair[0]); \socket_close($pair[1]); continue; }
             if ($pid === 0) {
+                \socket_close($pair[0]);
                 $buckets = \array_fill(0, $pathCount, '');
                 $fh = \fopen($inputPath, 'rb');
                 \stream_set_read_buffer($fh, 0);
@@ -56,10 +59,18 @@ final class Parser
                 \fclose($qf);
                 \fclose($fh);
                 $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
-                \file_put_contents($tmpPrefix . "_{$i}", \pack('V*', ...$counts));
+                $data = \pack('V*', ...$counts);
+                $len = \strlen($data);
+                $sent = 0;
+                while ($sent < $len) {
+                    $sent += \socket_write($pair[1], \substr($data, $sent));
+                }
+                \socket_close($pair[1]);
                 exit(0);
             }
+            \socket_close($pair[1]);
             $pids[$i] = $pid;
+            $sockets[$i] = $pair[0];
         }
 
         // Parent also steals work
@@ -76,21 +87,20 @@ final class Parser
         \fclose($fh);
         $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
 
-        // Wait for children and merge
-        while ($pids) {
-            $pid = \pcntl_wait($status);
-            $i = \array_search($pid, $pids, true);
-            if ($i === false) continue;
-            unset($pids[$i]);
-            $f = $tmpPrefix . "_{$i}";
-            $raw = \file_get_contents($f);
-            \unlink($f);
+        // Read from sockets and merge
+        foreach ($sockets as $i => $sock) {
+            $raw = '';
+            while (($buf = \socket_read($sock, 65536, \PHP_BINARY_READ)) !== '') {
+                $raw .= $buf;
+            }
+            \socket_close($sock);
             $childCounts = \unpack('V*', $raw);
             $j = 0;
             foreach ($childCounts as $val) {
                 $counts[$j++] += $val;
             }
         }
+        while (\pcntl_wait($status) > 0) {}
         \unlink($queueFile);
 
         // Write JSON
