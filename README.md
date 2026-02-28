@@ -34,6 +34,12 @@ final class Parser
 You can always run your implementation to check your work:
 
 ```sh
+php tempest data:parse
+```
+
+Furthermore, you can validate whether your output file is formatted correctly by running the `data:validate` command. This command will run on a small dataset with a predetermined expected output. If validation succeeds, you can be sure you implemented a working solution:
+
+```sh
 php tempest data:validate
 ```
 
