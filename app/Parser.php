@@ -22,7 +22,8 @@ final class Parser
         $dir = \dirname($inputPath);
         $file = \basename($inputPath);
         $os = OperatingSystem::new();
-        $outputs = $os
+        $outputs = [];
+        $_ = $os
             ->filesystem()
             ->mount(Path::of($dir.'/'))
             ->unwrap()
@@ -38,9 +39,8 @@ final class Parser
                 $line[0]->toString(),
                 $line[1]->take(10)->toString(),
             ])
-            ->reduce(
-                [],
-                static function($outputs, $line) {
+            ->foreach(
+                static function($line) use (&$outputs) {
                     [$path, $date] = $line;
 
                     if (!\array_key_exists($path, $outputs)) {
@@ -50,8 +50,6 @@ final class Parser
                     } else {
                         \fwrite($outputs[$path], $date."\n");
                     }
-
-                    return $outputs;
                 },
             );
 
