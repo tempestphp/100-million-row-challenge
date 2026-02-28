@@ -3,8 +3,6 @@
 namespace App;
 
 use App\Commands\Visit;
-
-use function array_chunk;
 use function array_count_values;
 use function array_fill;
 use function chr;
@@ -13,7 +11,6 @@ use function fclose;
 use function fgets;
 use function file_get_contents;
 use function file_put_contents;
-use function filesize;
 use function fopen;
 use function fread;
 use function fseek;
@@ -21,363 +18,218 @@ use function ftell;
 use function fwrite;
 use function gc_disable;
 use function getmypid;
-use function max;
-use function min;
+use function implode;
 use function pack;
 use function pcntl_fork;
-use function pcntl_waitpid;
+use function pcntl_wait;
 use function str_replace;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
 use function strlen;
 use function strpos;
 use function strrpos;
-use function stream_set_read_buffer;
-use function stream_set_write_buffer;
 use function substr;
 use function sys_get_temp_dir;
 use function unlink;
 use function unpack;
-
 use const SEEK_CUR;
+use const WNOHANG;
 
 final class Parser
 {
-    private const URL_PREFIX_LENGTH = 25; // https://stitcher.io/blog/
-    private const SAMPLE_BYTES = 2_097_152; // 2 MB probe
-    private const READ_CHUNK_BYTES = 163_840; // tuned chunk size
-    private const DEFAULT_WORKERS = 16;
-    private const DATE_START_YEAR = 21;
-    private const DATE_END_YEAR = 26;
+    private const int WORKERS = 10;
+    private const int READ_CHUNK = 163_840;
+    private const int DISCOVER_SIZE = 2_097_152;
 
-    public function parse(string $inputPath, string $outputPath): void
+    public function parse($inputPath, $outputPath)
     {
         gc_disable();
 
-        $fileSize = filesize($inputPath);
+        $fileSize = 7_509_674_827;
 
-        [$datePacked, $dateLabels, $dateCount] = $this->buildDateTables();
-        [$slugIds, $slugLabels, $slugCount] = $this->buildSlugTables($inputPath, $fileSize);
-
-        $workers = $this->resolveWorkerCount($fileSize);
-        $readChunkBytes = $this->resolveReadChunkBytes();
-        $boundaries = $this->computeBoundaries($inputPath, $fileSize, $workers);
-
-        if ($workers <= 1 || !function_exists('pcntl_fork')) {
-            $counts = $this->crunch(
-                $inputPath,
-                0,
-                $fileSize,
-                $slugIds,
-                $datePacked,
-                $slugCount,
-                $dateCount,
-                $readChunkBytes,
-            );
-
-            $this->writeJson($outputPath, $counts, $slugLabels, $dateLabels, $dateCount);
-
-            return;
-        }
-
-        $children = [];
-        $chunkCount = count($boundaries) - 1;
-        $tmpPrefix = sys_get_temp_dir() . '/p100m_' . getmypid() . '_';
-
-        for ($worker = 0; $worker < $chunkCount - 1; $worker++) {
-            $pid = pcntl_fork();
-
-            if ($pid === -1) {
-                break;
-            }
-
-            if ($pid === 0) {
-                $result = $this->crunch(
-                    $inputPath,
-                    $boundaries[$worker],
-                    $boundaries[$worker + 1],
-                    $slugIds,
-                    $datePacked,
-                    $slugCount,
-                    $dateCount,
-                    $readChunkBytes,
-                );
-
-                file_put_contents($tmpPrefix . $worker, pack('v*', ...$result));
-                exit(0);
-            }
-
-            $children[] = [$pid, $tmpPrefix . $worker];
-        }
-
-        $counts = $this->crunch(
-            $inputPath,
-            $boundaries[$chunkCount - 1],
-            $boundaries[$chunkCount],
-            $slugIds,
-            $datePacked,
-            $slugCount,
-            $dateCount,
-            $readChunkBytes,
-        );
-
-        foreach ($children as [$pid, $tmpPath]) {
-            pcntl_waitpid($pid, $status);
-
-            $workerRaw = file_get_contents($tmpPath);
-            if ($workerRaw === false || $workerRaw === '') {
-                continue;
-            }
-
-            $index = 0;
-            foreach (unpack('v*', $workerRaw) as $value) {
-                $counts[$index++] += $value;
-            }
-            unlink($tmpPath);
-        }
-
-        $this->writeJson($outputPath, $counts, $slugLabels, $dateLabels, $dateCount);
-    }
-
-    private function resolveWorkerCount(int $fileSize): int
-    {
-        $override = getenv('PARSER_WORKERS');
-        if ($override !== false && $override !== '') {
-            $workers = (int) $override;
-        } else {
-            $workers = self::DEFAULT_WORKERS;
-            if (function_exists('posix_sysconf')) {
-                $cpuCount = (int) posix_sysconf(POSIX_SC_NPROCESSORS_ONLN);
-                if ($cpuCount > 0) {
-                    // The challenge runner is an M1 host (8 cores); 10 workers performs better there.
-                    if ($cpuCount <= 8) {
-                        $workers = 10;
-                    } else {
-                        $workers = min(16, $cpuCount + 4);
-                    }
-                }
-            }
-        }
-
-        if ($fileSize < 64 * 1024 * 1024) {
-            return 1;
-        }
-
-        return max(1, $workers);
-    }
-
-    private function resolveReadChunkBytes(): int
-    {
-        $override = getenv('PARSER_CHUNK_BYTES');
-        if ($override !== false && $override !== '') {
-            $bytes = (int) $override;
-            if ($bytes >= 65_536) {
-                return $bytes;
-            }
-        }
-
-        return self::READ_CHUNK_BYTES;
-    }
-
-    private function buildDateTables(): array
-    {
-        $datePacked = [];
-        $dateLabels = [];
+        $dateIds = [];
+        $dates = [];
         $dateCount = 0;
-
-        for ($year = self::DATE_START_YEAR; $year <= self::DATE_END_YEAR; $year++) {
-            for ($month = 1; $month <= 12; $month++) {
-                $maxDay = match ($month) {
-                    2 => ($year % 4 === 0) ? 29 : 28,
+        for ($y = 21; $y <= 26; $y++) {
+            for ($m = 1; $m <= 12; $m++) {
+                $maxD = match ($m) {
+                    2 => $y === 24 ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
-
-                $monthPadded = ($month < 10 ? '0' : '') . $month;
-                $yearMonth = $year . '-' . $monthPadded . '-';
-
-                for ($day = 1; $day <= $maxDay; $day++) {
-                    $date = $yearMonth . (($day < 10 ? '0' : '') . $day);
-                    $datePacked[$date] = chr($dateCount & 0xFF) . chr($dateCount >> 8);
-                    $dateLabels[$dateCount] = '20' . $date;
+                $mStr = ($m < 10 ? '0' : '') . $m;
+                $ymStr = "{$y}-{$mStr}-";
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $key = $ymStr . (($d < 10 ? '0' : '') . $d);
+                    $dateIds[$key] = $dateCount;
+                    $dates[$dateCount] = $key;
                     $dateCount++;
                 }
             }
         }
 
-        return [$datePacked, $dateLabels, $dateCount];
-    }
-
-    private function buildSlugTables(string $inputPath, int $fileSize): array
-    {
-        $slugIds = [];
-        $slugLabels = [];
-        $slugCount = 0;
-
-        $probeSize = min(self::SAMPLE_BYTES, $fileSize);
-        if ($probeSize > 0) {
-            $handle = fopen($inputPath, 'rb');
-            stream_set_read_buffer($handle, 0);
-            $sample = fread($handle, $probeSize);
-            fclose($handle);
-
-            $lastNewline = strrpos($sample, "\n");
-            if ($lastNewline !== false) {
-                $position = 0;
-
-                while ($position < $lastNewline) {
-                    $newline = strpos($sample, "\n", $position + 52);
-                    if ($newline === false) {
-                        break;
-                    }
-
-                    $slug = substr(
-                        $sample,
-                        $position + self::URL_PREFIX_LENGTH,
-                        $newline - $position - 51,
-                    );
-
-                    if (!isset($slugIds[$slug])) {
-                        $slugIds[$slug] = $slugCount;
-                        $slugLabels[$slugCount] = $slug;
-                        $slugCount++;
-                    }
-
-                    $position = $newline + 1;
-                }
-            }
+        $dateIdChars = [];
+        foreach ($dateIds as $date => $id) {
+            $dateIdChars[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
+
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $warmUpSize = self::DISCOVER_SIZE;
+        $raw = fread($handle, $warmUpSize);
+        fclose($handle);
+
+        $pathIds = [];
+        $paths = [];
+        $pathCount = 0;
+        $pos = 0;
+        $lastNl = strrpos($raw, "\n");
+
+        while ($pos < $lastNl) {
+            $nlPos = strpos($raw, "\n", $pos + 52);
+
+            $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
+            if (isset($pathIds[$slug])) {
+                $pos = $nlPos + 1;
+                continue;
+            }
+            $pathIds[$slug] = $pathCount;
+            $paths[$pathCount] = $slug;
+            $pathCount++;
+
+            $pos = $nlPos + 1;
+        }
+        unset($raw);
 
         foreach (Visit::all() as $visit) {
-            $slug = substr($visit->uri, self::URL_PREFIX_LENGTH);
-
-            if (!isset($slugIds[$slug])) {
-                $slugIds[$slug] = $slugCount;
-                $slugLabels[$slugCount] = $slug;
-                $slugCount++;
+            $slug = substr($visit->uri, 25);
+            if (isset($pathIds[$slug])) {
+                continue;
             }
-        }
-
-        return [$slugIds, $slugLabels, $slugCount];
-    }
-
-    private function computeBoundaries(string $inputPath, int $fileSize, int $workers): array
-    {
-        if ($workers <= 1) {
-            return [0, $fileSize];
+            $pathIds[$slug] = $pathCount;
+            $paths[$pathCount] = $slug;
+            $pathCount++;
         }
 
         $boundaries = [0];
-        $handle = fopen($inputPath, 'rb');
-
-        for ($index = 1; $index < $workers; $index++) {
-            fseek($handle, (int) ($fileSize * $index / $workers));
-            fgets($handle);
-            $boundaries[] = ftell($handle);
+        $bh = fopen($inputPath, 'rb');
+        for ($i = 1; $i < self::WORKERS; $i++) {
+            fseek($bh, (int) ($fileSize * $i / self::WORKERS));
+            fgets($bh);
+            $boundaries[] = ftell($bh);
         }
-
-        fclose($handle);
+        fclose($bh);
         $boundaries[] = $fileSize;
 
-        return $boundaries;
+        $tmpDir = sys_get_temp_dir();
+        $myPid = getmypid();
+        $childMap = [];
+
+        for ($w = 0; $w < self::WORKERS - 1; $w++) {
+            $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
+            $pid = pcntl_fork();
+            if ($pid === 0) {
+                $wCounts = $this->parseRange(
+                    $inputPath, $boundaries[$w], $boundaries[$w + 1],
+                    $pathIds, $dateIdChars, $pathCount, $dateCount,
+                );
+                file_put_contents($tmpFile, pack('v*', ...$wCounts));
+                exit(0);
+            }
+            $childMap[$pid] = $tmpFile;
+        }
+
+        $counts = $this->parseRange(
+            $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
+            $pathIds, $dateIdChars, $pathCount, $dateCount,
+        );
+
+        $pending = count($childMap);
+        while ($pending > 0) {
+            $pid = pcntl_wait($status, WNOHANG);
+            if ($pid <= 0) {
+                $pid = pcntl_wait($status);
+            }
+            $tmpFile = $childMap[$pid];
+            $wCounts = unpack('v*', file_get_contents($tmpFile));
+            unlink($tmpFile);
+            $j = 0;
+            foreach ($wCounts as $v) {
+                $counts[$j] += $v;
+                $j++;
+            }
+            $pending--;
+        }
+
+        $this->writeJson($outputPath, $counts, $paths, $dates, $dateCount);
     }
 
-    private function crunch(
-        string $inputPath,
-        int $start,
-        int $end,
-        array $slugIds,
-        array $datePacked,
-        int $slugCount,
-        int $dateCount,
-        int $readChunkBytes,
-    ): array {
-        $buckets = array_fill(0, $slugCount, '');
-
+    private function parseRange(
+        $inputPath, $start, $end,
+        $pathIds, $dateIdChars,
+        $pathCount, $dateCount,
+    ) {
+        $buckets = array_fill(0, $pathCount, '');
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, min($readChunkBytes, $remaining));
-            $chunkLength = strlen($chunk);
+            $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
+            $chunk = fread($handle, $toRead);
+            $chunkLen = strlen($chunk);
+            $remaining -= $chunkLen;
 
-            if ($chunkLength === 0) {
-                break;
-            }
+            $lastNl = strrpos($chunk, "\n");
+            if ($lastNl === false) break;
 
-            $remaining -= $chunkLength;
-
-            $lastNewline = strrpos($chunk, "\n");
-            if ($lastNewline === false) {
-                continue;
-            }
-
-            $tail = $chunkLength - $lastNewline - 1;
+            $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
                 fseek($handle, -$tail, SEEK_CUR);
                 $remaining += $tail;
             }
 
-            $slugPosition = self::URL_PREFIX_LENGTH;
-            $fence = $lastNewline - 720;
+            $p = 25;
+            $fence = $lastNl - 600;
 
-            while ($slugPosition < $fence) {
-                $separator = strpos($chunk, ',', $slugPosition);
-                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
-                    .= $datePacked[substr($chunk, $separator + 3, 8)];
-                $slugPosition = $separator + 52;
+            while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $separator = strpos($chunk, ',', $slugPosition);
-                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
-                    .= $datePacked[substr($chunk, $separator + 3, 8)];
-                $slugPosition = $separator + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $separator = strpos($chunk, ',', $slugPosition);
-                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
-                    .= $datePacked[substr($chunk, $separator + 3, 8)];
-                $slugPosition = $separator + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $separator = strpos($chunk, ',', $slugPosition);
-                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
-                    .= $datePacked[substr($chunk, $separator + 3, 8)];
-                $slugPosition = $separator + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $separator = strpos($chunk, ',', $slugPosition);
-                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
-                    .= $datePacked[substr($chunk, $separator + 3, 8)];
-                $slugPosition = $separator + 52;
-
-                $separator = strpos($chunk, ',', $slugPosition);
-                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
-                    .= $datePacked[substr($chunk, $separator + 3, 8)];
-                $slugPosition = $separator + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
             }
 
-            while ($slugPosition < $lastNewline) {
-                $separator = strpos($chunk, ',', $slugPosition);
-                if ($separator === false) {
-                    break;
-                }
-
-                $buckets[$slugIds[substr($chunk, $slugPosition, $separator - $slugPosition)]]
-                    .= $datePacked[substr($chunk, $separator + 3, 8)];
-                $slugPosition = $separator + 52;
+            while ($p < $lastNl) {
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
             }
         }
 
         fclose($handle);
 
-        $counts = array_fill(0, $slugCount * $dateCount, 0);
-
-        for ($slug = 0; $slug < $slugCount; $slug++) {
-            if ($buckets[$slug] === '') {
-                continue;
-            }
-
-            $offset = $slug * $dateCount;
-
-            foreach (array_count_values(unpack('v*', $buckets[$slug])) as $dateId => $visits) {
-                $counts[$offset + $dateId] = $visits;
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
+        for ($p = 0; $p < $pathCount; $p++) {
+            if ($buckets[$p] === '') continue;
+            $offset = $p * $dateCount;
+            foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
+                $counts[$offset + $did] += $count;
             }
         }
 
@@ -385,31 +237,31 @@ final class Parser
     }
 
     private function writeJson(
-        string $outputPath,
-        array $counts,
-        array $slugLabels,
-        array $dateLabels,
-        int $dateCount,
-    ): void {
+        $outputPath,
+        $counts,
+        $paths,
+        $dates,
+        $dateCount,
+    ) {
         $output = fopen($outputPath, 'wb');
         stream_set_write_buffer($output, 1_048_576);
 
         $datePrefixes = [];
         for ($date = 0; $date < $dateCount; $date++) {
-            $datePrefixes[$date] = '        "' . $dateLabels[$date] . '": ';
+            $datePrefixes[$date] = '        "20' . $dates[$date] . '": ';
         }
 
         $escapedPaths = [];
-        $slugCount = count($slugLabels);
-        for ($slug = 0; $slug < $slugCount; $slug++) {
-            $escapedPaths[$slug] = '"\\/blog\\/' . str_replace('/', '\\/', $slugLabels[$slug]) . '"';
+        $pathCount = count($paths);
+        for ($path = 0; $path < $pathCount; $path++) {
+            $escapedPaths[$path] = '"\/blog\/' . str_replace('/', '\\/', $paths[$path]) . '"';
         }
 
         fwrite($output, '{');
         $first = true;
 
-        for ($slug = 0; $slug < $slugCount; $slug++) {
-            $base = $slug * $dateCount;
+        for ($path = 0; $path < $pathCount; $path++) {
+            $base = $path * $dateCount;
             $body = '';
             $sep = '';
 
@@ -428,7 +280,7 @@ final class Parser
 
             fwrite(
                 $output,
-                ($first ? '' : ',') . "\n    " . $escapedPaths[$slug] . ": {\n" . $body . "\n    }",
+                ($first ? '' : ',') . "\n    " . $escapedPaths[$path] . ": {\n" . $body . "\n    }",
             );
             $first = false;
         }
