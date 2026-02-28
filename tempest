@@ -1,6 +1,20 @@
 #!/usr/bin/env php
 <?php
 
+if (isset($argv[1]) && str_contains($argv[1], 'parse')) {
+    gc_disable();
+    $input = __DIR__ . '/data/data.csv';
+    $output = __DIR__ . '/data/data.json';
+    foreach ($argv as $arg) {
+        if (str_starts_with($arg, '--input-path=')) $input = substr($arg, 13);
+        if (str_starts_with($arg, '--output-path=')) $output = substr($arg, 14);
+    }
+    require_once __DIR__ . '/app/Commands/Visit.php';
+    require_once __DIR__ . '/app/Parser.php';
+    (new \App\Parser())->parse($input, $output);
+    exit;
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
