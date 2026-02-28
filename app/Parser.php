@@ -155,17 +155,15 @@ final class Parser
             if ($pid <= 0) {
                 $pid = pcntl_wait($status);
             }
-            if (isset($childMap[$pid])) {
-                $tmpFile = $childMap[$pid];
-                $wCounts = unpack('v*', file_get_contents($tmpFile));
-                unlink($tmpFile);
-                $j = 0;
-                foreach ($wCounts as $v) {
-                    $counts[$j] += $v;
-                    $j++;
-                }
-                $pending--;
+            $tmpFile = $childMap[$pid];
+            $wCounts = unpack('v*', file_get_contents($tmpFile));
+            unlink($tmpFile);
+            $j = 0;
+            foreach ($wCounts as $v) {
+                $counts[$j] += $v;
+                $j++;
             }
+            $pending--;
         }
 
         self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
@@ -224,7 +222,6 @@ final class Parser
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                if ($sep >= $lastNl) break;
                 $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
