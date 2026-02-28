@@ -9,7 +9,6 @@ final class Parser
     public function parse($inputPath, $outputPath)
     {
         $fileSize = \filesize($inputPath);
-        $numChunks = 16;
 
         [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount] = self::discover($inputPath, $fileSize);
 
@@ -26,8 +25,8 @@ final class Parser
         // Find chunk boundaries aligned to newlines (many small chunks for work-stealing)
         $boundaries = [0];
         $handle = \fopen($inputPath, 'rb');
-        for ($i = 1; $i < $numChunks; $i++) {
-            \fseek($handle, \intdiv($fileSize * $i, $numChunks));
+        for ($i = 1; $i < 32; $i++) {
+            \fseek($handle, ($fileSize * $i) >> 5);
             \fgets($handle);
             $boundaries[] = \ftell($handle);
         }
@@ -50,7 +49,7 @@ final class Parser
                 \stream_set_read_buffer($fh, 0);
                 $qf = \fopen($queueFile, 'c+b');
                 while (true) {
-                    $ci = self::grabChunk($qf, $numChunks);
+                    $ci = self::grabChunk($qf);
                     if ($ci === -1) break;
                     self::fillBuckets($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
                 }
@@ -69,7 +68,7 @@ final class Parser
         \stream_set_read_buffer($fh, 0);
         $qf = \fopen($queueFile, 'c+b');
         while (true) {
-            $ci = self::grabChunk($qf, $numChunks);
+            $ci = self::grabChunk($qf);
             if ($ci === -1) break;
             self::fillBuckets($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
         }
@@ -132,7 +131,7 @@ final class Parser
     {
         $handle = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($handle, 0);
-        $chunk = \fread($handle, \min($fileSize, 204800));
+        $chunk = \fread($handle, $fileSize < 204800 ? $fileSize : 204800);
         \fclose($handle);
 
         $lastNl = \strrpos($chunk, "\n");
@@ -183,12 +182,12 @@ final class Parser
         return [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount];
     }
 
-    private static function grabChunk($f, $numChunks)
+    private static function grabChunk($f)
     {
         \flock($f, \LOCK_EX);
         \fseek($f, 0);
         $idx = \unpack('V', \fread($f, 4))[1];
-        if ($idx >= $numChunks) {
+        if ($idx >= 32) {
             \flock($f, \LOCK_UN);
             return -1;
         }
