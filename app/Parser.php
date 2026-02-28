@@ -7,83 +7,50 @@ use Generator;
 
 final class Parser
 {
-    private const int CHUNK_SIZE = 1024 * 1024 * 14;
-    private const int DATE_CHUNK_SIZE = 1024 * 1024 * 5;
+    private const int CHUNK_SIZE = 1024 * 1024 * 70;
     private static array $urls = [];
-    private static array $doneUrls = [];
 
     public function parse(string $inputPath, string $outputPath): void
     {
-        foreach ($this->getUrls($inputPath) as $chunkUrls) {
-            foreach ($this->getUrlsAndDates($inputPath) as $chunkUrlsAndDates) {
-                foreach ($chunkUrls as $url => $true) {
-                    if (!isset($chunkUrlsAndDates[$url])) {
-                        continue;
+        foreach ($this->getUrlsAndDates($inputPath) as $chunkUrlsAndDates) {
+            foreach ($chunkUrlsAndDates as $url => $dates) {
+                if (!isset(self::$urls[$url])) {
+                    self::$urls[$url] = $dates;
+                } else {
+                    foreach ($dates as $date => $count) {
+                        self::$urls[$url][$date] = (self::$urls[$url][$date] ?? 0) + $count;
                     }
-
-                    $dates = $chunkUrlsAndDates[$url];
-
-                    if (!isset(self::$urls[$url])) {
-                        self::$urls[$url] = $dates;
-                    } else {
-                        foreach ($dates as $date => $count) {
-                            self::$urls[$url][$date] = (self::$urls[$url][$date] ?? 0) + $count;
-                        }
-                    }
-
-                    ksort(self::$urls[$url]);
                 }
             }
-
-            $this->jsonStream($outputPath);
-            self::$urls = [];
         }
-    }
 
-    private function getUrls(string $inputPath): Generator
-    {
-        $left = '';
-
-        foreach ($this->readChunkByChunk($inputPath, self::CHUNK_SIZE) as $chunk) {
-            $lastEolPost = strrpos($chunk, PHP_EOL);
-            $buffer = $left . substr($chunk, 0, $lastEolPost);
-            $left = substr($chunk, $lastEolPost + 1, strlen($chunk));
-            $lines = explode(PHP_EOL, $buffer);
-            $urls = [];
-
-            foreach ($lines as $line) {
-                $parts = explode(',', $line);
-
-                if (!isset(self::$doneUrls[$parts[0]])) {
-                    $urls[$parts[0]] = true;
-                }
-            }
-
-            yield $urls;
-        }
+        $this->jsonStream($outputPath);
     }
 
     private function getUrlsAndDates(string $inputPath): Generator
     {
         $left = '';
 
-        foreach ($this->readChunkByChunk($inputPath, self::DATE_CHUNK_SIZE) as $chunk) {
-            $lastEolPost = strrpos($chunk, PHP_EOL);
-            $buffer = $left . substr($chunk, 0, $lastEolPost);
-            $left = substr($chunk, $lastEolPost + 1, strlen($chunk));
-            $lines = explode(PHP_EOL, $buffer);
-            $urlsAndDates = [];
+        foreach ($this->readChunkByChunk($inputPath) as $chunk) {
+            $lastEolPos = strrpos($chunk, "\n");
+            $buffer = $left . substr($chunk, 0, $lastEolPos);
+            $left = substr($chunk, $lastEolPos + 1);
 
-            foreach ($lines as $line) {
-                $parts = explode(',', $line);
-                $url = $parts[0];
-                $date = substr($parts[1], 0, 10);
+            $urlsAndDates = [];
+            $line = strtok($buffer, "\n");
+
+            while ($line !== false) {
+                $commaPos = strpos($line, ',');
+                $url = substr($line, 0, $commaPos);
+                $date = substr($line, $commaPos + 1, 10);
 
                 if (!isset($urlsAndDates[$url][$date])) {
                     $urlsAndDates[$url][$date] = 0;
                 }
 
                 $urlsAndDates[$url][$date]++;
+
+                $line = strtok("\n");
             }
 
             yield $urlsAndDates;
@@ -101,12 +68,12 @@ final class Parser
         return $path;
     }
 
-    private function readChunkByChunk(string $inputPath, int $chunkSize): Generator
+    private function readChunkByChunk(string $inputPath): Generator
     {
         $file = fopen($inputPath, 'r');
 
         while (!feof($file)) {
-            yield fread($file, $chunkSize);
+            yield fread($file, self::CHUNK_SIZE);
         }
 
         fclose($file);
@@ -116,28 +83,33 @@ final class Parser
     {
         $fileOutput = fopen($outputPath, 'w');
         fwrite($fileOutput, "{\n");
+
         $isFirst = true;
-        $content = '';
 
         foreach (self::$urls as $url => $dates) {
             $escapedPath = $this->getUrlPath($url, escaped: true);
-            $content .= $isFirst
-                ? '    '.$escapedPath.': {'
-                : ",\n".'    '.$escapedPath.': {';
+
+            ksort($dates);
+
+            if ($isFirst) {
+                fwrite($fileOutput, '    '.$escapedPath.': {');
+            } else {
+                fwrite($fileOutput, ",\n".'    '.$escapedPath.': {');
+            }
+
             $dateKeys = array_keys($dates);
             $last = array_key_last($dateKeys);
 
             foreach ($dateKeys as $i => $date) {
                 $comma = $i === $last ? '' : ',';
-                $content .= "\n        " . '"' . $date . '": ' . $dates[$date] . $comma;
+                fwrite($fileOutput, "\n        " . '"' . $date . '": ' . $dates[$date] . $comma);
             }
 
-            $content .= "\n    }";
+            fwrite($fileOutput, "\n    }");
             $isFirst = false;
-            self::$doneUrls[$url] = true;
         }
 
-        fwrite($fileOutput, $content."\n}");
+        fwrite($fileOutput, "\n}");
         fclose($fileOutput);
     }
 }
