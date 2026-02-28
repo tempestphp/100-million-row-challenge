@@ -240,7 +240,7 @@ final class Parser
         foreach ($pathIds as $pathId => $_) {
             $dateCounts = &$w0_results[$pathId];
 
-            for ($w = 1; $w < 10; ++$w) {
+            for ($w = 1; $w < $this->workers; ++$w) {
                 foreach ($allWorkerResults[$w][$pathId] as $dateKey => $count) {
                     $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
                 }
