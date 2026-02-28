@@ -190,35 +190,34 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $p = 25;
-            $fence = $lastNl - 600;
+            $p = 0;
+            $fence = $lastNl - 520;
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
+                $nl = strpos($chunk, "\n", $p + 52);
+                $buckets[$pathIds[substr($chunk, $p + 25, $nl - $p - 51)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
+                $p = $nl + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
+                $nl = strpos($chunk, "\n", $p + 52);
+                $buckets[$pathIds[substr($chunk, $p + 25, $nl - $p - 51)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
+                $p = $nl + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
+                $nl = strpos($chunk, "\n", $p + 52);
+                $buckets[$pathIds[substr($chunk, $p + 25, $nl - $p - 51)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
+                $p = $nl + 1;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
+                $nl = strpos($chunk, "\n", $p + 52);
+                $buckets[$pathIds[substr($chunk, $p + 25, $nl - $p - 51)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
+                $p = $nl + 1;
             }
 
             while ($p < $lastNl) {
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
+                $nl = strpos($chunk, "\n", $p + 52);
+                if ($nl === false || $nl > $lastNl) {
+                    break;
+                }
+                $buckets[$pathIds[substr($chunk, $p + 25, $nl - $p - 51)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
+                $p = $nl + 1;
             }
         }
 
