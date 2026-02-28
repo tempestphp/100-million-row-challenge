@@ -98,8 +98,17 @@ final class Parser
                     $finalResult[$path] = $dates;
                 } else {
                     $existing = &$finalResult[$path];
+                    $needsSort = false;
                     foreach ($dates as $date => $count) {
-                        $existing[$date] = ($existing[$date] ?? 0) + $count;
+                        if (isset($existing[$date])) {
+                            $existing[$date] += $count;
+                        } else {
+                            $existing[$date] = $count;
+                            $needsSort = true;
+                        }
+                    }
+                    if ($needsSort) {
+                        \ksort($existing, SORT_STRING);
                     }
                     unset($existing);
                 }
@@ -109,11 +118,7 @@ final class Parser
 
         @rmdir($tempDir);
 
-        // Re-sort dates after merge (workers pre-sorted, but merge adds new keys out of order)
-        foreach ($finalResult as &$dates) {
-            \ksort($dates, SORT_STRING);
-        }
-        unset($dates);
+        // Dates are already fully sorted from the merge phase.
 
         $this->writeOutput($finalResult, $finalOrder, $outputPath);
     }
