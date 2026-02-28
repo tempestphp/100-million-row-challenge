@@ -7,7 +7,7 @@ use Generator;
 
 final class Parser
 {
-    private const int CHUNK_SIZE = 1024 * 1024 * 70;
+    private const int CHUNK_SIZE = 1024 * 1024 * 150;
     private static array $urls = [];
 
     public function parse(string $inputPath, string $outputPath): void
@@ -25,20 +25,17 @@ final class Parser
             $buffer = $left . substr($chunk, 0, $lastEolPos);
             $left = substr($chunk, $lastEolPos + 1);
 
-            $line = strtok($buffer, "\n");
+            $lines = explode("\n", $buffer);
 
-            while ($line !== false) {
-                $commaPos = strpos($line, ',');
-                $url = substr($line, 0, $commaPos);
-                $date = substr($line, $commaPos + 1, 10);
+            foreach ($lines as $line) {
+                $parts = explode(',', $line);
+                $url = $parts[0];
+                $date = substr($parts[1], 0, 10);
 
                 if (!isset(self::$urls[$url][$date])) {
                     self::$urls[$url][$date] = 0;
                 }
-
                 self::$urls[$url][$date]++;
-
-                $line = strtok("\n");
             }
         }
     }
