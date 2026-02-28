@@ -7,27 +7,16 @@ use Generator;
 
 final class Parser
 {
-    private const int CHUNK_SIZE = 1024 * 1024 * 50;
+    private const int CHUNK_SIZE = 1024 * 1024 * 70;
     private static array $urls = [];
 
     public function parse(string $inputPath, string $outputPath): void
     {
-        foreach ($this->getUrlsAndDates($inputPath) as $chunkUrlsAndDates) {
-            foreach ($chunkUrlsAndDates as $url => $dates) {
-                if (!isset(self::$urls[$url])) {
-                    self::$urls[$url] = $dates;
-                } else {
-                    foreach ($dates as $date => $count) {
-                        self::$urls[$url][$date] = (self::$urls[$url][$date] ?? 0) + $count;
-                    }
-                }
-            }
-        }
-
+        $this->getUrlsAndDates($inputPath);
         $this->jsonStream($outputPath);
     }
 
-    private function getUrlsAndDates(string $inputPath): Generator
+    private function getUrlsAndDates(string $inputPath): void
     {
         $left = '';
 
@@ -36,7 +25,6 @@ final class Parser
             $buffer = $left . substr($chunk, 0, $lastEolPos);
             $left = substr($chunk, $lastEolPos + 1);
 
-            $urlsAndDates = [];
             $line = strtok($buffer, "\n");
 
             while ($line !== false) {
@@ -44,16 +32,14 @@ final class Parser
                 $url = substr($line, 0, $commaPos);
                 $date = substr($line, $commaPos + 1, 10);
 
-                if (!isset($urlsAndDates[$url][$date])) {
-                    $urlsAndDates[$url][$date] = 0;
+                if (!isset(self::$urls[$url][$date])) {
+                    self::$urls[$url][$date] = 0;
                 }
 
-                $urlsAndDates[$url][$date]++;
+                self::$urls[$url][$date]++;
 
                 $line = strtok("\n");
             }
-
-            yield $urlsAndDates;
         }
     }
 
