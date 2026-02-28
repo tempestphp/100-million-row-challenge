@@ -32,14 +32,13 @@ use function substr;
 use function sys_get_temp_dir;
 use function unlink;
 use function unpack;
-use const SEEK_CUR;
 use const WNOHANG;
 
 final class Parser
 {
-    private const int WORKERS = 10;
-    private const int READ_CHUNK = 163_840;
-    private const int DISCOVER_SIZE = 2_097_152;
+    private const int WORKERS = 12;
+    private const int READ_CHUNK = 524_288;
+    private const int DISCOVER_SIZE = 524_288;
 
     public function parse($inputPath, $outputPath)
     {
@@ -75,8 +74,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $warmUpSize = self::DISCOVER_SIZE;
-        $raw = fread($handle, $warmUpSize);
+        $raw = fread($handle, self::DISCOVER_SIZE);
         fclose($handle);
 
         $pathIds = [];
@@ -174,21 +172,25 @@ final class Parser
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
         $remaining = $end - $start;
+        $carry = '';
 
         while ($remaining > 0) {
             $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
-            $chunk = fread($handle, $toRead);
-            $chunkLen = strlen($chunk);
-            $remaining -= $chunkLen;
+            $read = fread($handle, $toRead);
+            $readLen = strlen($read);
+            if ($readLen === 0) {
+                break;
+            }
+            $remaining -= $readLen;
+
+            $chunk = $carry === '' ? $read : $carry . $read;
 
             $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) break;
-
-            $tail = $chunkLen - $lastNl - 1;
-            if ($tail > 0) {
-                fseek($handle, -$tail, SEEK_CUR);
-                $remaining += $tail;
+            if ($lastNl === false) {
+                $carry = $chunk;
+                continue;
             }
+            $carry = substr($chunk, $lastNl + 1);
 
             $p = 0;
             $fence = $lastNl - 520;
