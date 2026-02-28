@@ -14,26 +14,33 @@ class SingleThread
         $result = [];
 
         $lenghtBaseUrl = strlen(self::BASE_URL);
-   
+
         while ($line = fgets($handle)) {
-           
+
             $path = substr($line, $lenghtBaseUrl, -self::DATE_TOTAL_LENGTH - 2);
-            $date = substr($line, -self::DATE_TOTAL_LENGTH - 1, self::DATE_LENGTH);
-            
-            if (isset($result[$path][$date])) {
-                $result[$path][$date]++;
-            } else {
-                $result[$path][$date] = 1;
-            }
-            
+            $dateint =  (int) str_replace('-', '', substr($line, -self::DATE_TOTAL_LENGTH - 1, self::DATE_LENGTH));
+
+            $result[$path][$dateint] = ($result[$path][$dateint] ?? 0) + 1;
         }
-      
+
         fclose($handle);
 
         foreach ($result as &$dates) {
             ksort($dates);
         }
-        
+
+
+        $result = array_map(function ($dates) {
+            $newDates = [];
+            foreach ($dates as $dateint => $count) {
+                $dateStr = substr((string) $dateint, 0, 4) . '-' . substr((string) $dateint, 4, 2) . '-' . substr((string) $dateint, 6, 2);
+                $newDates[$dateStr] = $count;
+            }
+            return $newDates;
+        }, $result);
+
+
+
         file_put_contents($outputPath, json_encode($result, JSON_PRETTY_PRINT));
     }
 }
