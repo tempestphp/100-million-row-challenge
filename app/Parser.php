@@ -162,7 +162,8 @@ final class Parser
                 unlink($tmpFile);
                 $j = 0;
                 foreach ($wCounts as $v) {
-                    $counts[$j++] += $v;
+                    $counts[$j] += $v;
+                    $j++;
                 }
                 $pending--;
             }
