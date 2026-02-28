@@ -1,7 +1,8 @@
 {
     "require": {
         "php": "^8.5",
-        "tempest/framework": "^3.2"
+        "tempest/framework": "^3.2",
+        "innmind/operating-system": "^7.0"
     },
     "autoload": {
         "psr-4": {
