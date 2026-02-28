@@ -128,11 +128,10 @@ final class Parser
 
                 fwrite($handle, '    }');
 
-                if (++$pathIndex < $pathCount) {
-                    fwrite($handle, ",\n");
-                } else {
-                    fwrite($handle, "\n");
-                }
+                match (true) {
+                    ++$pathIndex < $pathCount => fwrite($handle, ",\n"),
+                    default => fwrite($handle, "\n"),
+                };
 
                 Fiber::suspend();
 
