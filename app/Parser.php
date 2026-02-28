@@ -31,7 +31,7 @@ final class Parser
             ->unwrap()
             ->content()
             ->lines()
-            ->map(static fn($line) => $line->str()->drop(19))
+            ->map(static fn($line) => $line->str()->drop(24))
             ->exclude(static fn($line) => $line->empty())
             ->map(static fn($line) => $line->split(',')->toList())
             ->map(static fn($line) => [
@@ -75,7 +75,7 @@ final class Parser
 
                 $path = Str::of($path)
                     ->dropEnd(1)
-                    ->map(static fn($string) => \json_encode($string))
+                    ->map(static fn($string) => \json_encode('/blog'.$string))
                     ->toString();
 
                 return Sequence::of(...$dates)
