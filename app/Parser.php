@@ -6,11 +6,13 @@ use App\Commands\Visit;
 
 final class Parser
 {
-    private const DEFAULT_READ_CHUNK_SIZE = 262_144;
+    private const DEFAULT_READ_CHUNK_SIZE = 131_072; // 262_144;
 
-    private ?int $workers = 12;
+    private ?int $workers = 10;
     private ?array $pathIdByPath = null;
     private ?array $pathLinePrefix = null;
+    private ?array $paths = null;
+    private int $pathCount = 0;
     private ?array $generatedDateKeyByString = null;
     private ?array $generatedDateLinePrefix = null;
     private ?array $tmpFiles = [];
@@ -18,11 +20,12 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
+        ini_set('memory_limit', '10G');
         gc_disable();
-        $this->initializePathCache();
+        $this->initializePathCache($inputPath);
         $this->initializeGeneratedDateCache();
 
-        $this->workers = max(2, (int) (getenv('PARSER_WORKERS') ?: '12'));
+        $this->workers = max(2, (int) (getenv('PARSER_WORKERS') ?: $this->workers));
 
         $this->parseParallel($inputPath, $outputPath);
     }
@@ -41,6 +44,8 @@ final class Parser
         // $tmpHandles = [];
         $pids = [];
 
+        // var_dump($ranges, $this->workers);
+        // exit;
         foreach ($ranges as $index => &$range) {
             $tmpFile = tempnam(sys_get_temp_dir(), "parser_worker_{$index}_");
             $this->tmpFiles[] = $tmpFile;
@@ -169,13 +174,14 @@ final class Parser
      */
     private function parseRange(string $inputPath, int $start, int $end, $index): void
     {
+        $t0 = hrtime(true);
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 0);
         fseek($input, $start);
 
 
         $pathIdByPath = &$this->pathIdByPath;
-        $countsByPath = [];
+        $countsByPath = $this->paths;
         $dateKeyByString = &$this->generatedDateKeyByString;
         $buffer = '';
         $lineStart = $bufferOffset = 0;
@@ -189,10 +195,9 @@ final class Parser
                 $bufferOffset = 0;
             }
 
-            $buffer .= $chunk = fread($input, $remaining > $chunkSize ? $chunkSize : $remaining);
+            $buffer .= $chunk = fread($input, min($remaining, $chunkSize));
 
             if ($chunk === false) {
-
                 break;
             }
 
@@ -208,9 +213,8 @@ final class Parser
         }
 
         fclose($input);
-        fwrite($this->tmpHandles[$index], serialize($countsByPath));
-        fclose($this->tmpHandles[$index]);
-
+        file_put_contents($this->tmpFiles[$index], serialize($countsByPath));
+        echo "[worker {$index}] parseRange time: " . ((hrtime(true) - $t0) / 1e9) * 1000 . " ms" . PHP_EOL;
     }
 
     private function mergeAndWriteOutput(string $outputPath): void
@@ -220,42 +224,39 @@ final class Parser
         $file = fopen($outputPath, 'w');
         stream_set_write_buffer($file, 0);
 
-        $pathIds = [];
         for($i = 0; $i < $this->workers; $i++) {
-            $pathIds += $allWorkerResults[] = unserialize(file_get_contents($this->tmpFiles[$i]));
+            $allWorkerResults[] = unserialize(file_get_contents($this->tmpFiles[$i]));
+            var_dump(filesize($this->tmpFiles[$i]));
+
             unlink($this->tmpFiles[$i]);
         }
-
-        // Collect all unique pathIds — array + union on pathId-keyed arrays
-        // $pathIds = $allWorkerResults[0] + $allWorkerResults[1] + $allWorkerResults[2] + $allWorkerResults[3] + $allWorkerResults[4] + $allWorkerResults[5] + $allWorkerResults[6] + $allWorkerResults[7] + $allWorkerResults[8] + $allWorkerResults[9];
-
+exit;
         $dateLinePrefix = &$this->generatedDateLinePrefix;
         $pathLinePrefix = &$this->pathLinePrefix;
-        $pathCount = count($pathIds);
+        $pathCount = $this->pathCount;
+        $lastPathId = $pathCount - 1;
 
-        $w0_results = &$allWorkerResults[0];
         fwrite($file, '{' . PHP_EOL);
-        // $buffer = '{' . PHP_EOL;
-        // Single loop: for each path, merge all workers, sort, write
-        foreach ($pathIds as $pathId => $_) {
-            $dateCounts = &$w0_results[$pathId];
 
+        for ($pathId = 0; $pathId <= $lastPathId; $pathId++) {
+            // Collect all date keys across workers
+            $dateCounts = $allWorkerResults[0][$pathId];
             for ($w = 1; $w < $this->workers; ++$w) {
-                foreach ($allWorkerResults[$w][$pathId] as $dateKey => $count) {
-                    $dateCounts[$dateKey] = $dateCounts[$dateKey] + $count;
-                }
+                $dateCounts += $allWorkerResults[$w][$pathId];
             }
 
+            for ($w = 0; $w < $this->workers; ++$w) {
+                foreach ($allWorkerResults[$w][$pathId] as $dateKey => $count) {
+                    $dateCounts[$dateKey] += $count;
+                }
+            }
             ksort($dateCounts, SORT_NUMERIC);
-
-            $buffer = $pathLinePrefix[$pathId];
             $dateCount = count($dateCounts);
 
+            $buffer = $pathLinePrefix[$pathId];
             foreach ($dateCounts as $dateKey => $count) {
                 $buffer .= $dateLinePrefix[$dateKey] . $count . ((--$dateCount) ? ',' : '') . PHP_EOL;
             }
-
-
             $buffer .= ((--$pathCount) ? '    },' : '    }') . PHP_EOL;
 
             fwrite($file, $buffer);
@@ -264,8 +265,8 @@ final class Parser
         fwrite($file, '}');
         fclose($file);
         $endTime = microtime(true);
-        $executionTime = $endTime - $startTime;
-        echo "mergeAndWriteOutput time: $executionTime seconds" . PHP_EOL;
+        $executionTime = ($endTime - $startTime)*1000;
+        echo "mergeAndWriteOutput total: $executionTime ms" . PHP_EOL;
     }
 
     private function buildVisitsAndWriteOutput(array $countsByPath, string $outputPath): void
@@ -298,23 +299,39 @@ final class Parser
         fclose($file);
     }
 
-    private function initializePathCache(): void
+    private function initializePathCache(string $inputPath): void
     {
         if ($this->pathIdByPath !== null) {
             return;
         }
 
+        $totalPaths = count(Visit::all());
         $pathIdByPath = [];
         $pathLinePrefix = [];
+        $nextId = 0;
 
-        foreach (Visit::all() as $pathId => $visit) {
-            $path = substr($visit->uri, 25);
-            $pathIdByPath[$path] = $pathId;
-            $pathLinePrefix[$pathId] = '    "\/blog\/' . $path . '": {' . PHP_EOL;
+        $input = fopen($inputPath, 'r');
+
+        while (($line = fgets($input)) !== false) {
+            $commaPos = strpos($line, ',', 25);
+            $path = substr($line, 25, $commaPos - 25);
+
+            if (!isset($pathIdByPath[$path])) {
+                $pathIdByPath[$path] = $nextId;
+                $pathLinePrefix[$nextId] = '    "\/blog\/' . $path . '": {' . PHP_EOL;
+                $nextId++;
+                if ($nextId >= $totalPaths) {
+                    break;
+                }
+            }
         }
+
+        fclose($input);
 
         $this->pathIdByPath = $pathIdByPath;
         $this->pathLinePrefix = $pathLinePrefix;
+        $this->paths = array_fill(0, $nextId, []);
+        $this->pathCount = $nextId;
     }
 
     private function initializeGeneratedDateCache(): void
