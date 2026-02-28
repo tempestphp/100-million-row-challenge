@@ -9,66 +9,57 @@ final class Parser
         ini_set('memory_limit', '-1');
         gc_disable();
 
-        $fp = \fopen($inputPath, 'rb');
-        if (!$fp) {
-            return;
+        $fp = \fopen($inputPath, 'r');
+        if ($fp === false) {
+            throw new \RuntimeException("Unable to open file: $inputPath");
         }
 
         $result = [];
-        $order = [];
-        $orderCounter = 0;
-        $chunkSize = 256 * 1024 * 1024; // 128MB
+        $dateCache = [];
 
-        while (!\feof($fp)) {
-            $buffer = \fread($fp, $chunkSize);
-            if ($buffer === false || $buffer === '') {
-                break;
+        while (($line = \fgets($fp)) !== false) {
+            $path = \substr($line, 19, -27); // 19 = strlen('https://stitcher.io'), -27 removes , and date
+            $dateStr = \substr($line, -26, 10); // 10 = strlen('YYYY-MM-DD')
+
+            if (!isset($dateCache[$dateStr])) {
+                $dateCache[$dateStr] = (int) \str_replace('-', '', $dateStr);
             }
+            $dateInt = $dateCache[$dateStr];
 
-            // Ensure we read until the next newline to not sever a record in half
-            $extra = \fgets($fp);
-            if ($extra !== false) {
-                $buffer .= $extra;
+            // Fast hash lookup
+            if (isset($result[$path][$dateInt])) {
+                $result[$path][$dateInt]++;
+            } else {
+                $result[$path][$dateInt] = 1;
             }
-
-            if (\preg_match_all('/^https?:\/\/[^\/]+(\/[^,]+),(.{10})/m', $buffer, $matches)) {
-                $paths = $matches[1];
-                $dates = $matches[2];
-                $count = \count($paths);
-
-                for ($i = 0; $i < $count; ++$i) {
-                    $path = $paths[$i];
-                    $date = $dates[$i];
-
-                    $order[$path] ??= ++$orderCounter;
-                    $result[$path][$date] = ($result[$path][$date] ?? 0) + 1;
-                }
-            }
-
-            unset($buffer, $matches, $paths, $dates);
         }
 
         \fclose($fp);
 
         // Sort dates for each fully accumulated path
         foreach ($result as &$dates) {
-            \ksort($dates, SORT_STRING);
+            \ksort($dates, SORT_NUMERIC);
         }
 
-        $this->writeOutput($result, $order, $outputPath);
+        $this->writeOutput($result, $outputPath);
     }
 
-    private function writeOutput(array $result, array $order, string $outputPath): void
+    private function writeOutput(array $result, string $outputPath): void
     {
-        // Sort paths by first-appearance order
-        \asort($order, SORT_NUMERIC);
-
-        // Build ordered result (dates already sorted)
+        // Build ordered result (paths are already natively insertion-sorted, dates are sorted)
         $ordered = [];
-        foreach (\array_keys($order) as $path) {
-            if (isset($result[$path])) {
-                $ordered[$path] = $result[$path];
+        foreach ($result as $path => $dates) {
+            $formattedDates = [];
+            foreach ($dates as $dateInt => $count) {
+                // Use math to extract YYYY, MM, DD
+                $d = $dateInt % 100;
+                $m = \intdiv($dateInt, 100) % 100;
+                $y = \intdiv($dateInt, 10000);
+
+                $formattedKey = \sprintf('%04d-%02d-%02d', $y, $m, $d);
+                $formattedDates[$formattedKey] = $count;
             }
+            $ordered[$path] = $formattedDates;
         }
 
         \file_put_contents($outputPath, \json_encode($ordered, JSON_PRETTY_PRINT));
