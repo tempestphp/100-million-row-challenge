@@ -48,7 +48,7 @@ final class Parser
 
     public static function parse($inputPath, $outputPath)
     {
-//        gc_disable();
+        gc_disable();
 
         $fileSize = 7_509_674_827;
 
