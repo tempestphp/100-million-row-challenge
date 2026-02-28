@@ -57,9 +57,10 @@ final class Parser
     private function writeUrl($handle, string $url): void
     {
         // Format url and write
-        $urlLine = str_replace('/', '\/', $url);
-        $urlLine = '    "' . $urlLine . '": {';
-        fwrite($handle, $urlLine . self::EOL);
+        fwrite(
+            $handle,
+            '    "' . str_replace('/', '\/', $url) . '": {' . self::EOL
+        );
     }
 
     private function writeTimestamps($handle, array $timestamps): void
