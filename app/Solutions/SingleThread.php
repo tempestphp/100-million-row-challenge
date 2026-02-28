@@ -15,12 +15,21 @@ class SingleThread
 
         $lenghtBaseUrl = strlen(self::BASE_URL);
 
+        $pathEnd   = - (self::DATE_TOTAL_LENGTH + 2);
+        $dateStart = - (self::DATE_TOTAL_LENGTH + 1);
+        $dateLen   = self::DATE_LENGTH;
+
         while ($line = fgets($handle)) {
 
-            $path = substr($line, $lenghtBaseUrl, -self::DATE_TOTAL_LENGTH - 2);
-            $dateint =  (int) str_replace('-', '', substr($line, -self::DATE_TOTAL_LENGTH - 1, self::DATE_LENGTH));
+            $path = substr($line, $lenghtBaseUrl, $pathEnd);
+            $dateint =  (int) str_replace('-', '', substr($line, $dateStart, $dateLen));
 
-            $result[$path][$dateint] = ($result[$path][$dateint] ?? 0) + 1;
+            $ref = &$result[$path];
+            if (isset($ref[$dateint])) {
+                $ref[$dateint]++;
+            } else {
+                $ref[$dateint] = 1;
+            }
         }
 
         fclose($handle);
