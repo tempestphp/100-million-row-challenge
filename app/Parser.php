@@ -14,8 +14,8 @@ final class Parser
 
         while (($buffer = fgets($stream, 4096)) !== false) {
             $commaPos = strpos($buffer, ',');
-            $url = substr($buffer, 19, $commaPos - 19);
-            $date = substr($buffer, $commaPos + 1, 10);
+            $url      = substr($buffer, 19, $commaPos - 19);
+            $date     = substr($buffer, $commaPos + 1, 10);
 
             if (!isset($results[$url])) {
                 $results[$url] = [];
@@ -29,13 +29,42 @@ final class Parser
             $results[$url][$date]++;
         }
 
-        foreach ($results as $index => $result) {
-            ksort($result);
-            $results[$index] = $result;
-        }
+        fclose($stream);
 
-        $output = json_encode($results, JSON_PRETTY_PRINT);
+        $stream = fopen($outputPath, 'wb');
 
-        file_put_contents($outputPath, $output);
+        fwrite($stream, "{\n");
+
+        fwrite(
+            $stream,
+            implode(
+                ",\n",
+                array_map(
+                    static function ($url, $dates) {
+                        $url = str_replace("/", "\/", $url);
+                        ksort($dates);
+                        return
+                            "    \"{$url}\": {\n" .
+                            implode(
+                                ",\n",
+                                array_map(
+                                    static function ($date, $value) {
+                                        return "        \"{$date}\": {$value}";
+                                    },
+                                    array_keys((array) $dates),
+                                    array_values((array) $dates),
+                                ),
+                            ) .
+                            "\n    }"
+                        ;
+                    },
+                    array_keys($results),
+                    array_values($results),
+                ),
+            ),
+        );
+
+        fwrite($stream, "\n}");
+        fclose($stream);
     }
 }
