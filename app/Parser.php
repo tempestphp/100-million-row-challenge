@@ -12,21 +12,17 @@ final class Parser
      */
     public function parse(string $inputPath, string $outputPath): void
     {
-        $content = file_get_contents($inputPath);
-        if ($content === false) {
+        $handle = fopen($inputPath, 'r');
+        if ($handle === false) {
             throw new RuntimeException("Could not open input file: $inputPath");
-        }
-
-        $lines = explode("\n", $content);
-        unset($content);
-        if (end($lines) === "") {
-            array_pop($lines);
         }
 
         $visits = [];
 
-        foreach ($lines as $line) {
+        while (($line = fgets($handle)) !== false) {
             $commaPos = strpos($line, ',');
+            if ($commaPos === false) continue;
+
             $pathStart = strpos($line, '/', 8);
 
             if ($pathStart !== false && $pathStart < $commaPos) {
@@ -37,12 +33,18 @@ final class Parser
 
             $date = substr($line, $commaPos + 1, 10);
 
-            if (isset($visits[$path][$date])) {
-                $visits[$path][$date]++;
+            if (isset($visits[$path])) {
+                if (isset($visits[$path][$date])) {
+                    $visits[$path][$date]++;
+                } else {
+                    $visits[$path][$date] = 1;
+                }
             } else {
-                $visits[$path][$date] = 1;
+                $visits[$path] = [$date => 1];
             }
         }
+
+        fclose($handle);
 
         foreach ($visits as &$dates) {
             ksort($dates);
