@@ -37,14 +37,7 @@ use const WNOHANG;
 
 final class Parser
 {
-    private const int WORKERS = 10;
     private const int READ_CHUNK = 163_840;
-    private const int DISCOVER_SIZE = 2_097_152;
-
-    public function __call(string $name, array $arguments): mixed
-    {
-        return static::$name(...$arguments);
-    }
 
     public static function parse($inputPath, $outputPath)
     {
@@ -80,8 +73,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $warmUpSize = self::DISCOVER_SIZE;
-        $raw = fread($handle, $warmUpSize);
+        $raw = fread($handle, 2_097_152); // discovery 2MB
         fclose($handle);
 
         $pathIds = [];
@@ -118,8 +110,8 @@ final class Parser
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
-        for ($i = 1; $i < self::WORKERS; $i++) {
-            fseek($bh, (int) ($fileSize * $i / self::WORKERS));
+        foreach ([750_967_482, 1_501_934_965, 2_252_902_448, 3_003_869_930, 3_754_837_413, 4_505_804_896, 5_256_772_378, 6_007_739_861, 6_758_707_344] as $offset) {
+            fseek($bh, $offset);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -130,7 +122,7 @@ final class Parser
         $myPid = getmypid();
         $childMap = [];
 
-        for ($w = 0; $w < self::WORKERS - 1; $w++) {
+        for ($w = 0; $w < 9; $w++) {
             $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
             $pid = pcntl_fork();
             if ($pid === 0) {
@@ -145,7 +137,7 @@ final class Parser
         }
 
         $counts = self::parseRange(
-            $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
+            $inputPath, $boundaries[9], $boundaries[10],
             $pathIds, $dateIdChars, $pathCount, $dateCount,
         );
 
