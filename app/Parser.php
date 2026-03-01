@@ -3,6 +3,7 @@
 namespace App;
 
 use function count;
+use function array_fill;
 use function fgets;
 use function file_put_contents;
 use function fopen;
@@ -57,11 +58,11 @@ final class Parser
             // use dateIds for insertion because those are correctly ordered
             $dateId = $dateIds[$date];
 
-            if (isset($outputData[$path][$dateId])) {
-                $outputData[$path][$dateId]++;
-            } else {
-                $outputData[$path][$dateId] = 1;
+            if (!isset($outputData[$path])) {
+                $outputData[$path] = array_fill(0, $dateCount, 0);
             }
+
+            $outputData[$path][$dateId]++;
         }
 
         // write output
@@ -77,8 +78,8 @@ final class Parser
             $dateIndex = 0;
 
             foreach ($dateIds as $dateId) {
-                $count = $pathCounts[$dateId] ?? null;
-                if ($count === null) {
+                $count = $pathCounts[$dateId];
+                if ($count === 0) {
                     continue;
                 }
 
