@@ -80,7 +80,7 @@ final class Parser
 
         // Fork child workers
         $pids = [];
-        for ($i = 0; $i < 7; $i++) {
+        for ($i = 0; $i < 6; $i++) {
             $pid = pcntl_fork();
             if ($pid === -1) continue;
             if ($pid === 0) {
