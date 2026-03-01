@@ -88,8 +88,9 @@ final class Parser
                 $fh = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
                 $qf = fopen($queueFile, 'c+b');
-                while ($cis = self::grabChunks($qf, $numChunks)) {
-                    foreach ($cis as $ci) {
+                while (true) {
+                    $ci = self::grabChunk($qf, $numChunks);
+                    if ($ci === -1) break;
                     fseek($fh, $boundaries[$ci]);
                     $bytesProcessed = 0;
                     $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
@@ -127,7 +128,6 @@ final class Parser
                             $p = $c + 52;
                         }
                     }
-                    }
                 }
                 fclose($qf);
                 fclose($fh);
@@ -152,8 +152,9 @@ final class Parser
         $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
         $qf = fopen($queueFile, 'c+b');
-        while ($cis = self::grabChunks($qf, $numChunks)) {
-            foreach ($cis as $ci) {
+        while (true) {
+            $ci = self::grabChunk($qf, $numChunks);
+            if ($ci === -1) break;
             fseek($fh, $boundaries[$ci]);
             $bytesProcessed = 0;
             $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
@@ -190,7 +191,6 @@ final class Parser
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
                     $p = $c + 52;
                 }
-            }
             }
         }
         fclose($qf);
@@ -312,23 +312,19 @@ final class Parser
         return [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount];
     }
 
-    private static function grabChunks($f, $numChunks, $grab = 2)
+    private static function grabChunk($f, $numChunks)
     {
         flock($f, LOCK_EX);
         fseek($f, 0);
         $idx = unpack('V', fread($f, 4))[1];
         if ($idx >= $numChunks) {
             flock($f, LOCK_UN);
-            return [];
+            return -1;
         }
-        $end = $idx + $grab;
-        if ($end > $numChunks) $end = $numChunks;
         fseek($f, 0);
-        fwrite($f, pack('V', $end));
+        fwrite($f, pack('V', $idx + 1));
         fflush($f);
         flock($f, LOCK_UN);
-        $result = [];
-        for ($i = $idx; $i < $end; $i++) $result[] = $i;
-        return $result;
+        return $idx;
     }
 }
