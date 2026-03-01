@@ -8,14 +8,14 @@ final class Parser
 {
     public static function parse(string $inputPath, string $outputPath): void
     {
-        $numWorkers = 10;
-        $chunkSize = 131072;
-        $numCounters = 8;
+        $numWorkers = 14;
+        $chunkSize = 655360;
+        $numCounters = 10;
 
         $slugToIdx = [];
         $slugCount = 0;
         $fh = \fopen($inputPath, 'rb');
-        $sample = \fread($fh, 524288);
+        $sample = \fread($fh, 262144);
         \fclose($fh);
 
         $sampleLen = \strlen($sample);
@@ -98,7 +98,7 @@ final class Parser
                     }
 
                     $i = 25;
-                    $fence = $lastNl - 1000;
+                    $fence = $lastNl - 2500;
 
                     if ($i < $fence) {
                         do {
@@ -197,8 +197,8 @@ final class Parser
         $countPipes = [];
         for ($c = 0; $c < $numCounters; $c++) {
             \socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $rawPair);
-            \socket_set_option($rawPair[0], SOL_SOCKET, SO_RCVBUF, 2097152);
-            \socket_set_option($rawPair[1], SOL_SOCKET, SO_SNDBUF, 2097152);
+            \socket_set_option($rawPair[0], SOL_SOCKET, SO_RCVBUF, 262144);
+            \socket_set_option($rawPair[1], SOL_SOCKET, SO_SNDBUF, 262144);
             $countPipes[$c] = [\socket_export_stream($rawPair[0]), \socket_export_stream($rawPair[1])];
         }
 
@@ -237,7 +237,7 @@ final class Parser
                 $len = \strlen($fragment);
                 $written = 0;
                 while ($written < $len) {
-                    $n = \fwrite($sock, \substr($fragment, $written, 131072));
+                    $n = \fwrite($sock, \substr($fragment, $written, 32768));
                     if ($n === false) break;
                     $written += $n;
                 }
