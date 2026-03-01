@@ -42,6 +42,11 @@ function parse($i, $o)
         }
     }
 
+    $trIds = [];
+    foreach ($pathIds as $slug => $id) {
+        $trIds[substr($slug, 4)] = $id;
+    }
+
     $dateIds = [];
     $dateList = [];
     $dateCount = 0;
@@ -89,7 +94,8 @@ function parse($i, $o)
             if ($pid === 0) {
                 $handle = fopen($i, 'rb');
                 stream_set_read_buffer($handle, 0);
-                $buckets = array_fill(0, $pathCount, '');
+                $buckets = [];
+                foreach ($trIds as $t => $_) $buckets[$t] = '';
 
                 fseek($handle, $splits[$w]);
                 $remaining = $splits[$w + 1] - $splits[$w];
@@ -111,41 +117,41 @@ function parse($i, $o)
                     }
 
                     $fence = $lastNl - 620;
-                    $s = 25;
+                    $s = 29;
                     while ($s < $fence) {
                         $sep = strpos($chunk, ',', $s);
-                        $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 52;
+                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                        $s = $sep + 56;
                         $sep = strpos($chunk, ',', $s);
-                        $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 52;
+                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                        $s = $sep + 56;
                         $sep = strpos($chunk, ',', $s);
-                        $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 52;
+                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                        $s = $sep + 56;
                         $sep = strpos($chunk, ',', $s);
-                        $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 52;
+                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                        $s = $sep + 56;
                         $sep = strpos($chunk, ',', $s);
-                        $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 52;
+                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                        $s = $sep + 56;
                         $sep = strpos($chunk, ',', $s);
-                        $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 52;
+                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                        $s = $sep + 56;
                     }
                     while ($s < $lastNl) {
                         $sep = strpos($chunk, ',', $s);
                         if ($sep === false || $sep > $lastNl) break;
-                        $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 52;
+                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                        $s = $sep + 56;
                     }
                 }
                 fclose($handle);
 
                 $counts = array_fill(0, $totalCells, 0);
-                for ($p = 0; $p < $pathCount; $p++) {
-                    if ($buckets[$p] === '') continue;
-                    $offset = $p * $stride;
-                    foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $cnt) {
+                foreach ($buckets as $t => $data) {
+                    if ($data === '') continue;
+                    $offset = $trIds[$t] * $stride;
+                    foreach (array_count_values(unpack('v*', $data)) as $did => $cnt) {
                         $counts[$offset + $did] += $cnt;
                     }
                 }
@@ -157,7 +163,8 @@ function parse($i, $o)
 
         $handle = fopen($i, 'rb');
         stream_set_read_buffer($handle, 0);
-        $buckets = array_fill(0, $pathCount, '');
+        $buckets = [];
+        foreach ($trIds as $t => $_) $buckets[$t] = '';
         $remaining = $splits[1];
 
         while ($remaining > 0) {
@@ -177,41 +184,41 @@ function parse($i, $o)
             }
 
             $fence = $lastNl - 620;
-            $s = 25;
+            $s = 29;
             while ($s < $fence) {
                 $sep = strpos($chunk, ',', $s);
-                $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 52;
+                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                $s = $sep + 56;
                 $sep = strpos($chunk, ',', $s);
-                $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 52;
+                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                $s = $sep + 56;
                 $sep = strpos($chunk, ',', $s);
-                $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 52;
+                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                $s = $sep + 56;
                 $sep = strpos($chunk, ',', $s);
-                $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 52;
+                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                $s = $sep + 56;
                 $sep = strpos($chunk, ',', $s);
-                $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 52;
+                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                $s = $sep + 56;
                 $sep = strpos($chunk, ',', $s);
-                $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 52;
+                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                $s = $sep + 56;
             }
             while ($s < $lastNl) {
                 $sep = strpos($chunk, ',', $s);
                 if ($sep === false || $sep > $lastNl) break;
-                $buckets[$pathIds[substr($chunk, $s, $sep - $s)]] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 52;
+                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                $s = $sep + 56;
             }
         }
         fclose($handle);
 
         $counts = array_fill(0, $totalCells, 0);
-        for ($p = 0; $p < $pathCount; $p++) {
-            if ($buckets[$p] === '') continue;
-            $offset = $p * $stride;
-            foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $cnt) {
+        foreach ($buckets as $t => $data) {
+            if ($data === '') continue;
+            $offset = $trIds[$t] * $stride;
+            foreach (array_count_values(unpack('v*', $data)) as $did => $cnt) {
                 $counts[$offset + $did] += $cnt;
             }
         }
