@@ -2,6 +2,8 @@
 
 namespace App;
 
+\gc_disable();
+
 use function array_count_values;
 use function array_fill;
 use function chr;
@@ -16,8 +18,8 @@ use function fread;
 use function fseek;
 use function ftell;
 use function fwrite;
-use function gc_disable;
 use function getmypid;
+use function implode;
 use function ini_set;
 use function pack;
 use function pcntl_fork;
@@ -41,7 +43,6 @@ final class Parser
 {
     public function parse($inputPath, $outputPath)
     {
-        gc_disable();
         ini_set('memory_limit', '-1');
 
         $fileSize = filesize($inputPath);
@@ -67,7 +68,7 @@ final class Parser
             }
         }
 
-        $sampleSize = $fileSize > 4_194_304 ? 4_194_304 : $fileSize;
+        $sampleSize = $fileSize > 524_288 ? 524_288 : $fileSize;
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         $sample = fread($handle, $sampleSize);
@@ -94,7 +95,7 @@ final class Parser
         }
         unset($sample);
 
-        $numWorkers = (int) (trim((string) @shell_exec('sysctl -n hw.ncpu 2>/dev/null')) ?: trim((string) @shell_exec('nproc 2>/dev/null')) ?: 8) + 2;
+        $numWorkers = 10;
 
         $splits = [0];
         $handle = fopen($inputPath, 'rb');
@@ -115,9 +116,7 @@ final class Parser
             $pid = pcntl_fork();
             if ($pid === -1) continue;
             if ($pid === 0) {
-                gc_disable();
-                ini_set('memory_limit', '-1');
-                $wCounts = $this->parseRange(
+                $wCounts = self::parseRange(
                     $inputPath, $splits[$w], $splits[$w + 1],
                     $pathIds, $dateChars, $pathCount, $dateCount,
                 );
@@ -127,7 +126,7 @@ final class Parser
             $childMap[$pid] = $tmpFile;
         }
 
-        $counts = $this->parseRange(
+        $counts = self::parseRange(
             $inputPath, $splits[$numWorkers - 1], $splits[$numWorkers],
             $pathIds, $dateChars, $pathCount, $dateCount,
         );
@@ -149,48 +148,13 @@ final class Parser
             $pending--;
         }
 
-        $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
-        }
-
-        $escapedPaths = [];
-        for ($p = 0; $p < $pathCount; $p++) {
-            $escapedPaths[$p] = '"\\/blog\\/' . str_replace('/', '\\/', $paths[$p]) . '"';
-        }
-
-        $fp = fopen($outputPath, 'wb');
-        stream_set_write_buffer($fp, 1_048_576);
-        fwrite($fp, '{');
-        $firstPath = true;
-
-        for ($p = 0; $p < $pathCount; $p++) {
-            $base = $p * $dateCount;
-            $body = '';
-            $sep = '';
-
-            for ($d = 0; $d < $dateCount; $d++) {
-                $n = $counts[$base + $d];
-                if ($n === 0) continue;
-                $body .= $sep . $datePrefixes[$d] . $n;
-                $sep = ",\n";
-            }
-
-            if ($body === '') continue;
-
-            fwrite($fp, ($firstPath ? '' : ',') . "\n    " . $escapedPaths[$p] . ": {\n" . $body . "\n    }");
-            $firstPath = false;
-        }
-
-        fwrite($fp, "\n}");
-        fclose($fp);
+        self::writeJson($outputPath, $counts, $paths, $pathCount, $dates, $dateCount);
     }
 
-    private function parseRange(
+    private static function parseRange(
         $inputPath, $start, $end,
         $pathIds, $dateChars, $pathCount, $dateCount,
     ) {
-        $chunkSize = 163_840;
         $buckets = array_fill(0, $pathCount, '');
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -198,7 +162,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > $chunkSize ? $chunkSize : $remaining);
+            $chunk = fread($handle, $remaining > 163_840 ? 163_840 : $remaining);
             $chunkLen = strlen($chunk);
             if ($chunkLen === 0) break;
             $remaining -= $chunkLen;
@@ -213,7 +177,7 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 600;
+            $fence = $lastNl - 606;
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
@@ -240,6 +204,7 @@ final class Parser
                 $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
+
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateChars[substr($chunk, $sep + 3, 8)];
@@ -259,5 +224,44 @@ final class Parser
         }
 
         return $counts;
+    }
+
+    private static function writeJson($outputPath, $counts, $paths, $pathCount, $dates, $dateCount)
+    {
+        $datePrefixes = [];
+        for ($d = 0; $d < $dateCount; $d++) {
+            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+        }
+
+        $escapedPaths = [];
+        for ($p = 0; $p < $pathCount; $p++) {
+            $escapedPaths[$p] = '"\\/blog\\/' . str_replace('/', '\\/', $paths[$p]) . '"';
+        }
+
+        $fp = fopen($outputPath, 'wb');
+        stream_set_write_buffer($fp, 1_048_576);
+        fwrite($fp, '{');
+        $firstPath = true;
+
+        for ($p = 0; $p < $pathCount; $p++) {
+            $base = $p * $dateCount;
+            $dateEntries = [];
+
+            for ($d = 0; $d < $dateCount; $d++) {
+                $n = $counts[$base + $d];
+                if ($n === 0) continue;
+                $dateEntries[] = $datePrefixes[$d] . $n;
+            }
+
+            if ($dateEntries === []) continue;
+
+            $buf = $firstPath ? "\n    " : ",\n    ";
+            $firstPath = false;
+            $buf .= $escapedPaths[$p] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
+            fwrite($fp, $buf);
+        }
+
+        fwrite($fp, "\n}");
+        fclose($fp);
     }
 }
