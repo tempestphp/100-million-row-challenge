@@ -2,6 +2,7 @@
 
 namespace App;
 
+use App\Commands\Visit;
 use RuntimeException;
 use function array_keys;
 use function array_unique;
@@ -62,6 +63,16 @@ final class Parser
     /**
      * @var array<string, int>
      */
+    private array $pathIdByPath = [];
+
+    /**
+     * @var array<int, string>
+     */
+    private array $pathById = [];
+
+    /**
+     * @var array<string, int>
+     */
     private array $profileDurations = [];
 
     /**
@@ -97,16 +108,31 @@ final class Parser
         }
 
         $this->chunkSize = $this->determineChunkSize();
+        [$this->pathIdByPath, $this->pathById] = $this->buildPathDictionaries();
 
         $totalStart = $this->profileStart();
 
         $parseStart = $this->profileStart();
-        $visits = $this->parseParallel($inputPath, $fileSize);
+        $visitsByPathId = $this->parseParallel($inputPath, $fileSize);
+        $visits = $this->materializePathVisits($visitsByPathId);
         $this->profileStop('parse_phase', $parseStart);
 
         $sortStart = $this->profileStart();
         foreach ($visits as &$pathVisits) {
             ksort($pathVisits);
+
+            $normalizedDates = [];
+
+            foreach ($pathVisits as $dateInt => $count) {
+                $dateValue = (int) $dateInt;
+                $year = intdiv($dateValue, 10000);
+                $month = intdiv($dateValue % 10000, 100);
+                $day = $dateValue % 100;
+
+                $normalizedDates[sprintf('%04d-%02d-%02d', $year, $month, $day)] = $count;
+            }
+
+            $pathVisits = $normalizedDates;
         }
         unset($pathVisits);
         $this->profileStop('sort_phase', $sortStart);
@@ -130,7 +156,50 @@ final class Parser
     }
 
     /**
-     * @return array<string, array<string, int>>
+     * @return array{0: array<string, int>, 1: array<int, string>}
+     */
+    private function buildPathDictionaries(): array
+    {
+        $pathIdByPath = [];
+        $pathById = [];
+        $nextPathId = 0;
+
+        foreach (Visit::all() as $visit) {
+            $path = substr($visit->uri, self::HOST_PREFIX_LENGTH);
+
+            if ($path === '' || isset($pathIdByPath[$path])) {
+                continue;
+            }
+
+            $pathIdByPath[$path] = $nextPathId;
+            $pathById[$nextPathId] = $path;
+            $nextPathId++;
+        }
+
+        return [$pathIdByPath, $pathById];
+    }
+
+    /**
+     * @param array<int, array<int, int>> $visitsByPathId
+     * @return array<string, array<int, int>>
+     */
+    private function materializePathVisits(array $visitsByPathId): array
+    {
+        $visits = [];
+
+        foreach ($visitsByPathId as $pathId => $pathVisits) {
+            if (! isset($this->pathById[$pathId])) {
+                continue;
+            }
+
+            $visits[$this->pathById[$pathId]] = $pathVisits;
+        }
+
+        return $visits;
+    }
+
+    /**
+     * @return array<int, array<int, int>>
      */
     private function parseParallel(string $inputPath, int $fileSize): array
     {
@@ -196,9 +265,9 @@ final class Parser
                     $workerProfile['worker_total_start_ns'] = hrtime(true);
                 }
 
-                $visits = $this->parseSegment($inputPath, $start, $end, $workerProfile);
+                $workerResult = $this->parseSegment($inputPath, $start, $end, $workerProfile);
 
-                if (! is_array($visits)) {
+                if (! is_array($workerResult)) {
                     fclose($childSocket);
                     exit(1);
                 }
@@ -209,9 +278,9 @@ final class Parser
                 }
 
                 $payloadData = $workerProfile === null
-                    ? $visits
+                    ? $workerResult
                     : [
-                        'visits' => $visits,
+                        'visits' => $workerResult,
                         'worker_profile' => $workerProfile,
                     ];
 
@@ -312,22 +381,32 @@ final class Parser
                 $this->ingestWorkerProfile($decodedPayload['worker_profile']);
             }
 
+            if (! is_array($workerData)) {
+                foreach (array_keys($pids) as $pid) {
+                    pcntl_waitpid($pid, $status);
+                }
+
+                throw new RuntimeException('Invalid worker payload');
+            }
+
             $mergeStart = $this->profileStart();
-            foreach ($workerData as $path => $pathVisits) {
-                if (! isset($merged[$path])) {
-                    $merged[$path] = $pathVisits;
+            foreach ($workerData as $pathId => $pathVisits) {
+                $pathId = (int) $pathId;
+
+                if (! isset($merged[$pathId])) {
+                    $merged[$pathId] = $pathVisits;
                     continue;
                 }
 
-                $mergedPathVisits = &$merged[$path];
+                $mergedPathVisits = &$merged[$pathId];
 
-                foreach ($pathVisits as $date => $count) {
-                    if (! isset($mergedPathVisits[$date])) {
-                        $mergedPathVisits[$date] = $count;
+                foreach ($pathVisits as $dateInt => $count) {
+                    if (! isset($mergedPathVisits[$dateInt])) {
+                        $mergedPathVisits[$dateInt] = $count;
                         continue;
                     }
 
-                    $mergedPathVisits[$date] += $count;
+                    $mergedPathVisits[$dateInt] += $count;
                 }
 
                 unset($mergedPathVisits);
@@ -361,7 +440,7 @@ final class Parser
     }
 
     /**
-     * @return array<string, array<string, int>>|null
+     * @return array<int, array<int, int>>|null
      */
     private function parseSegment(string $inputPath, int $start, int $end, ?array &$workerProfile = null): ?array
     {
@@ -399,16 +478,23 @@ final class Parser
 
     /**
      * @param resource $handle
-     * @return array<string, array<string, int>>
+     * @return array<int, array<int, int>>
      */
     private function parseSegmentWithFgets(mixed $handle, int $segmentSize, ?array &$workerProfile = null): array
     {
         $visits = [];
+
         $remainingBytes = $segmentSize;
         $profilingWorker = $workerProfile !== null;
 
         $sampledFgetsNs = 0;
-        $sampledParseNs = 0;
+        $sampledParseComputeLengthNs = 0;
+        $sampledParseTrimNs = 0;
+        $sampledParseComputeOffsetsNs = 0;
+        $sampledParseExtractDataNs = 0;
+        $sampledParseLookupPathIdNs = 0;
+        $sampledParseLookupDateBucketNs = 0;
+        $sampledParseIncrementCounterNs = 0;
         $lineIndex = 0;
 
         $parseLoopStart = $profilingWorker ? hrtime(true) : 0;
@@ -431,76 +517,130 @@ final class Parser
                 break;
             }
 
-            $parseLineStart = $sampleLine ? hrtime(true) : 0;
-
+            $computeLengthStart = $sampleLine ? hrtime(true) : 0;
             $lineByteLength = strlen($line);
 
-            if ($lineByteLength === 0) {
-                if ($sampleLine && $parseLineStart !== 0) {
-                    $sampledParseNs += hrtime(true) - $parseLineStart;
-                }
-
-                continue;
+            if ($sampleLine) {
+                $sampledParseComputeLengthNs += hrtime(true) - $computeLengthStart;
             }
 
             $remainingBytes -= $lineByteLength;
 
+            $trimStart = $sampleLine ? hrtime(true) : 0;
+
             $lineLength = $lineByteLength - 1;
 
-            if ($lineLength < self::MIN_LINE_LENGTH) {
-                if ($sampleLine && $parseLineStart !== 0) {
-                    $sampledParseNs += hrtime(true) - $parseLineStart;
-                }
-
-                continue;
+            if ($sampleLine) {
+                $sampledParseTrimNs += hrtime(true) - $trimStart;
             }
 
-            if ($line[$lineLength - 1] === "\r") {
-                $lineLength--;
-            }
+            $computeOffsetsStart = $sampleLine ? hrtime(true) : 0;
 
             $timestampStart = $lineLength - self::TIMESTAMP_LENGTH;
             $commaPos = $timestampStart - 1;
             $pathLength = $commaPos - self::HOST_PREFIX_LENGTH;
 
-            if ($pathLength <= 0) {
-                if ($sampleLine && $parseLineStart !== 0) {
-                    $sampledParseNs += hrtime(true) - $parseLineStart;
-                }
-
-                continue;
+            if ($sampleLine) {
+                $sampledParseComputeOffsetsNs += hrtime(true) - $computeOffsetsStart;
             }
+
+            $extractDataStart = $sampleLine ? hrtime(true) : 0;
 
             $path = substr($line, self::HOST_PREFIX_LENGTH, $pathLength);
-            $date = substr($line, $timestampStart, 10);
+            $dateInt = (int) (
+                substr($line, $timestampStart, 4)
+                . substr($line, $timestampStart + 5, 2)
+                . substr($line, $timestampStart + 8, 2)
+            );
 
-            if (isset($visits[$path][$date])) {
-                $visits[$path][$date]++;
+            if ($sampleLine) {
+                $sampledParseExtractDataNs += hrtime(true) - $extractDataStart;
+            }
 
-                if ($sampleLine && $parseLineStart !== 0) {
-                    $sampledParseNs += hrtime(true) - $parseLineStart;
+            if ($sampleLine) {
+                $lookupPathIdStart = hrtime(true);
+                $pathId = $this->pathIdByPath[$path];
+                $sampledParseLookupPathIdNs += hrtime(true) - $lookupPathIdStart;
+
+                if (! isset($visits[$pathId])) {
+                    $incrementStart = hrtime(true);
+                    $visits[$pathId] = [$dateInt => 1];
+                    $sampledParseIncrementCounterNs += hrtime(true) - $incrementStart;
+                    continue;
                 }
 
+                $pathBucket = &$visits[$pathId];
+
+                $lookupDateStart = hrtime(true);
+                $dateExists = isset($pathBucket[$dateInt]);
+                $sampledParseLookupDateBucketNs += hrtime(true) - $lookupDateStart;
+
+                $incrementStart = hrtime(true);
+
+                if ($dateExists) {
+                    $pathBucket[$dateInt]++;
+                } else {
+                    $pathBucket[$dateInt] = 1;
+                }
+
+                $sampledParseIncrementCounterNs += hrtime(true) - $incrementStart;
                 continue;
             }
 
-            $visits[$path][$date] = 1;
+            $pathId = $this->pathIdByPath[$path];
 
-            if ($sampleLine && $parseLineStart !== 0) {
-                $sampledParseNs += hrtime(true) - $parseLineStart;
+            if (! isset($visits[$pathId])) {
+                $visits[$pathId] = [];
             }
+
+            $pathBucket = &$visits[$pathId];
+
+            if (isset($pathBucket[$dateInt])) {
+                $pathBucket[$dateInt]++;
+                continue;
+            }
+
+            $pathBucket[$dateInt] = 1;
         }
 
         if ($profilingWorker && $parseLoopStart !== 0) {
             $parseLoopNs = hrtime(true) - $parseLoopStart;
             $workerProfile['worker_parse_loop_ns'] = $parseLoopNs;
 
-            $sampledTotalNs = $sampledFgetsNs + $sampledParseNs;
+            $sampledTotalNs = $sampledFgetsNs
+                + $sampledParseComputeLengthNs
+                + $sampledParseTrimNs
+                + $sampledParseComputeOffsetsNs
+                + $sampledParseExtractDataNs
+                + $sampledParseLookupPathIdNs
+                + $sampledParseLookupDateBucketNs
+                + $sampledParseIncrementCounterNs;
 
             if ($sampledTotalNs > 0) {
-                $fgetsShareNs = (int) (($parseLoopNs * $sampledFgetsNs) / $sampledTotalNs);
-                $workerProfile['worker_fgets_share_ns'] = $fgetsShareNs;
-                $workerProfile['worker_line_parse_share_ns'] = $parseLoopNs - $fgetsShareNs;
+                $workerFgetsNs = (int) (($parseLoopNs * $sampledFgetsNs) / $sampledTotalNs);
+                $workerParseComputeLengthNs = (int) (($parseLoopNs * $sampledParseComputeLengthNs) / $sampledTotalNs);
+                $workerParseTrimNs = (int) (($parseLoopNs * $sampledParseTrimNs) / $sampledTotalNs);
+                $workerParseComputeOffsetsNs = (int) (($parseLoopNs * $sampledParseComputeOffsetsNs) / $sampledTotalNs);
+                $workerParseExtractDataNs = (int) (($parseLoopNs * $sampledParseExtractDataNs) / $sampledTotalNs);
+                $workerParseLookupPathIdNs = (int) (($parseLoopNs * $sampledParseLookupPathIdNs) / $sampledTotalNs);
+                $workerParseLookupDateBucketNs = (int) (($parseLoopNs * $sampledParseLookupDateBucketNs) / $sampledTotalNs);
+
+                $allocatedNs = $workerFgetsNs
+                    + $workerParseComputeLengthNs
+                    + $workerParseTrimNs
+                    + $workerParseComputeOffsetsNs
+                    + $workerParseExtractDataNs
+                    + $workerParseLookupPathIdNs
+                    + $workerParseLookupDateBucketNs;
+
+                $workerProfile['worker_fgets_ns'] = $workerFgetsNs;
+                $workerProfile['worker_parse_compute_length_ns'] = $workerParseComputeLengthNs;
+                $workerProfile['worker_parse_trim_ns'] = $workerParseTrimNs;
+                $workerProfile['worker_parse_compute_offsets_ns'] = $workerParseComputeOffsetsNs;
+                $workerProfile['worker_parse_extract_data_ns'] = $workerParseExtractDataNs;
+                $workerProfile['worker_parse_lookup_path_id_ns'] = $workerParseLookupPathIdNs;
+                $workerProfile['worker_parse_lookup_date_bucket_ns'] = $workerParseLookupDateBucketNs;
+                $workerProfile['worker_parse_increment_counter_ns'] = $parseLoopNs - $allocatedNs;
             }
         }
 
@@ -608,7 +748,7 @@ final class Parser
     }
 
     /**
-     * @return array<string, array<string, int>>|null
+     * @return array<mixed>|null
      */
     private function decodePayload(string $payload): ?array
     {
