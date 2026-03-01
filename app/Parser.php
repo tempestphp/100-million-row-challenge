@@ -96,7 +96,7 @@ final class Parser
                     $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
                     while ($bytesProcessed < $toProcess) {
                         $remaining = $toProcess - $bytesProcessed;
-                        $chunk = fread($fh, $remaining > 262144 ? 262144 : $remaining);
+                        $chunk = fread($fh, $remaining > 131072 ? 131072 : $remaining);
                         if (!$chunk) break;
                         $lastNl = strrpos($chunk, "\n");
                         if ($lastNl === false) continue;
@@ -160,7 +160,7 @@ final class Parser
             $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
             while ($bytesProcessed < $toProcess) {
                 $remaining = $toProcess - $bytesProcessed;
-                $chunk = fread($fh, $remaining > 262144 ? 262144 : $remaining);
+                $chunk = fread($fh, $remaining > 131072 ? 131072 : $remaining);
                 if (!$chunk) break;
                 $lastNl = strrpos($chunk, "\n");
                 if ($lastNl === false) continue;
