@@ -97,44 +97,44 @@ final class Parser
                         $remaining += $tail;
                     }
 
-                    $pos = 0;
+                    $i = 25;
                     $fence = $lastNl - 600;
 
-                    if ($pos < $fence) {
+                    if ($i < $fence) {
                         do {
-                            $c = \strpos($raw, ',', $pos + 29);
-                            $buckets[\substr($raw, $pos + 25, $c - $pos - 25)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $pos = $c + 27;
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
 
-                            $c = \strpos($raw, ',', $pos + 29);
-                            $buckets[\substr($raw, $pos + 25, $c - $pos - 25)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $pos = $c + 27;
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
 
-                            $c = \strpos($raw, ',', $pos + 29);
-                            $buckets[\substr($raw, $pos + 25, $c - $pos - 25)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $pos = $c + 27;
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
 
-                            $c = \strpos($raw, ',', $pos + 29);
-                            $buckets[\substr($raw, $pos + 25, $c - $pos - 25)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $pos = $c + 27;
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
 
-                            $c = \strpos($raw, ',', $pos + 29);
-                            $buckets[\substr($raw, $pos + 25, $c - $pos - 25)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $pos = $c + 27;
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
 
-                            $c = \strpos($raw, ',', $pos + 29);
-                            $buckets[\substr($raw, $pos + 25, $c - $pos - 25)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $pos = $c + 27;
-                        } while ($pos < $fence);
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
+                        } while ($i < $fence);
                     }
 
-                    if ($pos < $lastNl) {
+                    if ($i < $lastNl) {
                         do {
-                            $c = \strpos($raw, ',', $pos + 29);
+                            $c = \strpos($raw, ',', $i);
                             if ($c === false || $c > $lastNl) break;
-                            $buckets[\substr($raw, $pos + 25, $c - $pos - 25)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $pos = $c + 27;
-                        } while ($pos < $lastNl);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
+                        } while ($i < $lastNl);
                     }
                 } while ($remaining > 0);
 
