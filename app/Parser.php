@@ -108,24 +108,29 @@ final class Parser
                         $p = 25;
                         $limit = $lastNl - 600;
                         while ($p < $limit) {
-                            $c = strpos($chunk, ",", $p);
+                            $nl = strpos($chunk, "\n", $p);
+                            $c = $nl - 26;
                             $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                            $p = $c + 52;
-                            $c = strpos($chunk, ",", $p);
+                            $p = $nl + 26;
+                            $nl = strpos($chunk, "\n", $p);
+                            $c = $nl - 26;
                             $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                            $p = $c + 52;
-                            $c = strpos($chunk, ",", $p);
+                            $p = $nl + 26;
+                            $nl = strpos($chunk, "\n", $p);
+                            $c = $nl - 26;
                             $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                            $p = $c + 52;
-                            $c = strpos($chunk, ",", $p);
+                            $p = $nl + 26;
+                            $nl = strpos($chunk, "\n", $p);
+                            $c = $nl - 26;
                             $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                            $p = $c + 52;
+                            $p = $nl + 26;
                         }
                         while ($p < $lastNl) {
-                            $c = strpos($chunk, ",", $p);
-                            if ($c === false || $c >= $lastNl) break;
+                            $nl = strpos($chunk, "\n", $p);
+                            if ($nl === false || $nl > $lastNl) break;
+                            $c = $nl - 26;
                             $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                            $p = $c + 52;
+                            $p = $nl + 26;
                         }
                     }
                 }
@@ -172,24 +177,29 @@ final class Parser
                 $p = 25;
                 $limit = $lastNl - 600;
                 while ($p < $limit) {
-                    $c = strpos($chunk, ",", $p);
+                    $nl = strpos($chunk, "\n", $p);
+                    $c = $nl - 26;
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                    $p = $c + 52;
-                    $c = strpos($chunk, ",", $p);
+                    $p = $nl + 26;
+                    $nl = strpos($chunk, "\n", $p);
+                    $c = $nl - 26;
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                    $p = $c + 52;
-                    $c = strpos($chunk, ",", $p);
+                    $p = $nl + 26;
+                    $nl = strpos($chunk, "\n", $p);
+                    $c = $nl - 26;
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                    $p = $c + 52;
-                    $c = strpos($chunk, ",", $p);
+                    $p = $nl + 26;
+                    $nl = strpos($chunk, "\n", $p);
+                    $c = $nl - 26;
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                    $p = $c + 52;
+                    $p = $nl + 26;
                 }
                 while ($p < $lastNl) {
-                    $c = strpos($chunk, ",", $p);
-                    if ($c === false || $c >= $lastNl) break;
+                    $nl = strpos($chunk, "\n", $p);
+                    if ($nl === false || $nl > $lastNl) break;
+                    $c = $nl - 26;
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
-                    $p = $c + 52;
+                    $p = $nl + 26;
                 }
             }
         }
