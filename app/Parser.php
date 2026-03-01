@@ -6,7 +6,7 @@ use Exception;
 
 final class Parser
 {
-    private const NUM_WORKERS = 10;
+    private const NUM_WORKERS = 8;
     private const MAX_PATHS = 300;
     private const CHUNK_SIZE = 8_388_608; // 8MB
     private const SLUG_SCAN_CHUNK_BYTES = 2_097_152; // 2MB
@@ -365,14 +365,48 @@ final class Parser
                 $remaining += $over;
             }
 
+            $lineCount = substr_count($chunk, "\n", 0, $lastNl + 1);
+            $mainIters = $lineCount >> 3;
+            $tailLines = $lineCount & 7;
+
             $pos = self::URL_SLUG_OFFSET;
-            while ($pos < $lastNl) {
+
+            for ($i = 0; $i < $mainIters; ++$i) {
                 $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
 
-                if ($sep === false || $sep >= $lastNl) {
-                    break;
-                }
+                $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
 
+                $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+                $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+                $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+                $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+                $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+                $sep = strpos($chunk, ',', $pos);
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
+            }
+
+            for ($i = 0; $i < $tailLines; ++$i) {
+                $sep = strpos($chunk, ',', $pos);
                 ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
                 $pos = $sep + self::NEXT_SLUG_OFFSET;
             }
