@@ -2,6 +2,8 @@
 
 namespace App;
 
+use App\Commands\Visit;
+
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
@@ -17,9 +19,28 @@ final class Parser
         $buffer = '';
         $parsedDateCache = [];
         $formattedDatesByInt = [];
-        $lastPathId = 0;
         $pathCache = [];
         $pathByIds = [];
+
+        foreach (Visit::all() as $pathId => $visit) {
+            $path = substr($visit->uri, $prefixLength);
+            $pathCache[$path] = $pathId;
+            $pathByIds[$pathId] = $path;
+        }
+
+        for ($year = 2021; $year <= 2026; $year++) {
+            for ($month = 1; $month <= 12; $month++) {
+                for ($day = 1; $day <= 31; $day++) {
+                    $rawDate = \sprintf('%d-%02d-%02d', $year, $month, $day);
+                    $parsedDateCache[$rawDate] = (int) (
+                        \substr($rawDate, 0, 4)
+                        . \substr($rawDate, 5, 2)
+                        . \substr($rawDate, 8, 2)
+                    );
+                    $formattedDatesByInt[$parsedDateCache[$rawDate]] = $rawDate;
+                }
+            }
+        }
 
         while (! \feof($fh)) {
             $chunk = \fread($fh, $chunkSize);
@@ -43,24 +64,9 @@ final class Parser
                 $path = \substr($buffer, $pathStart, $commaPos - $pathStart);
                 $rawDate = \substr($buffer, $commaPos + 1, 10);
 
-                if (isset($pathCache[$path])) {
-                    $pathId = $pathCache[$path];
-                } else {
-                    $pathId = $lastPathId++;
-                    $pathCache[$path] = $pathId;
-                    $pathByIds[$pathId] = $path;
-                }
+                $pathId = $pathCache[$path];
 
-                if (isset($parsedDateCache[$rawDate])) {
-                    $date = $parsedDateCache[$rawDate];
-                } else {
-                    $parsedDateCache[$rawDate] = $date = (int) (
-                        \substr($rawDate, 0, 4)
-                        . \substr($rawDate, 5, 2)
-                        . \substr($rawDate, 8, 2)
-                    );
-                    $formattedDatesByInt[$date] = $rawDate;
-                }
+                $date = $parsedDateCache[$rawDate];
 
                 $pathDates = &$result[$pathId];
 
@@ -83,24 +89,9 @@ final class Parser
             $path = \substr($buffer, $prefixLength, $commaPos - $prefixLength);
             $rawDate = \substr($buffer, $commaPos + 1, 10);
 
-            if (isset($pathCache[$path])) {
-                $pathId = $pathCache[$path];
-            } else {
-                $pathId = $lastPathId++;
-                $pathCache[$path] = $pathId;
-                $pathByIds[$pathId] = $path;
-            }
+            $pathId = $pathCache[$path];
 
-            if (isset($parsedDateCache[$rawDate])) {
-                $date = $parsedDateCache[$rawDate];
-            } else {
-                $parsedDateCache[$rawDate] = $date = (int) (
-                    \substr($rawDate, 0, 4)
-                    . \substr($rawDate, 5, 2)
-                    . \substr($rawDate, 8, 2)
-                );
-                $formattedDatesByInt[$date] = $rawDate;
-            }
+            $date = $parsedDateCache[$rawDate];
 
             $pathDates = &$result[$pathId];
 
