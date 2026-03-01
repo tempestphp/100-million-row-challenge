@@ -37,6 +37,7 @@ use function sprintf;
 use function stream_socket_pair;
 use function stream_set_read_buffer;
 use function strlen;
+use function str_ends_with;
 use function substr;
 
 final class Parser
@@ -46,13 +47,13 @@ final class Parser
     private const int HOST_PREFIX_LENGTH = 19;
     private const int MIN_LINE_LENGTH = self::HOST_PREFIX_LENGTH + 1 + self::TIMESTAMP_LENGTH;
 
-    private const int FORK_MIN_FILE_SIZE = 512 * 1024 * 1024;
     private const int DEFAULT_WORKERS = 12;
     private const int MAX_WORKERS = 32;
     private const int MIN_BYTES_PER_WORKER = 128 * 1024 * 1024;
 
     private const string SERIALIZER = 'igbinary';
     private const int SOCKET_HEADER_LENGTH = 20;
+    private const int PROFILE_SAMPLE_MASK = 127;
 
     private int $chunkSize = self::DEFAULT_CHUNK_SIZE;
     private string $serializer = self::SERIALIZER;
@@ -63,10 +64,31 @@ final class Parser
      */
     private array $profileDurations = [];
 
+    /**
+     * @var array<string, int>
+     */
+    private array $profileCounters = [];
+
+    /**
+     * @var array<string, int>
+     */
+    private array $workerTimeTotalsNs = [];
+
+    /**
+     * @var array<string, int>
+     */
+    private array $workerTimeMaxNs = [];
+
+    private int $workerProfileCount = 0;
+
     public function parse(string $inputPath, string $outputPath): void
     {
         $this->profileEnabled = getenv('PARSER_PROFILE') === '1';
         $this->profileDurations = [];
+        $this->profileCounters = [];
+        $this->workerTimeTotalsNs = [];
+        $this->workerTimeMaxNs = [];
+        $this->workerProfileCount = 0;
 
         $fileSize = filesize($inputPath);
 
@@ -122,11 +144,8 @@ final class Parser
             return [];
         }
 
-        if (! $this->shouldFork($fileSize, count($segments))) {
-            return $this->parseSegmentOrFail($inputPath, 0, $fileSize);
-        }
-
         $parallelStart = $this->profileStart();
+        $spawnStart = $this->profileStart();
 
         $workerSockets = [];
         $pids = [];
@@ -170,14 +189,33 @@ final class Parser
             if ($pid === 0) {
                 fclose($parentSocket);
 
-                $visits = $this->parseSegment($inputPath, $start, $end);
+                $workerProfile = null;
+
+                if ($this->profileEnabled) {
+                    $workerProfile = [];
+                    $workerProfile['worker_total_start_ns'] = hrtime(true);
+                }
+
+                $visits = $this->parseSegment($inputPath, $start, $end, $workerProfile);
 
                 if (! is_array($visits)) {
                     fclose($childSocket);
                     exit(1);
                 }
 
-                $payload = $this->encodePayload($visits);
+                if (is_array($workerProfile)) {
+                    $workerProfile['worker_total_ns'] = hrtime(true) - $workerProfile['worker_total_start_ns'];
+                    unset($workerProfile['worker_total_start_ns']);
+                }
+
+                $payloadData = $workerProfile === null
+                    ? $visits
+                    : [
+                        'visits' => $visits,
+                        'worker_profile' => $workerProfile,
+                    ];
+
+                $payload = $this->encodePayload($payloadData);
                 $lengthHeader = sprintf('%020d', strlen($payload));
 
                 if (! $this->writeToSocket($childSocket, $lengthHeader . $payload)) {
@@ -196,11 +234,16 @@ final class Parser
             $pids[$pid] = $worker;
         }
 
+        $this->profileStop('parallel_spawn', $spawnStart);
+        $this->profileCounter('parallel_workers', count($workerSockets));
+
         $merged = [];
+        $receiveStart = $this->profileStart();
 
         ksort($workerSockets);
 
         foreach ($workerSockets as $worker => $socket) {
+            $socketReadStart = $this->profileStart();
             $header = $this->readFromSocket($socket, self::SOCKET_HEADER_LENGTH);
 
             if (! is_string($header)) {
@@ -233,6 +276,7 @@ final class Parser
 
             $payload = $this->readFromSocket($socket, $payloadLength);
             fclose($socket);
+            $this->profileStop('parallel_socket_read', $socketReadStart);
 
             if (! is_string($payload)) {
                 foreach (array_keys($pids) as $pid) {
@@ -242,9 +286,14 @@ final class Parser
                 throw new RuntimeException('Unable to read payload body from worker process');
             }
 
-            $workerData = $this->decodePayload($payload);
+            $this->profileCounter('parallel_payload_count', 1);
+            $this->profileCounter('parallel_payload_bytes', strlen($payload));
 
-            if (! is_array($workerData)) {
+            $decodeStart = $this->profileStart();
+            $decodedPayload = $this->decodePayload($payload);
+            $this->profileStop('parallel_decode', $decodeStart);
+
+            if (! is_array($decodedPayload)) {
                 foreach (array_keys($pids) as $pid) {
                     pcntl_waitpid($pid, $status);
                 }
@@ -252,6 +301,18 @@ final class Parser
                 throw new RuntimeException('Invalid worker payload');
             }
 
+            $workerData = $decodedPayload;
+
+            if (
+                isset($decodedPayload['visits'], $decodedPayload['worker_profile'])
+                && is_array($decodedPayload['visits'])
+                && is_array($decodedPayload['worker_profile'])
+            ) {
+                $workerData = $decodedPayload['visits'];
+                $this->ingestWorkerProfile($decodedPayload['worker_profile']);
+            }
+
+            $mergeStart = $this->profileStart();
             foreach ($workerData as $path => $pathVisits) {
                 if (! isset($merged[$path])) {
                     $merged[$path] = $pathVisits;
@@ -271,7 +332,11 @@ final class Parser
 
                 unset($mergedPathVisits);
             }
+
+            $this->profileStop('parallel_merge', $mergeStart);
         }
+
+        $this->profileStop('parallel_receive', $receiveStart);
 
         $waitStart = $this->profileStart();
         $failed = false;
@@ -295,43 +360,18 @@ final class Parser
         return $merged;
     }
 
-    private function shouldFork(int $fileSize, int $segmentCount): bool
-    {
-        if ($fileSize < self::FORK_MIN_FILE_SIZE) {
-            return false;
-        }
-
-        if ($segmentCount < 2) {
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * @return array<string, array<string, int>>
-     */
-    private function parseSegmentOrFail(string $inputPath, int $start, int $end): array
-    {
-        $visits = $this->parseSegment($inputPath, $start, $end);
-
-        if (! is_array($visits)) {
-            throw new RuntimeException('Unable to parse input segment');
-        }
-
-        return $visits;
-    }
-
     /**
      * @return array<string, array<string, int>>|null
      */
-    private function parseSegment(string $inputPath, int $start, int $end): ?array
+    private function parseSegment(string $inputPath, int $start, int $end, ?array &$workerProfile = null): ?array
     {
         $segmentSize = $end - $start;
 
         if ($segmentSize <= 0) {
             return [];
         }
+
+        $openSeekStart = $workerProfile !== null ? hrtime(true) : 0;
 
         $handle = fopen($inputPath, 'rb');
 
@@ -346,7 +386,11 @@ final class Parser
             return null;
         }
 
-        $visits = $this->parseSegmentWithFgets($handle, $segmentSize);
+        if ($workerProfile !== null && $openSeekStart !== 0) {
+            $workerProfile['worker_open_seek_ns'] = hrtime(true) - $openSeekStart;
+        }
+
+        $visits = $this->parseSegmentWithFgets($handle, $segmentSize, $workerProfile);
 
         fclose($handle);
 
@@ -357,21 +401,45 @@ final class Parser
      * @param resource $handle
      * @return array<string, array<string, int>>
      */
-    private function parseSegmentWithFgets(mixed $handle, int $segmentSize): array
+    private function parseSegmentWithFgets(mixed $handle, int $segmentSize, ?array &$workerProfile = null): array
     {
         $visits = [];
         $remainingBytes = $segmentSize;
+        $profilingWorker = $workerProfile !== null;
+
+        $sampledFgetsNs = 0;
+        $sampledParseNs = 0;
+        $lineIndex = 0;
+
+        $parseLoopStart = $profilingWorker ? hrtime(true) : 0;
 
         while ($remainingBytes > 0) {
+            if ($profilingWorker) {
+                $lineIndex++;
+            }
+
+            $sampleLine = $profilingWorker && (($lineIndex & self::PROFILE_SAMPLE_MASK) === 0);
+            $fgetsStart = $sampleLine ? hrtime(true) : 0;
+
             $line = fgets($handle);
+
+            if ($sampleLine && $fgetsStart !== 0) {
+                $sampledFgetsNs += hrtime(true) - $fgetsStart;
+            }
 
             if ($line === false) {
                 break;
             }
 
+            $parseLineStart = $sampleLine ? hrtime(true) : 0;
+
             $lineByteLength = strlen($line);
 
             if ($lineByteLength === 0) {
+                if ($sampleLine && $parseLineStart !== 0) {
+                    $sampledParseNs += hrtime(true) - $parseLineStart;
+                }
+
                 continue;
             }
 
@@ -380,6 +448,10 @@ final class Parser
             $lineLength = $lineByteLength - 1;
 
             if ($lineLength < self::MIN_LINE_LENGTH) {
+                if ($sampleLine && $parseLineStart !== 0) {
+                    $sampledParseNs += hrtime(true) - $parseLineStart;
+                }
+
                 continue;
             }
 
@@ -392,6 +464,10 @@ final class Parser
             $pathLength = $commaPos - self::HOST_PREFIX_LENGTH;
 
             if ($pathLength <= 0) {
+                if ($sampleLine && $parseLineStart !== 0) {
+                    $sampledParseNs += hrtime(true) - $parseLineStart;
+                }
+
                 continue;
             }
 
@@ -400,10 +476,32 @@ final class Parser
 
             if (isset($visits[$path][$date])) {
                 $visits[$path][$date]++;
+
+                if ($sampleLine && $parseLineStart !== 0) {
+                    $sampledParseNs += hrtime(true) - $parseLineStart;
+                }
+
                 continue;
             }
 
             $visits[$path][$date] = 1;
+
+            if ($sampleLine && $parseLineStart !== 0) {
+                $sampledParseNs += hrtime(true) - $parseLineStart;
+            }
+        }
+
+        if ($profilingWorker && $parseLoopStart !== 0) {
+            $parseLoopNs = hrtime(true) - $parseLoopStart;
+            $workerProfile['worker_parse_loop_ns'] = $parseLoopNs;
+
+            $sampledTotalNs = $sampledFgetsNs + $sampledParseNs;
+
+            if ($sampledTotalNs > 0) {
+                $fgetsShareNs = (int) (($parseLoopNs * $sampledFgetsNs) / $sampledTotalNs);
+                $workerProfile['worker_fgets_share_ns'] = $fgetsShareNs;
+                $workerProfile['worker_line_parse_share_ns'] = $parseLoopNs - $fgetsShareNs;
+            }
         }
 
         return $visits;
@@ -502,7 +600,7 @@ final class Parser
     }
 
     /**
-     * @param array<string, array<string, int>> $data
+     * @param array<mixed> $data
      */
     private function encodePayload(array $data): string
     {
@@ -582,6 +680,40 @@ final class Parser
         $this->profileDurations[$phase] = ($this->profileDurations[$phase] ?? 0) + (hrtime(true) - $start);
     }
 
+    private function profileCounter(string $name, int $value): void
+    {
+        if (! $this->profileEnabled) {
+            return;
+        }
+
+        $this->profileCounters[$name] = ($this->profileCounters[$name] ?? 0) + $value;
+    }
+
+    /**
+     * @param array<string, int> $workerProfile
+     */
+    private function ingestWorkerProfile(array $workerProfile): void
+    {
+        if (! $this->profileEnabled) {
+            return;
+        }
+
+        $this->workerProfileCount++;
+
+        foreach ($workerProfile as $name => $value) {
+            if (! is_int($value) || ! str_ends_with($name, '_ns')) {
+                continue;
+            }
+
+            $this->workerTimeTotalsNs[$name] = ($this->workerTimeTotalsNs[$name] ?? 0) + $value;
+            $currentMax = $this->workerTimeMaxNs[$name] ?? 0;
+
+            if ($value > $currentMax) {
+                $this->workerTimeMaxNs[$name] = $value;
+            }
+        }
+    }
+
     private function printProfile(int $fileSize, int $paths): void
     {
         if (! $this->profileEnabled) {
@@ -598,6 +730,27 @@ final class Parser
 
         foreach ($this->profileDurations as $phase => $duration) {
             fwrite(STDERR, sprintf("profile %s=%.6f\n", $phase, $duration / 1_000_000_000));
+        }
+
+        foreach ($this->profileCounters as $name => $value) {
+            fwrite(STDERR, sprintf("profile %s=%d\n", $name, $value));
+        }
+
+        if ($this->workerProfileCount === 0) {
+            return;
+        }
+
+        fwrite(STDERR, sprintf("profile worker_count=%d\n", $this->workerProfileCount));
+
+        ksort($this->workerTimeTotalsNs);
+
+        foreach ($this->workerTimeTotalsNs as $metric => $totalNs) {
+            $avgSeconds = ($totalNs / $this->workerProfileCount) / 1_000_000_000;
+            $maxSeconds = ($this->workerTimeMaxNs[$metric] ?? 0) / 1_000_000_000;
+            $metricName = substr($metric, 0, strlen($metric) - 3);
+
+            fwrite(STDERR, sprintf("profile %s_avg_sec=%.6f\n", $metricName, $avgSeconds));
+            fwrite(STDERR, sprintf("profile %s_max_sec=%.6f\n", $metricName, $maxSeconds));
         }
     }
 
