@@ -238,6 +238,14 @@ final class Parser
                 $c = \strpos($chunk, ",", $p);
                 $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
                 $p = $c + 52;
+
+                $c = \strpos($chunk, ",", $p);
+                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $p = $c + 52;
+
+                $c = \strpos($chunk, ",", $p);
+                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                $p = $c + 52;
             }
             while ($p < $lastNl) {
                 $c = \strpos($chunk, ",", $p);
