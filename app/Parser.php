@@ -136,7 +136,7 @@ final class Parser
                 if ($test instanceof \Shmop) {
                     $useShmop = true;
                     $shm[0] = $test;
-                    for ($i = 1; $i < $w - 1; $i++) {
+                    for ($i = 1; $i < $w; $i++) {
                         $shm[$i] = \shmop_open(($me << 4) + $i + 1, 'c', 0644, $segSize);
                     }
                 }
@@ -174,7 +174,7 @@ final class Parser
             file_put_contents($queueFile, pack('V', 0));
         }
 
-        for ($i = 0; $i < $w - 1; $i++) {
+        for ($i = 0; $i < $w; $i++) {
             $pid = pcntl_fork();
             if ($pid === 0) {
                 $cnt = $useSem
@@ -191,11 +191,8 @@ final class Parser
             $ch[$pid] = $i;
         }
 
-        $cnt = $useSem
-            ? self::workerLoopSem($inputPath, $queueShm, $sem, $offsets, $numChunks, $pathIds, $dateIdChars, $pathCount, $dateCount)
-            : self::workerLoopFlock($inputPath, $queueFile, $offsets, $numChunks, $pathIds, $dateIdChars, $pathCount, $dateCount);
-
-        $pending = count($ch);
+        $cnt = array_fill(0, $totalSize, 0);
+        $pending = $w;
         while ($pending > 0) {
             $pid = pcntl_wait($status);
             $idx = $ch[$pid];
@@ -319,7 +316,7 @@ final class Parser
             }
 
             $p = 25;
-            $fc = $ln - 832;
+            $fc = $ln - 792;
 
             while ($p < $fc) {
                 $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
