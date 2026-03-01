@@ -16,6 +16,19 @@ final class Parser
         [$dateToBinaryId, $dateJsonPrefix, $dateCount] = $this->buildDateMetadata();
 
         $fileSize = \filesize($inputPath);
+        if ($fileSize === 0 || $slugOrder === []) {
+            \file_put_contents($outputPath, "{}\n");
+            return;
+        }
+
+        if ($fileSize < $chunkBytes * 4) {
+            $workerCount = 1;
+        }
+
+        if ($counterCount > \count($slugOrder)) {
+            $counterCount = \count($slugOrder);
+        }
+
         $boundaries = $this->computeBoundaries($inputPath, $fileSize, $workerCount);
 
         $mergedBuckets = $this->collectBucketsFromWorkers(
@@ -33,7 +46,6 @@ final class Parser
             $mergedBuckets,
             $slugOrder,
             $dateJsonPrefix,
-            $dateCount,
             $counterCount,
         );
     }
@@ -81,26 +93,36 @@ final class Parser
         $dateId = 0;
 
         $daysInMonth = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        $monthStrings = [];
+        for ($month = 1; $month <= 12; $month++) {
+            $monthStrings[$month] = $month < 10 ? '0' . $month : (string) $month;
+        }
+
+        $dayStrings = [];
+        for ($day = 1; $day <= 31; $day++) {
+            $dayStrings[$day] = $day < 10 ? '0' . $day : (string) $day;
+        }
 
         for ($year = 2021; $year <= 2026; $year++) {
-            $isLeapYear = ($year % 4 === 0 && ($year % 100 !== 0 || $year % 400 === 0));
+            $yy = $year - 2000;
+            $yyString = $yy < 10 ? '0' . $yy : (string) $yy;
+            $yearString = (string) $year;
 
             for ($month = 1; $month <= 12; $month++) {
                 $days = $daysInMonth[$month];
-                if ($month === 2 && $isLeapYear) {
+                if ($month === 2 && $year === 2024) {
                     $days = 29;
                 }
 
-                for ($day = 1; $day <= $days; $day++) {
-                    $yy = $year - 2000;
+                $monthString = $monthStrings[$month];
 
-                    $dateKey = ($yy < 10 ? '0' : '') . $yy
-                        . '-' . ($month < 10 ? '0' : '') . $month
-                        . '-' . ($day < 10 ? '0' : '') . $day;
+                for ($day = 1; $day <= $days; $day++) {
+                    $dayString = $dayStrings[$day];
+                    $dateKey = $yyString . '-' . $monthString . '-' . $dayString;
 
                     $dateToBinaryId[$dateKey] = \chr($dateId & 0xFF) . \chr($dateId >> 8);
                     $dateJsonPrefix[$dateId] = '        "'
-                        . \sprintf('%04d-%02d-%02d', $year, $month, $day)
+                        . $yearString . '-' . $monthString . '-' . $dayString
                         . '": ';
 
                     $dateId++;
@@ -116,6 +138,10 @@ final class Parser
      */
     private function computeBoundaries(string $inputPath, int $fileSize, int $workerCount): array
     {
+        if ($workerCount <= 1) {
+            return [0, $fileSize];
+        }
+
         $boundaries = [0];
 
         $handle = \fopen($inputPath, 'rb');
@@ -148,6 +174,17 @@ final class Parser
         array $slugIndexByKey,
         array $dateToBinaryId,
     ): array {
+        if ($workerCount === 1) {
+            return $this->parseWorkerSegment(
+                $inputPath,
+                $boundaries[0],
+                $boundaries[1],
+                $chunkBytes,
+                $slugOrder,
+                $dateToBinaryId,
+            );
+        }
+
         $tmpDir = \sys_get_temp_dir();
         $pidToWorker = [];
 
@@ -165,7 +202,9 @@ final class Parser
                 );
 
                 $encoded = $this->encodeWorkerBuckets($buckets, $slugIndexByKey);
-                \file_put_contents($tmpDir . '/parser_w' . $workerIndex, $encoded);
+                if ($encoded !== '') {
+                    \file_put_contents($tmpDir . '/parser_w' . $workerIndex, $encoded);
+                }
 
                 \posix_kill(\posix_getpid(), 9);
                 exit(0);
@@ -183,10 +222,24 @@ final class Parser
                 continue;
             }
 
+            if (!isset($pidToWorker[$pid])) {
+                continue;
+            }
+
             $workerIndex = $pidToWorker[$pid];
             $tmpFile = $tmpDir . '/parser_w' . $workerIndex;
+            if (!\is_file($tmpFile)) {
+                $completedWorkers++;
+                continue;
+            }
+
             $payload = \file_get_contents($tmpFile);
             \unlink($tmpFile);
+
+            if ($payload === false || $payload === '') {
+                $completedWorkers++;
+                continue;
+            }
 
             $this->mergeWorkerPayload($mergedBuckets, $slugOrder, $payload);
             $completedWorkers++;
@@ -209,6 +262,9 @@ final class Parser
         array $dateToBinaryId,
     ): array {
         $buckets = \array_fill_keys($slugOrder, '');
+        if ($start >= $end) {
+            return $buckets;
+        }
 
         $handle = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($handle, 0);
@@ -238,47 +294,56 @@ final class Parser
                 $remaining += $tailLength;
             }
 
-            $scanPos = 0;
-            $unrolledFence = $lastNewline - 600;
+            $slugPos = 25;
+            $searchPos = 29;
+            $lineFence = $lastNewline - 25;
+            $unrolledFence = $lineFence - 600;
 
-            if ($scanPos < $unrolledFence) {
+            if ($slugPos < $unrolledFence) {
                 do {
-                    $commaPos = \strpos($raw, ',', $scanPos + 29);
-                    $buckets[\substr($raw, $scanPos + 25, $commaPos - $scanPos - 25)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $scanPos = $commaPos + 27;
+                    $commaPos = \strpos($raw, ',', $searchPos);
+                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
+                    $slugPos = $commaPos + 52;
+                    $searchPos = $commaPos + 56;
 
-                    $commaPos = \strpos($raw, ',', $scanPos + 29);
-                    $buckets[\substr($raw, $scanPos + 25, $commaPos - $scanPos - 25)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $scanPos = $commaPos + 27;
+                    $commaPos = \strpos($raw, ',', $searchPos);
+                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
+                    $slugPos = $commaPos + 52;
+                    $searchPos = $commaPos + 56;
 
-                    $commaPos = \strpos($raw, ',', $scanPos + 29);
-                    $buckets[\substr($raw, $scanPos + 25, $commaPos - $scanPos - 25)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $scanPos = $commaPos + 27;
+                    $commaPos = \strpos($raw, ',', $searchPos);
+                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
+                    $slugPos = $commaPos + 52;
+                    $searchPos = $commaPos + 56;
 
-                    $commaPos = \strpos($raw, ',', $scanPos + 29);
-                    $buckets[\substr($raw, $scanPos + 25, $commaPos - $scanPos - 25)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $scanPos = $commaPos + 27;
+                    $commaPos = \strpos($raw, ',', $searchPos);
+                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
+                    $slugPos = $commaPos + 52;
+                    $searchPos = $commaPos + 56;
 
-                    $commaPos = \strpos($raw, ',', $scanPos + 29);
-                    $buckets[\substr($raw, $scanPos + 25, $commaPos - $scanPos - 25)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $scanPos = $commaPos + 27;
+                    $commaPos = \strpos($raw, ',', $searchPos);
+                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
+                    $slugPos = $commaPos + 52;
+                    $searchPos = $commaPos + 56;
 
-                    $commaPos = \strpos($raw, ',', $scanPos + 29);
-                    $buckets[\substr($raw, $scanPos + 25, $commaPos - $scanPos - 25)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $scanPos = $commaPos + 27;
-                } while ($scanPos < $unrolledFence);
+                    $commaPos = \strpos($raw, ',', $searchPos);
+                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
+                    $slugPos = $commaPos + 52;
+                    $searchPos = $commaPos + 56;
+                } while ($slugPos < $unrolledFence);
             }
 
-            if ($scanPos < $lastNewline) {
+            if ($slugPos < $lineFence) {
                 do {
-                    $commaPos = \strpos($raw, ',', $scanPos + 29);
+                    $commaPos = \strpos($raw, ',', $searchPos);
                     if ($commaPos === false || $commaPos > $lastNewline) {
                         break;
                     }
 
-                    $buckets[\substr($raw, $scanPos + 25, $commaPos - $scanPos - 25)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $scanPos = $commaPos + 27;
-                } while ($scanPos < $lastNewline);
+                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
+                    $slugPos = $commaPos + 52;
+                    $searchPos = $commaPos + 56;
+                } while ($slugPos < $lineFence);
             }
         } while ($remaining > 0);
 
@@ -312,6 +377,10 @@ final class Parser
      */
     private function mergeWorkerPayload(array &$mergedBuckets, array $slugOrder, string $payload): void
     {
+        if ($payload === '') {
+            return;
+        }
+
         $offset = 0;
         $payloadLength = \strlen($payload);
 
@@ -339,18 +408,61 @@ final class Parser
         array $mergedBuckets,
         array $slugOrder,
         array $dateJsonPrefix,
-        int $dateCount,
         int $counterCount,
     ): void {
+        $nonEmptySlugOrder = [];
+        foreach ($slugOrder as $slugKey) {
+            if ($mergedBuckets[$slugKey] !== '') {
+                $nonEmptySlugOrder[] = $slugKey;
+            }
+        }
+
+        if ($nonEmptySlugOrder === []) {
+            \file_put_contents($outputPath, "{}\n");
+            return;
+        }
+
+        $slugOrder = $nonEmptySlugOrder;
+        if ($counterCount > \count($slugOrder)) {
+            $counterCount = \count($slugOrder);
+        }
+
         $slugJsonHeaders = [];
         foreach ($slugOrder as $slugKey) {
             $slugJsonHeaders[$slugKey] = '    "\/blog\/' . $slugKey . '": {' . "\n";
         }
 
+        if ($counterCount === 1) {
+            $slugFragments = [];
+            foreach ($slugOrder as $slugKey) {
+                $packedDates = $mergedBuckets[$slugKey];
+                $counts = \array_count_values(\unpack('v*', $packedDates));
+                if (\count($counts) > 1) {
+                    \ksort($counts, SORT_NUMERIC);
+                }
+
+                $jsonFragment = $slugJsonHeaders[$slugKey];
+                $first = true;
+                foreach ($counts as $dateId => $count) {
+                    if (!$first) {
+                        $jsonFragment .= ",\n";
+                    }
+                    $jsonFragment .= $dateJsonPrefix[$dateId] . $count;
+                    $first = false;
+                }
+
+                $jsonFragment .= "\n    }";
+                $slugFragments[] = $jsonFragment;
+            }
+
+            \file_put_contents($outputPath, "{\n" . \implode(",\n", $slugFragments) . "\n}");
+            return;
+        }
+
         $counterPipes = $this->createCounterPipes($counterCount);
 
         $slugCount = \count($slugOrder);
-        $slugsPerCounter = (int) \ceil($slugCount / $counterCount);
+        $slugsPerCounter = intdiv($slugCount + $counterCount - 1, $counterCount);
         $counterPids = [];
 
         for ($counterIndex = 0; $counterIndex < $counterCount; $counterIndex++) {
@@ -371,12 +483,10 @@ final class Parser
                 for ($slugPos = $rangeStart; $slugPos < $rangeEnd; $slugPos++) {
                     $slugKey = $slugOrder[$slugPos];
                     $packedDates = $mergedBuckets[$slugKey];
-                    if ($packedDates === '') {
-                        continue;
-                    }
-
                     $counts = \array_count_values(\unpack('v*', $packedDates));
-                    \ksort($counts, SORT_NUMERIC);
+                    if (\count($counts) > 1) {
+                        \ksort($counts, SORT_NUMERIC);
+                    }
                     $jsonFragment = $slugJsonHeaders[$slugKey];
                     $first = true;
                     foreach ($counts as $dateId => $count) {
@@ -392,8 +502,10 @@ final class Parser
                     $slugFragments[] = $jsonFragment;
                 }
 
-                $fragment = \implode(",\n", $slugFragments);
-                $this->writeSocketFully($counterPipes[$counterIndex][1], $fragment);
+                if ($slugFragments !== []) {
+                    $fragment = \implode(",\n", $slugFragments);
+                    $this->writeSocketFully($counterPipes[$counterIndex][1], $fragment);
+                }
                 \fclose($counterPipes[$counterIndex][1]);
 
                 \posix_kill(\posix_getpid(), 9);
@@ -465,6 +577,9 @@ final class Parser
     {
         $written = 0;
         $payloadLength = \strlen($payload);
+        if ($payloadLength === 0) {
+            return;
+        }
 
         while ($written < $payloadLength) {
             $bytes = \fwrite($socket, \substr($payload, $written, 131072));
