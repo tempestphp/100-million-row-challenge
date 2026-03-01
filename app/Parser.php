@@ -23,7 +23,6 @@ use function pcntl_wait;
 use function pack;
 use function unpack;
 use function chr;
-use function ord;
 use function array_fill;
 use function array_count_values;
 use function implode;
@@ -79,15 +78,19 @@ final class Parser
                     $inputPath, $offsets[$w], $offsets[$w + 1],
                     $slugMap, $dateBin, $slugCount, $numDates,
                 );
-                $sparse = '';
+                $idxBin = '';
+                $cntBin = '';
+                $nEntries = 0;
                 for ($sid = 0; $sid < $slugCount; $sid++) {
                     if ($bins[$sid] === '') continue;
                     $base = $sid * $numDates;
                     foreach (array_count_values(unpack('v*', $bins[$sid])) as $did => $n) {
-                        $sparse .= pack('Vv', $base + $did, $n);
+                        $idxBin .= pack('V', $base + $did);
+                        $cntBin .= pack('v', $n);
+                        $nEntries++;
                     }
                 }
-                file_put_contents("{$tmpDir}/rc_{$pid}_{$w}", $sparse);
+                file_put_contents("{$tmpDir}/rc_{$pid}_{$w}", pack('V', $nEntries) . $idxBin . $cntBin);
                 \posix_kill(\posix_getpid(), 9);
             }
             $childMap[$childPid] = $w;
@@ -118,13 +121,11 @@ final class Parser
             $file = "{$tmpDir}/rc_{$pid}_{$w}";
             $raw = file_get_contents($file);
             unlink($file);
-            $len = strlen($raw);
-            $off = 0;
-            while ($off < $len) {
-                $idx = ord($raw[$off]) | (ord($raw[$off + 1]) << 8) | (ord($raw[$off + 2]) << 16) | (ord($raw[$off + 3]) << 24);
-                $cnt = ord($raw[$off + 4]) | (ord($raw[$off + 5]) << 8);
-                $result[$idx] += $cnt;
-                $off += 6;
+            $n = unpack('V', $raw)[1];
+            $idxArr = unpack("V{$n}", $raw, 4);
+            $cntArr = unpack("v{$n}", $raw, 4 + $n * 4);
+            for ($i = 1; $i <= $n; $i++) {
+                $result[$idxArr[$i]] += $cntArr[$i];
             }
             $pending--;
         }
@@ -219,7 +220,7 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1000;
+            $fence = $lastNl - 900;
 
             if ($p < $fence) {
                 do {
