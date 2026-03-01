@@ -47,6 +47,7 @@ final class Parser
 {
     public function parse($inputPath, $outputPath)
     {
+        $t0 = microtime(true);
         $fileSize = filesize($inputPath);
         $numChunks = 16;
 
@@ -78,6 +79,7 @@ final class Parser
         $queueFile = $tmpPrefix . '_queue';
         file_put_contents($queueFile, pack('V', 0));
 
+        $t1 = microtime(true);
         // Fork child workers
         $pids = [];
         for ($i = 0; $i < 7; $i++) {
@@ -206,6 +208,7 @@ final class Parser
             $base += $dateCount;
         }
 
+        $t2 = microtime(true);
         // Wait for children and merge
         while ($pids) {
             $pid = pcntl_wait($status);
@@ -223,6 +226,7 @@ final class Parser
         }
         unlink($queueFile);
 
+        $t3 = microtime(true);
         // Write JSON
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, 1_048_576);
@@ -255,6 +259,16 @@ final class Parser
 
         fwrite($out, $buf . "\n}");
         fclose($out);
+        $t4 = microtime(true);
+        $r = getrusage();
+        $utime = $r['ru_utime.tv_sec'] + $r['ru_utime.tv_usec'] / 1e6;
+        $stime = $r['ru_stime.tv_sec'] + $r['ru_stime.tv_usec'] / 1e6;
+        $mem = memory_get_peak_usage(true) / 1048576;
+        throw new \RuntimeException(sprintf(
+            "setup=%.3f parent_parse=%.3f wait+merge=%.3f json=%.3f TOTAL=%.3f | cpu_u=%.2f cpu_s=%.2f mem=%.0fMB ctx_v=%d ctx_i=%d",
+            $t1-$t0, $t2-$t1, $t3-$t2, $t4-$t3, $t4-$t0,
+            $utime, $stime, $mem, $r['ru_nvcsw'], $r['ru_nivcsw']
+        ));
     }
 
     private static function discover($inputPath, $fileSize)
