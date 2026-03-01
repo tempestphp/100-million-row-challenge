@@ -6,10 +6,11 @@ namespace App;
 
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    public static function parse(string $inputPath, string $outputPath): void
     {
         $numWorkers = 10;
-        $chunkSize  = 131072;
+        $chunkSize = 131072;
+        $numCounters = 8;
 
         $slugToIdx = [];
         $slugCount = 0;
@@ -136,18 +137,15 @@ final class Parser
                         } while ($pos < $lastNl);
                     }
                 } while ($remaining > 0);
-                \fclose($fh);
 
                 $out = '';
                 foreach ($buckets as $slug => $packed) {
                     if ($packed === '') continue;
                     $out .= \pack('vV', $slugToIdx[$slug], \strlen($packed)) . $packed;
                 }
-                unset($buckets);
 
                 \file_put_contents($tmpDir . '/parser_w' . $w, $out);
                 \posix_kill(\posix_getpid(), 9);
-                exit(0);
             }
             $pidToWorker[$pid] = $w;
         }
@@ -180,7 +178,6 @@ final class Parser
             $drained++;
         } while ($drained < $numWorkers);
 
-        $numCounters = 8;
         $numSlugs = \count($slugOrderList);
         $slugsPerCounter = (int)\ceil($numSlugs / $numCounters);
 
@@ -238,7 +235,6 @@ final class Parser
                 }
                 \fclose($sock);
                 \posix_kill(\posix_getpid(), 9);
-                exit(0);
             }
             $countPids[] = $pid;
         }

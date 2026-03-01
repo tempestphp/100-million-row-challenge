@@ -1,5 +1,10 @@
 #!/usr/bin/env php
 <?php
+if (($argv[1] ?? null) === 'data:parse' && isset($argv[2], $argv[3])) {
+    require __DIR__ . '/app/Parser.php';
+    App\Parser::parse(\substr($argv[2], 13), \substr($argv[3], 14));
+    exit(0);
+}
 
 use Tempest\Console\ConsoleApplication;
 
