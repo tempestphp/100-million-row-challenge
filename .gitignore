@@ -11,4 +11,3 @@ test-data-actual.json
 .env
 .DS_Store
 .benchmark
-data/test-data.json
