@@ -50,11 +50,11 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int READ_BLOCK_BYTES = 163_840;
+    private const int READ_BLOCK_BYTES = 65_536;
     private const int SLUG_SCAN_BYTES   = 2_097_152;
     private const int URL_PREFIX_BYTES  = 25;
     private const int PROCESS_COUNT     = 8;
-    private const int QUEUE_CHUNKS      = 16;
+    private const int QUEUE_CHUNKS      = 64;
 
     public function parse($inputPath, $outputPath)
     {
@@ -257,7 +257,8 @@ final class Parser
         $sem         = null;
         $queueFile   = null;
 
-        if ($canUseSem) {
+        $skipSem = (PHP_OS_FAMILY === 'Darwin') || (\getenv('PARSER_FORCE_FLOCK') === '1');
+        if ($canUseSem && !$skipSem) {
             set_error_handler(null);
             $sem      = @sem_get($semKey, 1, 0644, true);
             $queueShm = @shmop_open($queueShmKey, 'c', 0644, 4);
