@@ -17,6 +17,10 @@ final class DataValidateCommand
         $actualPath = __DIR__ . '/../../data/test-data-actual.json';
         $expectedPath = __DIR__ . '/../../data/test-data-expected.json';
 
+        if (is_file($actualPath)) {
+            unlink($actualPath);
+        }
+
         $this->console->call('data:parse', [$inputPath, $actualPath]);
 
         $actual = file_get_contents($actualPath);
