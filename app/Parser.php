@@ -13,6 +13,7 @@ use function fgets;
 use function file_get_contents;
 use function file_put_contents;
 use function filesize;
+use function flock;
 use function fopen;
 use function fread;
 use function fseek;
@@ -46,6 +47,8 @@ use function sys_get_temp_dir;
 use function unlink;
 use function unpack;
 
+use const LOCK_EX;
+use const LOCK_UN;
 use const SEEK_CUR;
 
 final class Parser
@@ -183,6 +186,7 @@ final class Parser
             file_put_contents($queueFile, pack('V', 0));
         }
 
+        $n        = $pathCount * $dateCount;
         $childMap = [];
 
         for ($w = 0; $w < $numWorkers - 1; $w++) {
@@ -251,7 +255,6 @@ final class Parser
         fclose($fh);
 
         $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
-        $n      = $pathCount * $dateCount;
 
         while ($childMap) {
             $pid = pcntl_wait($status);
@@ -340,9 +343,17 @@ final class Parser
             }
 
             $p     = $prefixLen;
-            $fence = $lastNl - 594;
+            $fence = $lastNl - 792;
 
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
