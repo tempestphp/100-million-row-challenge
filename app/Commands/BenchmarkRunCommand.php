@@ -5,9 +5,7 @@ namespace App\Commands;
 use Tempest\Cache\Cache;
 use Tempest\Console\ConsoleCommand;
 use Tempest\Console\HasConsole;
-use Tempest\DateTime\DateTime;
 use Tempest\DateTime\Duration;
-use Tempest\DateTime\FormatPattern;
 use Tempest\HttpClient\HttpClient;
 use Throwable;
 use function Tempest\env;
@@ -352,7 +350,8 @@ final class BenchmarkRunCommand
         );
 
         $command = sprintf(
-            "hyperfine --warmup 0 --runs 1 --show-output --export-json %s 'cd %s && %s'",
+            "hyperfine --warmup 0 --runs 1 --show-output --prepare=%s --export-json %s 'cd %s && %s'",
+            escapeshellarg('rm -f ' . $actualPath . ' 2> /dev/null'),
             escapeshellarg($resultFile),
             escapeshellarg($benchmarkDir),
             $parseCommand,
@@ -394,7 +393,8 @@ final class BenchmarkRunCommand
         if ($meanTime < 20) {
             // Second run for fast PRs
             $command = sprintf(
-                "hyperfine --warmup 2 --runs 5 --export-json %s 'cd %s && %s'",
+                "hyperfine --warmup 2 --runs 5 --prepare=%s --export-json %s 'cd %s && %s'",
+                escapeshellarg('rm -f ' . $actualPath . ' 2> /dev/null'),
                 escapeshellarg($resultFile),
                 escapeshellarg($benchmarkDir),
                 $parseCommand,
