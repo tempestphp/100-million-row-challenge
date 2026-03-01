@@ -2,11 +2,10 @@
 
 namespace App;
 
-use App\Commands\Visit;
 use function array_count_values;
 use function array_fill;
+use function array_flip;
 use function chr;
-use function count;
 use function fclose;
 use function fgets;
 use function file_get_contents;
@@ -37,7 +36,6 @@ use const WNOHANG;
 
 final class Parser
 {
-    private const int READ_CHUNK = 163_840;
 
     public static function parse($inputPath, $outputPath)
     {
@@ -71,42 +69,277 @@ final class Parser
             $dateIdChars[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
 
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, 2_097_152); // discovery 2MB
-        fclose($handle);
-
-        $pathIds = [];
-        $paths = [];
-        $pathCount = 0;
-        $pos = 0;
-        $lastNl = strrpos($raw, "\n");
-
-        while ($pos < $lastNl) {
-            $nlPos = strpos($raw, "\n", $pos + 52);
-
-            $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
-            if (isset($pathIds[$slug])) {
-                $pos = $nlPos + 1;
-                continue;
-            }
-            $pathIds[$slug] = $pathCount;
-            $paths[$pathCount] = $slug;
-            $pathCount++;
-
-            $pos = $nlPos + 1;
-        }
-        unset($raw);
-
-        foreach (Visit::all() as $visit) {
-            $slug = substr($visit->uri, 25);
-            if (isset($pathIds[$slug])) {
-                continue;
-            }
-            $pathIds[$slug] = $pathCount;
-            $paths[$pathCount] = $slug;
-            $pathCount++;
-        }
+        $paths = [
+                     'stitcher-alpha-5',
+                     'its-your-fault',
+                     'dont-get-stuck',
+                     'attributes-in-php-8',
+                     'game-changing-editions',
+                     'php-preload-benchmarks',
+                     'why-we-need-named-params-in-php',
+                     'minor-versions-breaking-changes',
+                     'preloading-in-php-74',
+                     'php-81-upgrade-mac',
+                     'opinion-driven-design',
+                     'rational-thinking',
+                     'php-81-performance-in-real-life',
+                     'php-enums-before-php-81',
+                     'php-version-stats-january-2023',
+                     'all-i-want-for-christmas',
+                     'php-81-in-8-code-blocks',
+                     'impact-charts',
+                     'solid-interfaces-and-final-rant-with-brent',
+                     'new-in-php-84',
+                     'a-syntax-highlighter-that-doesnt-suck',
+                     'jit-in-real-life-web-applications',
+                     'dont-write-your-own-framework',
+                     'websites-like-star-wars',
+                     'you-should',
+                     'php-reimagined',
+                     'php-version-stats-july-2023',
+                     'tackling_responsive_images-part_2',
+                     'array-find-in-php-84',
+                     'phpstorm-performance-issues-on-osx',
+                     'flooded-rss',
+                     'what-is-array-plus-in-php',
+                     'phpstorm-scopes',
+                     'guest-posts',
+                     'php-82-in-8-code-blocks',
+                     'braille-and-the-history-of-software',
+                     'things-considered-harmful',
+                     'strategies',
+                     'dont-be-clever',
+                     'structuring-unstructured-data',
+                     'upgrading-to-php-82',
+                     'event-driven-php',
+                     'theoretical-engineers',
+                     'birth-and-death-of-a-framework',
+                     'rfc-vote',
+                     'improved-lazy-loading',
+                     'why-we-need-multi-line-short-closures-in-php',
+                     'php-in-2021-video',
+                     'my-ikea-clock',
+                     'a-project-at-spatie',
+                     'php-8-nullsafe-operator',
+                     'my-journey-into-event-sourcing',
+                     'responsive-images-as-css-background',
+                     'php-version-stats-july-2024',
+                     'acquisition-by-giants',
+                     'the-framework-that-gets-out-of-your-way',
+                     'laravel-queueable-actions',
+                     'an-event-driven-mindset',
+                     'we-dont-need-runtime-type-checks',
+                     'how-i-plan',
+                     'why-light-themes-are-better-according-to-science',
+                     'new-in-php-85',
+                     'have-you-thought-about-casing',
+                     'php-version-stats-january-2024',
+                     'i-dont-code-the-way-i-used-to',
+                     'performance-101-building-the-better-web',
+                     'tempest-discovery-explained',
+                     'array-chunk-in-php',
+                     'front-line-php',
+                     'phpstorm-performance',
+                     'a-letter-to-the-php-team',
+                     'generics-in-php-2',
+                     'dependency-injection-for-beginners',
+                     'process-forks',
+                     'php-8-in-8-code-blocks',
+                     'a-new-major-version-of-laravel-event-sourcing',
+                     'named-arguments-and-variadic-functions',
+                     'php-version-stats-january-2025',
+                     'share-a-blog-assertchris-io',
+                     'ai-induced-skepticism',
+                     'can-i-translate-your-blog',
+                     'starting-a-newsletter',
+                     'things-i-wish-i-knew',
+                     're-on-using-psr-abstractions',
+                     'static_sites_vs_caching',
+                     'how-to-be-right-on-the-internet',
+                     'php-annotated',
+                     'mysql-show-foreign-key-errors',
+                     'share-a-blog-sebastiandedeyne-com',
+                     'mysql-import-json-binary-character-set',
+                     'thoughts-on-event-sourcing',
+                     'differences',
+                     'php-jit',
+                     'php-74-in-7-code-blocks',
+                     'mysql-query-logging',
+                     'generics-in-php-1',
+                     'uncertainty-doubt-and-static-analysis',
+                     'new-in-php-73',
+                     'code-folding',
+                     'uses',
+                     'eloquent-mysql-views',
+                     'pipe-operator-in-php-85',
+                     'twitter-home-made-me-miserable',
+                     'why-curly-brackets-go-on-new-lines',
+                     'type-system-in-php-survey-results',
+                     'twitter-exit',
+                     'the-ikea-effect',
+                     'a-year-of-property-hooks',
+                     'which-editor-to-choose',
+                     'craftsmen-know-their-tools',
+                     'parallel-php',
+                     'php-in-2020',
+                     'a-simple-approach-to-static-generation',
+                     'what-about-config-builders',
+                     'road-to-php-82',
+                     'fibers-with-a-grain-of-salt',
+                     'cloning-readonly-properties-in-php-81',
+                     'why-do-i-write',
+                     'share-a-blog-codingwriter-com',
+                     'a-storm-in-a-glass-of-water',
+                     'where-a-curly-bracket-belongs',
+                     'my-10-favourite-php-functions',
+                     'new-with-parentheses-php-84',
+                     'unfair-advantage',
+                     'extends-vs-implements',
+                     'php-in-2024',
+                     'new-in-php-83',
+                     'the-case-for-transpiled-generics',
+                     'i-dont-know',
+                     'what-are-objects-anyway-rant-with-brent',
+                     'building-a-custom-language-in-tempest-highlight',
+                     'analytics-for-developers',
+                     'enums-without-enums',
+                     'optimistic-or-realistic-estimates',
+                     'php-version-stats-january-2022',
+                     'passion-projects',
+                     'vendor-locked',
+                     'php-verse-2025',
+                     'limited-by-committee',
+                     'constructor-promotion-in-php-8',
+                     'building-a-framework',
+                     'service-locator-anti-pattern',
+                     'tagging-tempest-livestream',
+                     'bitwise-booleans-in-php',
+                     'a-programmers-cognitive-load',
+                     'dealing-with-deprecations',
+                     'new-in-php-82',
+                     'generics-in-php-3',
+                     'annotations',
+                     'php-enums',
+                     'you-cannot-find-me-on-mastodon',
+                     'sponsoring-open-source',
+                     'request-objects-in-tempest',
+                     'php-82-upgrade-mac',
+                     'new-in-php-8',
+                     'php-performance-across-versions',
+                     'stitcher-alpha-4',
+                     'php-in-2021',
+                     '11-million-rows-in-seconds',
+                     'php-86-partial-function-application',
+                     'things-dependency-injection-is-not-about',
+                     'generics-in-php-video',
+                     'organise-by-domain',
+                     'sponsors',
+                     'liskov-and-type-safety',
+                     'laravel-view-models',
+                     'what-about-request-classes',
+                     'reducing-code-motion',
+                     'php-8-jit-setup',
+                     'php-8-named-arguments',
+                     'asynchronous-php',
+                     'tagged-singletons',
+                     'php-enum-style-guide',
+                     'optimised-uuids-in-mysql',
+                     'its-all-just-text',
+                     'what-php-can-be',
+                     'a-vocal-minority',
+                     'php-8-match-or-switch',
+                     'html-5-in-php-84',
+                     'php-generics-and-why-we-need-them',
+                     'light-colour-schemes',
+                     'mastering-key-bindings',
+                     'readonly-classes-in-php-82',
+                     'what-event-sourcing-is-not-about',
+                     'responsive-images-done-right',
+                     'short-closures-in-php',
+                     'evolution-of-a-php-object',
+                     'what-a-good-pr-looks-like',
+                     'honesty',
+                     'starting-a-podcast',
+                     'php-reimagined-part-2',
+                     'php-2026',
+                     'typed-properties-in-php-74',
+                     'announcing-aggregate',
+                     'goodbye',
+                     'simplest-plugin-support',
+                     'phpstorm-tips-for-power-users',
+                     'stitcher-turns-5',
+                     'array-merge-vs + ',
+                     'comparing-dates',
+                     'php-81-new-in-initializers',
+                     'acronyms',
+                     'my-wishlist-for-php-in-2026',
+                     'php-84-at-least',
+                     'object-oriented-generators',
+                     'visual-perception-of-code',
+                     'things-i-learned-writing-a-fiction-novel',
+                     'shorthand-comparisons-in-php',
+                     'attribute-usage-in-top-php-packages',
+                     'image_optimizers',
+                     'php-in-2019',
+                     'not-optional',
+                     'stitcher-beta-1',
+                     'php-version-stats-july-2022',
+                     'laravel-custom-relation-classes',
+                     'deprecated-dynamic-properties-in-php-82',
+                     'open-source-strategies',
+                     'slashdash',
+                     'laravel-has-many-through',
+                     'php-in-2022',
+                     'deprecating-spatie-dto',
+                     'light-colour-schemes-are-better',
+                     'tackling_responsive_images-part_1',
+                     'merging-multidimensional-arrays-in-php',
+                     'php-version-stats-july-2021',
+                     'php-8-before-and-after',
+                     'the-road-to-php',
+                     'stitcher-beta-2',
+                     'generics-in-php-4',
+                     'combining-event-sourcing-and-stateful-systems',
+                     'array-objects-with-fixed-types',
+                     'override-in-php-83',
+                     'php-74-upgrade-mac',
+                     'php-8-upgrade-mac',
+                     'testing-patterns',
+                     'array-destructuring-with-list-in-php',
+                     'php-73-upgrade-mac',
+                     'when-i-lost-a-few-hundred-leads',
+                     'is-a-or-acts-as',
+                     'unsafe-sql-functions-in-laravel',
+                     'php-81-readonly-properties',
+                     'php-81-before-and-after',
+                     'improvements-on-laravel-nova',
+                     'thank-you-kinsta',
+                     'php-version-stats-june-2025',
+                     'new-in-php-74',
+                     'type-system-in-php-survey',
+                     'readonly-or-private-set',
+                     'share-a-blog-betterwebtype-com',
+                     'laravel-view-models-vs-view-composers',
+                     'tests-and-types',
+                     'clean-and-minimalistic-phpstorm',
+                     'processing-11-million-rows',
+                     'tabs-are-better',
+                     'phpstorm-performance-october-2018',
+                     'static-websites-with-tempest',
+                     'php-in-2023',
+                     'abstract-resources-in-laravel-nova',
+                     'a-letter-to-the-php-team-reply-to-joe',
+                     'procedurally-generated-game-in-php',
+                     'dealing-with-dependencies',
+                     'the-web-in-2045',
+                     'whats-your-motivator',
+                     'thoughts-on-asymmetric-visibility',
+                     'new-in-php-81',
+                     'route-attributes',
+                     'builders-and-architects-two-types-of-programmers',
+                     'cloning-readonly-properties-in-php-83',
+                 ];
+        $pathIds = array_flip($paths);
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
@@ -128,7 +361,7 @@ final class Parser
             if ($pid === 0) {
                 $wCounts = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $pathIds, $dateIdChars, $pathCount, $dateCount,
+                    $pathIds, $dateIdChars,
                 );
                 file_put_contents($tmpFile, pack('v*', ...$wCounts));
                 exit(0);
@@ -138,7 +371,7 @@ final class Parser
 
         $counts = self::parseRange(
             $inputPath, $boundaries[9], $boundaries[10],
-            $pathIds, $dateIdChars, $pathCount, $dateCount,
+            $pathIds, $dateIdChars,
         );
 
         $pending = count($childMap);
@@ -158,22 +391,21 @@ final class Parser
             $pending--;
         }
 
-        self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
+        self::writeJson($outputPath, $counts, $paths, $dates);
     }
 
     private static function parseRange(
         $inputPath, $start, $end,
         $pathIds, $dateIdChars,
-        $pathCount, $dateCount,
     ) {
-        $buckets = array_fill(0, $pathCount, '');
+        $buckets = array_fill(0, 268, '');
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $toRead = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
+            $toRead = $remaining > 163_840 ? 163_840 : $remaining;
             $chunk = fread($handle, $toRead);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
@@ -225,10 +457,10 @@ final class Parser
 
         fclose($handle);
 
-        $counts = array_fill(0, $pathCount * $dateCount, 0);
-        for ($p = 0; $p < $pathCount; $p++) {
+        $counts = array_fill(0, 587_188, 0);
+        for ($p = 0; $p < 268; $p++) {
             if ($buckets[$p] === '') continue;
-            $offset = $p * $dateCount;
+            $offset = $p * 2191;
             foreach (array_count_values(unpack('v*', $buckets[$p])) as $did => $count) {
                 $counts[$offset + $did] += $count;
             }
@@ -239,30 +471,29 @@ final class Parser
 
     private static function writeJson(
         $outputPath, $counts, $paths,
-        $dates, $dateCount,
+        $dates,
     ) {
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, 1_048_576);
         fwrite($out, '{');
 
         $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
+        for ($d = 0; $d < 2191; $d++) {
             $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
         }
 
-        $pathCount = count($paths);
         $escapedPaths = [];
-        for ($p = 0; $p < $pathCount; $p++) {
+        for ($p = 0; $p < 268; $p++) {
             $escapedPaths[$p] = "\"\\/blog\\/" . str_replace('/', '\\/', $paths[$p]) . "\"";
         }
 
         $firstPath = true;
 
-        for ($p = 0; $p < $pathCount; $p++) {
-            $base = $p * $dateCount;
+        for ($p = 0; $p < 268; $p++) {
+            $base = $p * 2191;
             $dateEntries = [];
 
-            for ($d = 0; $d < $dateCount; $d++) {
+            for ($d = 0; $d < 2191; $d++) {
                 $count = $counts[$base + $d];
                 if ($count === 0) continue;
                 $dateEntries[] = $datePrefixes[$d] . $count;
