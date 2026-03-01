@@ -13,15 +13,17 @@ use function fgets;
 use function file_put_contents;
 use function fopen;
 use function fread;
+use function gc_disable;
 use function json_encode;
 use function preg_match_all;
 use function str_ends_with;
 
 final class Parser
 {
-    private const int READ_CHUNK_SIZE = 1024 * 1024 * 4;
+    private const int READ_CHUNK_SIZE = 1024 * 1024;
 
-    private const string REGEX_LINE_PARSER = ";^https://stitcher.io(/[^,]+),(.{10});";
+    private const string REGEX_LINE_PARSER = ";^https://stitcher.io(/[^,]+),(.{10});m";
+
     /**
      * @var false|resource
      */
@@ -32,7 +34,7 @@ final class Parser
      */
     public function parse(string $inputPath, string $outputPath): void
     {
-        \gc_disable();
+        gc_disable();
         try {
             $toEncode = [];
             ($this->inputHandle = fopen($inputPath, "r")) || throw new Exception("Couldn't open input file");
