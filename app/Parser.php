@@ -23,8 +23,10 @@ use function pcntl_wait;
 use function pack;
 use function unpack;
 use function chr;
+use function ord;
 use function array_fill;
 use function array_count_values;
+use function implode;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -39,8 +41,8 @@ use const WNOHANG;
 
 final class Parser
 {
-    private const int WORKERS = 12;
-    private const int CHUNK_SIZE = 163_840;
+    private const int WORKERS = 10;
+    private const int CHUNK_SIZE = 131_072;
 
     public static function parse(string $inputPath, string $outputPath): void
     {
@@ -73,20 +75,37 @@ final class Parser
             $childPid = pcntl_fork();
             if ($childPid === 0) {
                 ini_set('memory_limit', '-1');
-                $result = self::processChunk(
+                $bins = self::processChunk(
                     $inputPath, $offsets[$w], $offsets[$w + 1],
                     $slugMap, $dateBin, $slugCount, $numDates,
                 );
-                file_put_contents("{$tmpDir}/rc_{$pid}_{$w}", pack('v*', ...$result));
-                exit(0);
+                $sparse = '';
+                for ($sid = 0; $sid < $slugCount; $sid++) {
+                    if ($bins[$sid] === '') continue;
+                    $base = $sid * $numDates;
+                    foreach (array_count_values(unpack('v*', $bins[$sid])) as $did => $n) {
+                        $sparse .= pack('Vv', $base + $did, $n);
+                    }
+                }
+                file_put_contents("{$tmpDir}/rc_{$pid}_{$w}", $sparse);
+                \posix_kill(\posix_getpid(), 9);
             }
             $childMap[$childPid] = $w;
         }
 
-        $result = self::processChunk(
+        $bins = self::processChunk(
             $inputPath, $offsets[self::WORKERS - 1], $offsets[self::WORKERS],
             $slugMap, $dateBin, $slugCount, $numDates,
         );
+        $result = array_fill(0, $slugCount * $numDates, 0);
+        for ($sid = 0; $sid < $slugCount; $sid++) {
+            if ($bins[$sid] === '') continue;
+            $base = $sid * $numDates;
+            foreach (array_count_values(unpack('v*', $bins[$sid])) as $did => $n) {
+                $result[$base + $did] = $n;
+            }
+        }
+        unset($bins);
 
         // Merge child results as they finish (WNOHANG)
         $pending = self::WORKERS - 1;
@@ -97,11 +116,15 @@ final class Parser
             }
             $w = $childMap[$reaped];
             $file = "{$tmpDir}/rc_{$pid}_{$w}";
-            $partial = unpack('v*', file_get_contents($file));
+            $raw = file_get_contents($file);
             unlink($file);
-            $j = 0;
-            foreach ($partial as $v) {
-                $result[$j++] += $v;
+            $len = strlen($raw);
+            $off = 0;
+            while ($off < $len) {
+                $idx = ord($raw[$off]) | (ord($raw[$off + 1]) << 8) | (ord($raw[$off + 2]) << 16) | (ord($raw[$off + 3]) << 24);
+                $cnt = ord($raw[$off + 4]) | (ord($raw[$off + 5]) << 8);
+                $result[$idx] += $cnt;
+                $off += 6;
             }
             $pending--;
         }
@@ -118,7 +141,7 @@ final class Parser
 
         $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
-        $sample = fread($fh, min($fileSize, 204_800));
+        $sample = fread($fh, min($fileSize, 2_097_152));
         fclose($fh);
 
         $lastNl = strrpos($sample, "\n");
@@ -169,10 +192,6 @@ final class Parser
         return [$slugMap, $slugOrder, $slugCount, $dateBin, $dateStr, $numDates];
     }
 
-    /**
-     * Parse a file chunk. Accumulates date tokens per path, then batch-counts
-     * each path's buffer and fills a flat count tally [pathId * numDates + dateId].
-     */
     private static function processChunk(
         string $path, int $start, int $end,
         array $slugMap, array $dateBin,
@@ -200,24 +219,42 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 500;
+            $fence = $lastNl - 1000;
 
-            while ($p < $fence) {
-                $c = strpos($chunk, ',', $p);
-                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
-                $p = $c + 52;
+            if ($p < $fence) {
+                do {
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
 
-                $c = strpos($chunk, ',', $p);
-                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
-                $p = $c + 52;
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
 
-                $c = strpos($chunk, ',', $p);
-                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
-                $p = $c + 52;
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
 
-                $c = strpos($chunk, ',', $p);
-                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
-                $p = $c + 52;
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
+
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
+
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
+
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
+
+                    $c = strpos($chunk, ',', $p);
+                    $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                    $p = $c + 52;
+                } while ($p < $fence);
             }
 
             while ($p < $lastNl) {
@@ -230,17 +267,7 @@ final class Parser
 
         fclose($fh);
 
-        // Tally: per-path date buffers -> flat count tally
-        $tally = array_fill(0, $slugCount * $numDates, 0);
-        for ($sid = 0; $sid < $slugCount; $sid++) {
-            if ($bins[$sid] === '') continue;
-            $base = $sid * $numDates;
-            foreach (array_count_values(unpack('v*', $bins[$sid])) as $did => $n) {
-                $tally[$base + $did] = $n;
-            }
-        }
-
-        return $tally;
+        return $bins;
     }
 
     private static function writeOutput(
@@ -266,19 +293,17 @@ final class Parser
 
         for ($p = 0; $p < $slugCount; $p++) {
             $base = $p * $numDates;
-            $body = '';
-            $sep = '';
+            $dateEntries = [];
 
             for ($d = 0; $d < $numDates; $d++) {
                 $n = $result[$base + $d];
                 if ($n === 0) continue;
-                $body .= $sep . $jsonDate[$d] . $n;
-                $sep = ",\n";
+                $dateEntries[] = $jsonDate[$d] . $n;
             }
 
-            if ($body === '') continue;
+            if ($dateEntries === []) continue;
 
-            fwrite($fp, ($first ? '' : ',') . "\n    " . $jsonSlug[$p] . ": {\n" . $body . "\n    }");
+            fwrite($fp, ($first ? '' : ',') . "\n    " . $jsonSlug[$p] . ": {\n" . implode(",\n", $dateEntries) . "\n    }");
             $first = false;
         }
 
