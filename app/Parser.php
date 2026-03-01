@@ -20,19 +20,29 @@ final class Parser
         $visits = [];
 
         while (($line = fgets($handle)) !== false) {
-            $line = trim($line);
-            if (empty($line)) {
+            $line = rtrim($line, "\r\n");
+            if ($line === '') {
                 continue;
             }
 
-            $parts = explode(',', $line);
-            if (count($parts) < 2) {
+            $commaPos = strpos($line, ',');
+            if ($commaPos === false) {
                 continue;
             }
 
-            [$url, $timestamp] = $parts;
+            $url = substr($line, 0, $commaPos);
+            $timestamp = substr($line, $commaPos + 1);
 
-            $path = parse_url($url, PHP_URL_PATH);
+            // Manual path extraction from URL (find the first '/' after "://")
+            $path = '/';
+            $protoEnd = strpos($url, '://');
+            if ($protoEnd !== false) {
+                $pathStart = strpos($url, '/', $protoEnd + 3);
+                if ($pathStart !== false) {
+                    $path = substr($url, $pathStart);
+                }
+            }
+
             $date = substr($timestamp, 0, 10); //YYYY-MM-DD
 
             if (!isset($visits[$path])) {
