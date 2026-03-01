@@ -6,47 +6,38 @@ use RuntimeException;
 use function array_keys;
 use function array_unique;
 use function array_values;
-use function bin2hex;
 use function call_user_func;
 use function count;
 use function fclose;
 use function fgets;
-use function file_get_contents;
 use function file_put_contents;
 use function filesize;
 use function fopen;
 use function fseek;
 use function ftell;
+use function fread;
 use function fwrite;
 use function getenv;
-use function getmypid;
 use function hrtime;
 use function intdiv;
 use function is_array;
-use function is_dir;
-use function is_file;
 use function is_int;
 use function is_resource;
 use function is_string;
-use function is_writable;
 use function json_encode;
 use function ksort;
 use function max;
 use function min;
-use function mkdir;
 use function pcntl_fork;
 use function pcntl_waitpid;
 use function pcntl_wexitstatus;
 use function pcntl_wifexited;
-use function random_bytes;
-use function rmdir;
 use function sort;
 use function sprintf;
+use function stream_socket_pair;
 use function stream_set_read_buffer;
 use function strlen;
 use function substr;
-use function sys_get_temp_dir;
-use function unlink;
 
 final class Parser
 {
@@ -61,6 +52,7 @@ final class Parser
     private const int MIN_BYTES_PER_WORKER = 128 * 1024 * 1024;
 
     private const string SERIALIZER = 'igbinary';
+    private const int SOCKET_HEADER_LENGTH = 20;
 
     private int $chunkSize = self::DEFAULT_CHUNK_SIZE;
     private string $serializer = self::SERIALIZER;
@@ -136,88 +128,128 @@ final class Parser
 
         $parallelStart = $this->profileStart();
 
-        $tmpBaseDir = $this->resolveTempBaseDir();
-        $tmpDir = $tmpBaseDir . '/100mrc-' . getmypid() . '-' . bin2hex(random_bytes(4));
-
-        if (! mkdir($tmpDir, 0777, true) && ! is_dir($tmpDir)) {
-            throw new RuntimeException("Unable to create temp directory: {$tmpDir}");
-        }
-
-        $workerFiles = [];
+        $workerSockets = [];
         $pids = [];
 
         foreach ($segments as $worker => $segment) {
             [$start, $end] = $segment;
-            $workerFile = "{$tmpDir}/worker-{$worker}.bin";
 
-            $pid = pcntl_fork();
+            $socketPair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
 
-            if ($pid === -1) {
+            if (! is_array($socketPair) || count($socketPair) !== 2) {
+                foreach ($workerSockets as $socket) {
+                    fclose($socket);
+                }
+
                 foreach (array_keys($pids) as $existingPid) {
                     pcntl_waitpid($existingPid, $status);
                 }
 
-                $this->cleanupWorkerFiles($tmpDir, $workerFiles);
+                throw new RuntimeException('Unable to create socket pair for worker process');
+            }
+
+            [$parentSocket, $childSocket] = $socketPair;
+
+            $pid = pcntl_fork();
+
+            if ($pid === -1) {
+                fclose($parentSocket);
+                fclose($childSocket);
+
+                foreach ($workerSockets as $socket) {
+                    fclose($socket);
+                }
+
+                foreach (array_keys($pids) as $existingPid) {
+                    pcntl_waitpid($existingPid, $status);
+                }
 
                 throw new RuntimeException('Unable to fork worker process');
             }
 
             if ($pid === 0) {
+                fclose($parentSocket);
+
                 $visits = $this->parseSegment($inputPath, $start, $end);
 
                 if (! is_array($visits)) {
+                    fclose($childSocket);
                     exit(1);
                 }
 
                 $payload = $this->encodePayload($visits);
+                $lengthHeader = sprintf('%020d', strlen($payload));
 
-                if (file_put_contents($workerFile, $payload) === false) {
+                if (! $this->writeToSocket($childSocket, $lengthHeader . $payload)) {
+                    fclose($childSocket);
                     exit(1);
                 }
+
+                fclose($childSocket);
 
                 exit(0);
             }
 
-            $workerFiles[$worker] = $workerFile;
+            fclose($childSocket);
+
+            $workerSockets[$worker] = $parentSocket;
             $pids[$pid] = $worker;
         }
 
-        $waitStart = $this->profileStart();
-        $failed = false;
-
-        foreach (array_keys($pids) as $pid) {
-            pcntl_waitpid($pid, $status);
-
-            if (! pcntl_wifexited($status) || pcntl_wexitstatus($status) !== 0) {
-                $failed = true;
-            }
-        }
-
-        $this->profileStop('parallel_wait', $waitStart);
-
-        if ($failed) {
-            $this->cleanupWorkerFiles($tmpDir, $workerFiles);
-            throw new RuntimeException('One or more worker processes failed');
-        }
-
-        $mergeStart = $this->profileStart();
         $merged = [];
 
-        ksort($workerFiles);
+        ksort($workerSockets);
 
-        foreach ($workerFiles as $workerFile) {
-            $content = file_get_contents($workerFile);
+        foreach ($workerSockets as $worker => $socket) {
+            $header = $this->readFromSocket($socket, self::SOCKET_HEADER_LENGTH);
 
-            if ($content === false) {
-                $this->cleanupWorkerFiles($tmpDir, $workerFiles);
-                throw new RuntimeException("Unable to read worker payload: {$workerFile}");
+            if (! is_string($header)) {
+                fclose($socket);
+
+                foreach ($workerSockets as $index => $otherSocket) {
+                    if ($index !== $worker) {
+                        fclose($otherSocket);
+                    }
+                }
+
+                foreach (array_keys($pids) as $pid) {
+                    pcntl_waitpid($pid, $status);
+                }
+
+                throw new RuntimeException('Unable to read payload header from worker process');
             }
 
-            $workerData = $this->decodePayload($content);
+            $payloadLength = (int) $header;
+
+            if ($payloadLength < 0) {
+                fclose($socket);
+
+                foreach (array_keys($pids) as $pid) {
+                    pcntl_waitpid($pid, $status);
+                }
+
+                throw new RuntimeException('Invalid payload length from worker process');
+            }
+
+            $payload = $this->readFromSocket($socket, $payloadLength);
+            fclose($socket);
+
+            if (! is_string($payload)) {
+                foreach (array_keys($pids) as $pid) {
+                    pcntl_waitpid($pid, $status);
+                }
+
+                throw new RuntimeException('Unable to read payload body from worker process');
+            }
+
+            $workerData = $this->decodePayload($payload);
 
             if (! is_array($workerData)) {
-                $this->cleanupWorkerFiles($tmpDir, $workerFiles);
-                throw new RuntimeException("Invalid worker payload: {$workerFile}");
+                foreach (array_keys($pids) as $pid) {
+                    pcntl_waitpid($pid, $status);
+                }
+
+                throw new RuntimeException('Invalid worker payload');
             }
 
             foreach ($workerData as $path => $pathVisits) {
@@ -241,9 +273,23 @@ final class Parser
             }
         }
 
-        $this->profileStop('parallel_merge', $mergeStart);
+        $waitStart = $this->profileStart();
+        $failed = false;
 
-        $this->cleanupWorkerFiles($tmpDir, $workerFiles);
+        foreach (array_keys($pids) as $pid) {
+            pcntl_waitpid($pid, $status);
+
+            if (! pcntl_wifexited($status) || pcntl_wexitstatus($status) !== 0) {
+                $failed = true;
+            }
+        }
+
+        $this->profileStop('parallel_wait', $waitStart);
+
+        if ($failed) {
+            throw new RuntimeException('One or more worker processes failed');
+        }
+
         $this->profileStop('parallel_total', $parallelStart);
 
         return $merged;
@@ -473,30 +519,49 @@ final class Parser
         return is_array($decoded) ? $decoded : null;
     }
 
-    private function resolveTempBaseDir(): string
+    /**
+     * @param resource $socket
+     */
+    private function writeToSocket(mixed $socket, string $payload): bool
     {
-        $configured = getenv('PARSER_TMP_DIR');
+        $payloadLength = strlen($payload);
+        $written = 0;
 
-        if (
-            is_string($configured)
-            && $configured !== ''
-            && is_dir($configured)
-            && is_writable($configured)
-        ) {
-            return $configured;
+        while ($written < $payloadLength) {
+            $bytes = fwrite($socket, substr($payload, $written));
+
+            if ($bytes === false || $bytes === 0) {
+                return false;
+            }
+
+            $written += $bytes;
         }
 
-        $allowRamTmp = getenv('PARSER_RAM_TMP');
+        return true;
+    }
 
-        if (
-            $allowRamTmp !== '0'
-            && is_dir('/dev/shm')
-            && is_writable('/dev/shm')
-        ) {
-            return '/dev/shm';
+    /**
+     * @param resource $socket
+     */
+    private function readFromSocket(mixed $socket, int $length): ?string
+    {
+        if ($length === 0) {
+            return '';
         }
 
-        return sys_get_temp_dir();
+        $buffer = '';
+
+        while (strlen($buffer) < $length) {
+            $chunk = fread($socket, $length - strlen($buffer));
+
+            if ($chunk === false || $chunk === '') {
+                return null;
+            }
+
+            $buffer .= $chunk;
+        }
+
+        return $buffer;
     }
 
     private function profileStart(): int
@@ -536,19 +601,4 @@ final class Parser
         }
     }
 
-    /**
-     * @param array<int, string> $workerFiles
-     */
-    private function cleanupWorkerFiles(string $tmpDir, array $workerFiles): void
-    {
-        foreach ($workerFiles as $workerFile) {
-            if (is_file($workerFile)) {
-                unlink($workerFile);
-            }
-        }
-
-        if (is_dir($tmpDir)) {
-            rmdir($tmpDir);
-        }
-    }
 }
