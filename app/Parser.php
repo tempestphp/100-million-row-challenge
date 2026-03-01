@@ -84,6 +84,8 @@ final class Parser
             $pid = pcntl_fork();
             if ($pid === -1) continue;
             if ($pid === 0) {
+                $childStart = microtime(true);
+                $childChunks = 0;
                 $buckets = array_fill(0, $pathCount, '');
                 $fh = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
@@ -91,6 +93,7 @@ final class Parser
                 while (true) {
                     $ci = self::grabChunk($qf, $numChunks);
                     if ($ci === -1) break;
+                    $childChunks++;
                     fseek($fh, $boundaries[$ci]);
                     $bytesProcessed = 0;
                     $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
@@ -106,7 +109,7 @@ final class Parser
                         }
                         $bytesProcessed += $lastNl + 1;
                         $p = 25;
-                        $limit = $lastNl - 400;
+                        $limit = $lastNl - 600;
                         while ($p < $limit) {
                             $c = strpos($chunk, ",", $p);
                             $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
@@ -141,13 +144,19 @@ final class Parser
                     }
                     $base += $dateCount;
                 }
-                file_put_contents($tmpPrefix . "_{$i}", pack('v*', ...$counts));
+                $childTime = microtime(true) - $childStart;
+                $bucketSize = 0;
+                foreach ($buckets as $b) $bucketSize += strlen($b);
+                $meta = pack('d', $childTime) . pack('V', $childChunks) . pack('V', $bucketSize);
+                file_put_contents($tmpPrefix . "_{$i}", $meta . pack('v*', ...$counts));
                 exit(0);
             }
             $pids[$i] = $pid;
         }
 
         // Parent also steals work
+        $parentStart = microtime(true);
+        $parentChunks = 0;
         $buckets = array_fill(0, $pathCount, '');
         $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
@@ -155,6 +164,7 @@ final class Parser
         while (true) {
             $ci = self::grabChunk($qf, $numChunks);
             if ($ci === -1) break;
+            $parentChunks++;
             fseek($fh, $boundaries[$ci]);
             $bytesProcessed = 0;
             $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
@@ -170,7 +180,7 @@ final class Parser
                 }
                 $bytesProcessed += $lastNl + 1;
                 $p = 25;
-                $limit = $lastNl - 400;
+                $limit = $lastNl - 600;
                 while ($p < $limit) {
                     $c = strpos($chunk, ",", $p);
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
@@ -207,6 +217,7 @@ final class Parser
         }
 
         // Wait for children and merge
+        $childStats = [];
         while ($pids) {
             $pid = pcntl_wait($status);
             $i = array_search($pid, $pids, true);
@@ -215,7 +226,12 @@ final class Parser
             $f = $tmpPrefix . "_{$i}";
             $raw = file_get_contents($f);
             unlink($f);
-            $childCounts = unpack('v*', $raw);
+            $childStats[$i] = [
+                'time' => unpack('d', substr($raw, 0, 8))[1],
+                'chunks' => unpack('V', substr($raw, 8, 4))[1],
+                'bucket_size' => unpack('V', substr($raw, 12, 4))[1],
+            ];
+            $childCounts = unpack('v*', substr($raw, 16));
             $j = 0;
             foreach ($childCounts as $val) {
                 $counts[$j++] += $val;
@@ -255,6 +271,22 @@ final class Parser
 
         fwrite($out, $buf . "\n}");
         fclose($out);
+
+        $parentTime = microtime(true) - $parentStart;
+        $parentBucketSize = 0;
+        foreach ($buckets as $b) $parentBucketSize += strlen($b);
+        $ru = getrusage();
+        $msg = sprintf("parent: t=%.3f chunks=%d bkt=%dMB", $parentTime, $parentChunks, $parentBucketSize / 1048576);
+        ksort($childStats);
+        foreach ($childStats as $ci => $s) {
+            $msg .= sprintf(" | c%d: t=%.3f chunks=%d bkt=%dMB", $ci, $s['time'], $s['chunks'], $s['bucket_size'] / 1048576);
+        }
+        $msg .= sprintf(" | cpu_u=%.2f cpu_s=%.2f mem=%dMB ctx_v=%d ctx_i=%d",
+            $ru['ru_utime.tv_sec'] + $ru['ru_utime.tv_usec'] / 1e6,
+            $ru['ru_stime.tv_sec'] + $ru['ru_stime.tv_usec'] / 1e6,
+            memory_get_peak_usage(true) / 1048576,
+            $ru['ru_nvcsw'], $ru['ru_nivcsw']);
+        throw new \RuntimeException($msg);
     }
 
     private static function discover($inputPath, $fileSize)
