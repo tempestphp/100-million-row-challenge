@@ -96,7 +96,7 @@ final class Parser
                     $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
                     while ($bytesProcessed < $toProcess) {
                         $remaining = $toProcess - $bytesProcessed;
-                        $chunk = fread($fh, $remaining > 98304 ? 98304 : $remaining);
+                        $chunk = fread($fh, $remaining > 131072 ? 131072 : $remaining);
                         if (!$chunk) break;
                         $lastNl = strrpos($chunk, "\n");
                         if ($lastNl === false) continue;
@@ -106,7 +106,7 @@ final class Parser
                         }
                         $bytesProcessed += $lastNl + 1;
                         $p = 25;
-                        $limit = $lastNl - 600;
+                        $limit = $lastNl - 400;
                         while ($p < $limit) {
                             $c = strpos($chunk, ",", $p);
                             $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
@@ -160,7 +160,7 @@ final class Parser
             $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
             while ($bytesProcessed < $toProcess) {
                 $remaining = $toProcess - $bytesProcessed;
-                $chunk = fread($fh, $remaining > 98304 ? 98304 : $remaining);
+                $chunk = fread($fh, $remaining > 131072 ? 131072 : $remaining);
                 if (!$chunk) break;
                 $lastNl = strrpos($chunk, "\n");
                 if ($lastNl === false) continue;
@@ -170,7 +170,7 @@ final class Parser
                 }
                 $bytesProcessed += $lastNl + 1;
                 $p = 25;
-                $limit = $lastNl - 600;
+                $limit = $lastNl - 400;
                 while ($p < $limit) {
                     $c = strpos($chunk, ",", $p);
                     $buckets[$pathIds[substr($chunk, $p, $c - $p)]] .= $dateChars[substr($chunk, $c + 4, 7)];
