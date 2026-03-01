@@ -61,8 +61,7 @@ final class Parser
             // use dateIds for insertion because those are correctly ordered
             $dateId = $dateIds[$date];
 
-            $outputData[$path][$dateId] ??= 0;
-            $outputData[$path][$dateId]++;
+            $outputData[$path][$dateId] = ($outputData[$path][$dateId] ?? 0) + 1;
         }
 
         // write JSON in memory
