@@ -2,116 +2,287 @@
 
 namespace App;
 
+use App\Commands\Visit;
+
+use function strpos;
+use function strrpos;
+use function substr;
+use function strlen;
+use function fopen;
+use function fclose;
+use function fread;
+use function fseek;
+use function ftell;
+use function fgets;
+use function fwrite;
+use function filesize;
+use function gc_disable;
+use function ini_set;
+use function pcntl_fork;
+use function pcntl_wait;
+use function pack;
+use function unpack;
+use function chr;
+use function array_fill;
+use function array_count_values;
+use function str_replace;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function sys_get_temp_dir;
+use function file_get_contents;
+use function file_put_contents;
+use function getmypid;
+use function unlink;
+use function min;
+use const SEEK_CUR;
+use const WNOHANG;
+
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    private const int WORKERS = 12;
+    private const int CHUNK_SIZE = 163_840;
+
+    public static function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
+        ini_set('memory_limit', '-1');
+
         $fileSize = filesize($inputPath);
-        $workerCount = 2;
 
-        // Phase 1: Calculate chunk boundaries on newline boundaries
-        $boundaries = $this->calculateBoundaries($inputPath, $fileSize, $workerCount);
-        $actualWorkers = count($boundaries) - 1;
+        // Build ID mappings
+        [$slugMap, $slugOrder, $slugCount, $dateBin, $dateStr, $numDates] =
+            self::buildMappings($inputPath, $fileSize);
 
-        // Phase 2: Fork children for chunks 1..N-1, parent processes chunk 0
-        $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
+        // Split file into worker chunks at newline boundaries
+        $offsets = [0];
+        $fh = fopen($inputPath, 'rb');
+        for ($i = 1; $i < self::WORKERS; $i++) {
+            fseek($fh, (int)($fileSize * $i / self::WORKERS));
+            fgets($fh);
+            $offsets[] = ftell($fh);
+        }
+        fclose($fh);
+        $offsets[] = $fileSize;
+
+        // Fork children for chunks 0..N-2, parent takes last chunk
+        $tmpDir = sys_get_temp_dir();
         $pid = getmypid();
-        $children = [];
+        $childMap = [];
 
-        for ($w = 1; $w < $actualWorkers; $w++) {
+        for ($w = 0; $w < self::WORKERS - 1; $w++) {
             $childPid = pcntl_fork();
             if ($childPid === 0) {
-                $childFlat = $this->parseChunk($inputPath, $boundaries[$w], $boundaries[$w + 1]);
-                file_put_contents("$tmpDir/100m_{$pid}_$w", serialize($childFlat));
+                ini_set('memory_limit', '-1');
+                $result = self::processChunk(
+                    $inputPath, $offsets[$w], $offsets[$w + 1],
+                    $slugMap, $dateBin, $slugCount, $numDates,
+                );
+                file_put_contents("{$tmpDir}/rc_{$pid}_{$w}", pack('v*', ...$result));
                 exit(0);
             }
-            $children[$w] = $childPid;
+            $childMap[$childPid] = $w;
         }
 
-        // Parent processes first chunk (preserves first-seen path order)
-        $flat = $this->parseChunk($inputPath, $boundaries[0], $boundaries[1]);
+        $result = self::processChunk(
+            $inputPath, $offsets[self::WORKERS - 1], $offsets[self::WORKERS],
+            $slugMap, $dateBin, $slugCount, $numDates,
+        );
 
-        // Phase 3: Wait + merge children in order
-        for ($w = 1; $w < $actualWorkers; $w++) {
-            pcntl_waitpid($children[$w], $status);
-            $childFlat = unserialize(file_get_contents("$tmpDir/100m_{$pid}_$w"));
-            @unlink("$tmpDir/100m_{$pid}_$w");
-            foreach ($childFlat as $key => $count) {
-                $flat[$key] = ($flat[$key] ?? 0) + $count;
+        // Merge child results as they finish (WNOHANG)
+        $pending = self::WORKERS - 1;
+        while ($pending > 0) {
+            $reaped = pcntl_wait($status, WNOHANG);
+            if ($reaped <= 0) {
+                $reaped = pcntl_wait($status);
             }
-            unset($childFlat);
+            $w = $childMap[$reaped];
+            $file = "{$tmpDir}/rc_{$pid}_{$w}";
+            $partial = unpack('v*', file_get_contents($file));
+            unlink($file);
+            $j = 0;
+            foreach ($partial as $v) {
+                $result[$j++] += $v;
+            }
+            $pending--;
         }
 
-        // Phase 4: Split composite keys → nested array (preserving first-seen order)
-        $data = [];
-        foreach ($flat as $key => $count) {
-            $path = substr($key, 0, -11);   // "/blog/slug"
-            $date = substr($key, -10);       // "YYYY-MM-DD"
-            $data[$path][$date] = $count;
-        }
-        unset($flat);
-
-        // Phase 5: Sort dates + write output
-        foreach ($data as &$dates) {
-            ksort($dates);
-        }
-        unset($dates);
-
-        file_put_contents($outputPath, json_encode($data, JSON_PRETTY_PRINT));
+        self::writeOutput($outputPath, $result, $slugOrder, $slugCount, $dateStr, $numDates);
     }
 
-    private function calculateBoundaries(string $path, int $fileSize, int $workers): array
+    private static function buildMappings(string $inputPath, int $fileSize): array
     {
-        $boundaries = [0];
-        $handle = fopen($path, 'rb');
-        for ($i = 1; $i < $workers; $i++) {
-            fseek($handle, (int)($fileSize * $i / $workers));
-            fgets($handle); // advance past partial line
-            $boundaries[] = ftell($handle);
+        // Paths: sample file for first-seen order, then Visit::all() for completeness
+        $slugMap = [];
+        $slugOrder = [];
+        $slugCount = 0;
+
+        $fh = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fh, 0);
+        $sample = fread($fh, min($fileSize, 204_800));
+        fclose($fh);
+
+        $lastNl = strrpos($sample, "\n");
+        $pos = 0;
+        while ($pos < $lastNl) {
+            $nl = strpos($sample, "\n", $pos + 52);
+            if ($nl === false) break;
+            $slug = substr($sample, $pos + 25, $nl - $pos - 51);
+            if (!isset($slugMap[$slug])) {
+                $slugMap[$slug] = $slugCount;
+                $slugOrder[$slugCount] = $slug;
+                $slugCount++;
+            }
+            $pos = $nl + 1;
         }
-        fclose($handle);
-        $boundaries[] = $fileSize;
-        return $boundaries;
+        unset($sample);
+
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, 25);
+            if (!isset($slugMap[$slug])) {
+                $slugMap[$slug] = $slugCount;
+                $slugOrder[$slugCount] = $slug;
+                $slugCount++;
+            }
+        }
+
+        // Dates: enumerate calendar 2021-2026 as 2-byte binary tokens
+        $dateBin = [];
+        $dateStr = [];
+        $numDates = 0;
+        for ($y = 21; $y <= 26; $y++) {
+            for ($m = 1; $m <= 12; $m++) {
+                $maxD = match ($m) {
+                    2 => ($y % 4 === 0) ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+                $ms = $m < 10 ? "0{$m}" : (string)$m;
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $ds = $d < 10 ? "0{$d}" : (string)$d;
+                    $dateBin["{$y}-{$ms}-{$ds}"] = chr($numDates & 0xFF) . chr($numDates >> 8);
+                    $dateStr[$numDates] = "20{$y}-{$ms}-{$ds}";
+                    $numDates++;
+                }
+            }
+        }
+
+        return [$slugMap, $slugOrder, $slugCount, $dateBin, $dateStr, $numDates];
     }
 
-    private function parseChunk(string $path, int $start, int $end): array
-    {
-        $flat = [];
-        $handle = fopen($path, 'rb');
-        stream_set_read_buffer($handle, 0);
-        fseek($handle, $start);
-
+    /**
+     * Parse a file chunk. Accumulates date tokens per path, then batch-counts
+     * each path's buffer and fills a flat count tally [pathId * numDates + dateId].
+     */
+    private static function processChunk(
+        string $path, int $start, int $end,
+        array $slugMap, array $dateBin,
+        int $slugCount, int $numDates,
+    ): array {
+        $bins = array_fill(0, $slugCount, '');
+        $fh = fopen($path, 'rb');
+        stream_set_read_buffer($fh, 0);
+        fseek($fh, $start);
         $remaining = $end - $start;
-        $leftover = '';
-        set_error_handler(static function () { return true; });
 
         while ($remaining > 0) {
-            $toRead = $remaining > 131072 ? 131072 : $remaining;
-            $raw = fread($handle, $toRead);
-            if ($raw === false || $raw === '') break;
-            $remaining -= strlen($raw);
+            $chunk = fread($fh, $remaining > self::CHUNK_SIZE ? self::CHUNK_SIZE : $remaining);
+            $cLen = strlen($chunk);
+            if ($cLen === 0) break;
+            $remaining -= $cLen;
 
-            if ($leftover !== '') {
-                $raw = $leftover . $raw;
-                $leftover = '';
+            $lastNl = strrpos($chunk, "\n");
+            if ($lastNl === false) break;
+
+            $tail = $cLen - $lastNl - 1;
+            if ($tail > 0) {
+                fseek($fh, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
 
-            $lines = explode("\n", $raw);
-            $leftover = array_pop($lines);
+            $p = 25;
+            $fence = $lastNl - 500;
 
-            foreach ($lines as $line) {
-                $flat[substr($line, 19, -15)]++;
+            while ($p < $fence) {
+                $c = strpos($chunk, ',', $p);
+                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                $p = $c + 52;
+
+                $c = strpos($chunk, ',', $p);
+                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                $p = $c + 52;
+
+                $c = strpos($chunk, ',', $p);
+                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                $p = $c + 52;
+
+                $c = strpos($chunk, ',', $p);
+                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                $p = $c + 52;
+            }
+
+            while ($p < $lastNl) {
+                $c = strpos($chunk, ',', $p);
+                if ($c === false || $c >= $lastNl) break;
+                $bins[$slugMap[substr($chunk, $p, $c - $p)]] .= $dateBin[substr($chunk, $c + 3, 8)];
+                $p = $c + 52;
             }
         }
 
-        // Handle final leftover (line without trailing newline)
-        if ($leftover !== '') {
-            $flat[substr($leftover, 19, -15)]++;
+        fclose($fh);
+
+        // Tally: per-path date buffers -> flat count tally
+        $tally = array_fill(0, $slugCount * $numDates, 0);
+        for ($sid = 0; $sid < $slugCount; $sid++) {
+            if ($bins[$sid] === '') continue;
+            $base = $sid * $numDates;
+            foreach (array_count_values(unpack('v*', $bins[$sid])) as $did => $n) {
+                $tally[$base + $did] = $n;
+            }
         }
 
-        restore_error_handler();
-        fclose($handle);
-        return $flat;
+        return $tally;
+    }
+
+    private static function writeOutput(
+        string $outputPath, array $result,
+        array $slugOrder, int $slugCount,
+        array $dateStr, int $numDates,
+    ): void {
+        $jsonDate = [];
+        for ($d = 0; $d < $numDates; $d++) {
+            $jsonDate[$d] = '        "' . $dateStr[$d] . '": ';
+        }
+
+        $jsonSlug = [];
+        for ($p = 0; $p < $slugCount; $p++) {
+            $jsonSlug[$p] = '"\\/blog\\/' . str_replace('/', '\\/', $slugOrder[$p]) . '"';
+        }
+
+        $fp = fopen($outputPath, 'wb');
+        stream_set_write_buffer($fp, 1_048_576);
+
+        fwrite($fp, '{');
+        $first = true;
+
+        for ($p = 0; $p < $slugCount; $p++) {
+            $base = $p * $numDates;
+            $body = '';
+            $sep = '';
+
+            for ($d = 0; $d < $numDates; $d++) {
+                $n = $result[$base + $d];
+                if ($n === 0) continue;
+                $body .= $sep . $jsonDate[$d] . $n;
+                $sep = ",\n";
+            }
+
+            if ($body === '') continue;
+
+            fwrite($fp, ($first ? '' : ',') . "\n    " . $jsonSlug[$p] . ": {\n" . $body . "\n    }");
+            $first = false;
+        }
+
+        fwrite($fp, "\n}");
+        fclose($fp);
     }
 }
