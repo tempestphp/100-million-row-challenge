@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App;
 
+//use App\Commands\Visit;
 use Exception;
 use Generator;
 use function count;
@@ -35,8 +36,9 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
+        $toEncode = [];
+
         try {
-            $toEncode = [];
             ($this->inputHandle = fopen($inputPath, "r")) || throw new Exception("Couldn't open input file");
             foreach ($this->getChunk() as $chunk) {
                 $matches = [];
@@ -46,15 +48,7 @@ final class Parser
                 for ($key = 0; $key < $matchCount; $key++) {
                     $path = $matches[1][$key];
                     $date = $matches[2][$key];
-
-                    if (!isset($toEncode[$path])) {
-                        $toEncode[$path] = [$date => 0];
-                    }
-                    if (!isset($toEncode[$path][$date])) {
-                        $toEncode[$path][$date] = 0;
-                    }
-
-                    $toEncode[$path][$date]++;
+                    $toEncode[$path][$date] = ($toEncode[$path][$date] ?? 0) + 1;
                 }
             }
 
