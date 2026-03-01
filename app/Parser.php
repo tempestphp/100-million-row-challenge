@@ -9,7 +9,6 @@ use function array_values;
 use function bin2hex;
 use function call_user_func;
 use function count;
-use function extension_loaded;
 use function fclose;
 use function fgets;
 use function file_get_contents;
@@ -19,7 +18,6 @@ use function fopen;
 use function fseek;
 use function ftell;
 use function fwrite;
-use function function_exists;
 use function getenv;
 use function getmypid;
 use function hrtime;
@@ -42,7 +40,6 @@ use function pcntl_wexitstatus;
 use function pcntl_wifexited;
 use function random_bytes;
 use function rmdir;
-use function serialize;
 use function sort;
 use function sprintf;
 use function stream_set_read_buffer;
@@ -50,7 +47,6 @@ use function strlen;
 use function substr;
 use function sys_get_temp_dir;
 use function unlink;
-use function unserialize;
 
 final class Parser
 {
@@ -64,12 +60,10 @@ final class Parser
     private const int MAX_WORKERS = 32;
     private const int MIN_BYTES_PER_WORKER = 128 * 1024 * 1024;
 
-    private const string SERIALIZER_PHP = 'php';
-    private const string SERIALIZER_IGBINARY = 'igbinary';
-    private const string SERIALIZER_MSGPACK = 'msgpack';
+    private const string SERIALIZER = 'igbinary';
 
     private int $chunkSize = self::DEFAULT_CHUNK_SIZE;
-    private string $serializer = self::SERIALIZER_PHP;
+    private string $serializer = self::SERIALIZER;
     private bool $profileEnabled = false;
 
     /**
@@ -89,7 +83,6 @@ final class Parser
         }
 
         $this->chunkSize = $this->determineChunkSize();
-        $this->serializer = $this->resolveSerializer();
 
         $totalStart = $this->profileStart();
 
@@ -266,7 +259,7 @@ final class Parser
             return false;
         }
 
-        return function_exists('pcntl_fork') && function_exists('pcntl_waitpid');
+        return true;
     }
 
     /**
@@ -462,49 +455,12 @@ final class Parser
         return $megabytes * 1024 * 1024;
     }
 
-    private function resolveSerializer(): string
-    {
-        $configured = getenv('PARSER_SERIALIZER');
-
-        if (is_string($configured) && $configured !== '') {
-            if ($configured === self::SERIALIZER_IGBINARY && extension_loaded('igbinary')) {
-                return self::SERIALIZER_IGBINARY;
-            }
-
-            if ($configured === self::SERIALIZER_MSGPACK && extension_loaded('msgpack')) {
-                return self::SERIALIZER_MSGPACK;
-            }
-
-            if ($configured === self::SERIALIZER_PHP) {
-                return self::SERIALIZER_PHP;
-            }
-        }
-
-        if (extension_loaded('igbinary')) {
-            return self::SERIALIZER_IGBINARY;
-        }
-
-        if (extension_loaded('msgpack')) {
-            return self::SERIALIZER_MSGPACK;
-        }
-
-        return self::SERIALIZER_PHP;
-    }
-
     /**
      * @param array<string, array<string, int>> $data
      */
     private function encodePayload(array $data): string
     {
-        if ($this->serializer === self::SERIALIZER_IGBINARY && function_exists('igbinary_serialize')) {
-            return (string) call_user_func('igbinary_serialize', $data);
-        }
-
-        if ($this->serializer === self::SERIALIZER_MSGPACK && function_exists('msgpack_pack')) {
-            return (string) call_user_func('msgpack_pack', $data);
-        }
-
-        return serialize($data);
+        return (string) call_user_func('igbinary_serialize', $data);
     }
 
     /**
@@ -512,15 +468,7 @@ final class Parser
      */
     private function decodePayload(string $payload): ?array
     {
-        $decoded = null;
-
-        if ($this->serializer === self::SERIALIZER_IGBINARY && function_exists('igbinary_unserialize')) {
-            $decoded = call_user_func('igbinary_unserialize', $payload);
-        } elseif ($this->serializer === self::SERIALIZER_MSGPACK && function_exists('msgpack_unpack')) {
-            $decoded = call_user_func('msgpack_unpack', $payload);
-        } else {
-            $decoded = unserialize($payload, ['allowed_classes' => false]);
-        }
+        $decoded = call_user_func('igbinary_unserialize', $payload);
 
         return is_array($decoded) ? $decoded : null;
     }
