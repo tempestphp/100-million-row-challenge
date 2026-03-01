@@ -37,14 +37,22 @@ if ($timingEnabled) {
 $markTiming('script-start');
 $argv = $_SERVER['argv'];
 
-if (($argv[1] ?? null) === 'data:parse') {
+$cmd = $argv[1] ?? null;
+
+if ($cmd === 'data:parse' || $cmd === 'data:parseNew2') {
     $markTiming('fast-path-enter');
-    require __DIR__ . '/app/Parser.php';
+    if ($cmd === 'data:parse') {
+        require __DIR__ . '/app/Parser.php';
+    } else {
+        require __DIR__ . '/app/ParserNew2.php';
+    }
     require __DIR__ . '/app/Commands/Visit.php';
     $markTiming('fast-path-required');
 
     $inputPath = __DIR__ . '/data/data.csv';
-    $outputPath = __DIR__ . '/data/data.json';
+    $outputPath = $cmd === 'data:parse'
+        ? __DIR__ . '/data/data.json'
+        : __DIR__ . '/data/data-new2.json';
     $positionals = [];
     $argc = count($argv);
 
@@ -85,7 +93,11 @@ if (($argv[1] ?? null) === 'data:parse') {
     }
 
     $parseStart = microtime(true);
-    (new \App\Parser())->parse($inputPath, $outputPath);
+    if ($cmd === 'data:parse') {
+        (new \App\Parser())->parse($inputPath, $outputPath);
+    } else {
+        \App\ParserNew2::parse($inputPath, $outputPath);
+    }
     $parseElapsed = microtime(true) - $parseStart;
     fwrite(STDOUT, "✓ // {$parseElapsed}\n");
     $markTiming('fast-path-parse-done');

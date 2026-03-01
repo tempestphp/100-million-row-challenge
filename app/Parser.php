@@ -177,19 +177,39 @@ final class Parser
             $scaledPlans[$candidatePlanId] = self::scalePlanForInput($plan, $inputBytes);
         }
 
-        $pilotPlanId = self::choosePlanWithinCurrentRun(
-            $inputPath,
-            $inputBytes,
-            $scaledPlans,
-            $slugIdByKey,
-            $dayIdTokens,
-            $planId,
-        );
+        $profileRuns = (int) ($tuningState['profiles'][$tuningKey]['runs'] ?? 0);
+        $forcePilot = (\getenv('PARSER_FORCE_PILOT') === '1');
+        $disableAutoTune = (\getenv('PARSER_DISABLE_AUTOTUNE') === '1');
+        $shouldRunPilot = $forcePilot || (!$disableAutoTune && ($profileRuns < 6 || ($profileRuns % 25 === 0)));
+        $pilotPlanId = null;
+
+        if ($shouldRunPilot) {
+            $pilotPlanId = self::choosePlanWithinCurrentRun(
+                $inputPath,
+                $inputBytes,
+                $scaledPlans,
+                $slugIdByKey,
+                $dayIdTokens,
+                $planId,
+            );
+        }
 
         if ($pilotPlanId !== null && isset($scaledPlans[$pilotPlanId])) {
             $planId = $pilotPlanId;
             $workerTotal = $scaledPlans[$planId]['workers'];
             $chunkTotal = $scaledPlans[$planId]['chunks'];
+        }
+
+        $forcedWorkers = (int) (\getenv('PARSER_FORCE_WORKERS') ?: 0);
+        $forcedChunks = (int) (\getenv('PARSER_FORCE_CHUNKS') ?: 0);
+        if ($forcedWorkers > 0) {
+            $workerTotal = $forcedWorkers;
+        }
+        if ($forcedChunks > 0) {
+            $chunkTotal = $forcedChunks;
+        }
+        if ($chunkTotal < $workerTotal) {
+            $chunkTotal = $workerTotal;
         }
         $markPhase('in-run-pilot');
 
@@ -235,6 +255,7 @@ final class Parser
         $queueShmKey = $myPid + 2;
         $queueShm    = null;
         $sem         = null;
+        $queueFile   = null;
 
         if ($canUseSem) {
             set_error_handler(null);
@@ -246,7 +267,11 @@ final class Parser
         if ($sem !== false && $sem !== null && $queueShm !== false && $queueShm !== null) {
             shmop_write($queueShm, pack('V', 0), 0);
             $useSemQueue = true;
-        } else {
+        }
+
+        $useStaticSchedule = !$useSemQueue && self::shouldUseStaticChunkSchedule($workerTotal, $chunkTotal);
+
+        if (!$useSemQueue && !$useStaticSchedule) {
             $queueFile = $tmpPrefix . '_queue';
             file_put_contents($queueFile, pack('V', 0));
         }
@@ -264,7 +289,9 @@ final class Parser
                 $fh      = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                if ($useSemQueue) {
+                if ($useStaticSchedule) {
+                    self::consumeAssignedChunks($fh, $chunkOffsets, $chunkTotal, $w, $workerTotal, $slugIdByKey, $dayIdTokens, $buckets);
+                } elseif ($useSemQueue) {
                     while (true) {
                         $ci = self::claimChunkFromSharedQueue($queueShm, $sem, $chunkTotal);
                         if ($ci === -1) break;
@@ -301,7 +328,9 @@ final class Parser
         $fh      = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        if ($useSemQueue) {
+        if ($useStaticSchedule) {
+            self::consumeAssignedChunks($fh, $chunkOffsets, $chunkTotal, $workerTotal - 1, $workerTotal, $slugIdByKey, $dayIdTokens, $buckets);
+        } elseif ($useSemQueue) {
             while (true) {
                 $ci = self::claimChunkFromSharedQueue($queueShm, $sem, $chunkTotal);
                 if ($ci === -1) break;
@@ -348,7 +377,7 @@ final class Parser
         if ($useSemQueue) {
             shmop_delete($queueShm);
             sem_remove($sem);
-        } else {
+        } elseif ($queueFile !== null) {
             unlink($queueFile);
         }
 
@@ -392,7 +421,8 @@ final class Parser
             : 'balanced';
 
         $runCount = (int) ($entry['runs'] ?? 0);
-        $explore = $runCount < (\count($plans) * 2) || ($runCount % 10 === 0);
+        $disableAutoTune = (\getenv('PARSER_DISABLE_AUTOTUNE') === '1');
+        $explore = !$disableAutoTune && ($runCount < (\count($plans) * 2) || ($runCount % 25 === 0));
 
         if ($explore) {
             $leastRuns = PHP_INT_MAX;
@@ -834,20 +864,48 @@ final class Parser
         return $idx;
     }
 
+    private static function shouldUseStaticChunkSchedule(int $workerTotal, int $chunkTotal): bool
+    {
+        $env = \getenv('PARSER_STATIC_SCHEDULE');
+        if (\is_string($env) && $env !== '') {
+            return $env === '1';
+        }
+
+        return false;
+    }
+
+    private static function consumeAssignedChunks(
+        $handle,
+        array $chunkOffsets,
+        int $chunkTotal,
+        int $workerIndex,
+        int $workerTotal,
+        array $slugIdByKey,
+        array $dayIdTokens,
+        array &$buckets,
+    ): void {
+        $from = intdiv($chunkTotal * $workerIndex, $workerTotal);
+        $to = intdiv($chunkTotal * ($workerIndex + 1), $workerTotal);
+
+        for ($ci = $from; $ci < $to; $ci++) {
+            self::consumeRangeIntoBuckets($handle, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
+        }
+    }
+
     private static function consumeRangeIntoBuckets($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
         fseek($handle, $start);
 
         $remaining = $end - $start;
-        $bufSize   = self::READ_BLOCK_BYTES;
+        $bufSize = self::READ_BLOCK_BYTES;
         $prefixLen = self::URL_PREFIX_BYTES;
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
-            $chunk  = fread($handle, $toRead);
+            $chunk = fread($handle, $toRead);
             if (!$chunk) break;
 
-            $chunkLen   = strlen($chunk);
+            $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
@@ -900,16 +958,81 @@ final class Parser
     private static function reduceBucketsToCounts(&$buckets, $slugTotal, $dateCount)
     {
         $counts = array_fill(0, $slugTotal * $dateCount, 0);
-        $base   = 0;
+        $base = 0;
+        $smallBucketThreshold = self::smallBucketThreshold();
+
         foreach ($buckets as $bucket) {
-            if ($bucket !== '') {
+            if ($bucket === '') {
+                $base += $dateCount;
+                continue;
+            }
+
+            $len = strlen($bucket);
+            if ($len === 2) {
+                $did = \ord($bucket[0]) | (\ord($bucket[1]) << 8);
+                $counts[$base + $did]++;
+                $base += $dateCount;
+                continue;
+            }
+
+            if ($len === 4) {
+                $did0 = \ord($bucket[0]) | (\ord($bucket[1]) << 8);
+                $did1 = \ord($bucket[2]) | (\ord($bucket[3]) << 8);
+                if ($did0 === $did1) {
+                    $counts[$base + $did0] += 2;
+                } else {
+                    $counts[$base + $did0]++;
+                    $counts[$base + $did1]++;
+                }
+                $base += $dateCount;
+                continue;
+            }
+
+            if ($len <= $smallBucketThreshold) {
+                for ($i = 0; $i < $len; $i += 2) {
+                    $did = \ord($bucket[$i]) | (\ord($bucket[$i + 1]) << 8);
+                    $counts[$base + $did]++;
+                }
+            } else {
                 foreach (array_count_values(unpack('v*', $bucket)) as $did => $cnt) {
                     $counts[$base + $did] += $cnt;
                 }
             }
+
             $base += $dateCount;
         }
+
         return $counts;
+    }
+
+    private static function smallBucketThreshold(): int
+    {
+        static $threshold = null;
+
+        if ($threshold !== null) {
+            return $threshold;
+        }
+
+        $raw = \getenv('PARSER_REDUCE_SMALL_BUCKET');
+        if (!\is_string($raw) || $raw === '') {
+            $threshold = 0;
+            return $threshold;
+        }
+
+        $value = (int) $raw;
+        if ($value < 0) {
+            $value = 0;
+        } elseif ($value > 256) {
+            $value = 256;
+        }
+
+        if (($value & 1) === 1) {
+            $value--;
+        }
+
+        $threshold = $value;
+
+        return $threshold;
     }
 
     private static function flushJsonOutput($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount)
