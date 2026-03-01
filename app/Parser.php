@@ -7,6 +7,12 @@ use Exception;
 final class Parser
 {
     private const NUM_WORKERS = 10;
+    private const MAX_PATHS = 300;
+    private const CHUNK_SIZE = 8_388_608; // 8MB
+    private const SLUG_SCAN_CHUNK_BYTES = 2_097_152; // 2MB
+    private const URL_SLUG_OFFSET = 25; // strlen('https://stitcher.io/blog/')
+    private const NEXT_SLUG_OFFSET = 52; // strlen(',2026-01-24T01:16:58+00:00\nhttps://stitcher.io/blog/')
+    private const DATE_SLOTS_PER_PATH = 2560;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -20,13 +26,37 @@ final class Parser
             throw new Exception("Unable to get file size: {$inputPath}");
         }
 
-        // Calculate chunk boundaries aligned to newlines
+        // Build the global path IDs once in the parent.
+        [$slugBaseByStr, $pathStrById] = $this->scanPathBases($inputPath);
+        $pathCount = count($pathStrById);
+
+        if ($pathCount === 0) {
+            file_put_contents($outputPath, json_encode([], JSON_PRETTY_PRINT));
+
+            return;
+        }
+
+        // Global date IDs are fixed to 2020..2026.
+        $dateStrById = $this->buildDateStrings();
+        $dateIdByShort = $this->buildDateIdsByShort($dateStrById);
+        $numDates = count($dateStrById);
+
+        if (self::DATE_SLOTS_PER_PATH < $numDates) {
+            throw new Exception(sprintf(
+                'DATE_SLOTS_PER_PATH (%d) must be >= number of fixed dates (%d).',
+                self::DATE_SLOTS_PER_PATH,
+                $numDates,
+            ));
+        }
+
+        $flatSize = $pathCount * self::DATE_SLOTS_PER_PATH;
+
+        // Calculate chunk boundaries aligned to newlines.
         $boundaries = $this->calculateBoundaries($inputPath, $fileSize);
 
-        // Unique prefix for temp files
+        // Unique prefix for temp files.
         $tmpPrefix = './parser_' . getmypid() . '_';
 
-        // Fork workers — each writes results to a temp file (no sockets needed)
         $pids = [];
 
         for ($i = 1; $i < self::NUM_WORKERS; ++$i) {
@@ -37,172 +67,221 @@ final class Parser
             }
 
             if ($pid === 0) {
-                // CHILD: process chunk, write binary result to temp file
-                [$workerFlat, $nextPathId, $nextDateId, $pathStrById, $dateStrById] = $this->processChunk($inputPath, $boundaries[$i], $boundaries[$i + 1]);
+                $workerFlat = $this->processChunk(
+                    $inputPath,
+                    $boundaries[$i],
+                    $boundaries[$i + 1],
+                    $slugBaseByStr,
+                    $dateIdByShort,
+                    $flatSize,
+                );
 
-                $tmpFile = $tmpPrefix . $i;
-                $fp = fopen($tmpFile, 'wb');
-
-                // Header: nextPathId, nextDateId as 4-byte unsigned ints
-                fwrite($fp, pack('VV', $nextPathId, $nextDateId));
-
-                // Flat array as packed binary — only the used region (nextPathId * 2048 entries)
-                $usedSize = $nextPathId << 11;
-                if ($usedSize > 0) {
-                    // Pack in chunks to avoid massive argument list to pack()
-                    $chunkSize = 8192;
-                    for ($offset = 0; $offset < $usedSize; $offset += $chunkSize) {
-                        $slice = array_slice($workerFlat, $offset, min($chunkSize, $usedSize - $offset));
-                        fwrite($fp, pack('V*', ...$slice));
-                    }
-                }
-
-                // String tables — small, serialize is fine for these
-                $stringData = serialize([$pathStrById, $dateStrById]);
-                fwrite($fp, $stringData);
-
-                fclose($fp);
+                $this->writeFlatFile($tmpPrefix . $i, $workerFlat, $flatSize);
                 exit(0);
             }
 
             $pids[$i] = $pid;
         }
 
-        // Parent processes the first chunk directly (avoids one IPC roundtrip)
-        [$parentFlat, $parentNextPathId, $parentNextDateId, $parentPathStrById, $parentDateStrById] = $this->processChunk($inputPath, $boundaries[0], $boundaries[1]);
+        // Parent processes the first chunk directly.
+        $flat = $this->processChunk(
+            $inputPath,
+            $boundaries[0],
+            $boundaries[1],
+            $slugBaseByStr,
+            $dateIdByShort,
+            $flatSize,
+        );
 
-        // Wait for all children to finish writing
+        // Wait for all children to finish writing.
         foreach ($pids as $pid) {
             pcntl_waitpid($pid, $status);
         }
 
-        // Phase 1: Build global ID mappings
-        $workerData = [];
-        $globalPathId = [];
-        $globalPathStr = [];
-        $nextGlobalPathId = 0;
-        $globalDateId = [];
-        $globalDateStr = [];
-        $nextGlobalDateId = 0;
-
-        // Process parent result inline
-        $pathMap = [];
-        foreach ($parentPathStrById as $localId => $str) {
-            $gid = $globalPathId[$str] ?? null;
-            if ($gid === null) {
-                $gid = $nextGlobalPathId++;
-                $globalPathId[$str] = $gid;
-                $globalPathStr[$gid] = $str;
-            }
-            $pathMap[$localId] = $gid;
-        }
-        $dateMap = [];
-        foreach ($parentDateStrById as $localId => $str) {
-            $gid = $globalDateId[$str] ?? null;
-            if ($gid === null) {
-                $gid = $nextGlobalDateId++;
-                $globalDateId[$str] = $gid;
-                $globalDateStr[$gid] = $str;
-            }
-            $dateMap[$localId] = $gid;
-        }
-        $workerData[] = [$parentFlat, $parentNextPathId, $parentNextDateId, $pathMap, $dateMap];
-
-        unset($parentFlat, $parentPathStrById, $parentDateStrById);
-
-        // Read child results from temp files — binary unpack instead of unserialize
+        // Read child flat arrays and merge directly.
         for ($i = 1; $i < self::NUM_WORKERS; ++$i) {
             $tmpFile = $tmpPrefix . $i;
             $raw = file_get_contents($tmpFile);
+
+            if ($raw === false) {
+                throw new Exception("Unable to read temp file: {$tmpFile}");
+            }
+
             unlink($tmpFile);
 
-            // Read header
-            $header = unpack('VnextPathId/VnextDateId', $raw, 0);
-            $workerNextPathId = $header['nextPathId'];
-            $workerNextDateId = $header['nextDateId'];
+            $workerFlat = unpack('V*', $raw);
 
-            // Read flat array from binary
-            $headerSize = 8; // 2 × 4 bytes
-            $usedSize = $workerNextPathId << 11;
-            $flatBytes = $usedSize * 4; // 4 bytes per uint32
-
-            $workerFlat = [];
-            if ($usedSize > 0) {
-                $workerFlat = array_values(unpack('V*', substr($raw, $headerSize, $flatBytes)));
+            if ($workerFlat === false) {
+                throw new Exception("Unable to unpack worker data: {$tmpFile}");
             }
 
-            // Read string tables from remainder
-            $stringOffset = $headerSize + $flatBytes;
-            [$pathStrById, $dateStrById] = unserialize(substr($raw, $stringOffset));
-
-            unset($raw);
-
-            $pathMap = [];
-            foreach ($pathStrById as $localId => $str) {
-                $gid = $globalPathId[$str] ?? null;
-                if ($gid === null) {
-                    $gid = $nextGlobalPathId++;
-                    $globalPathId[$str] = $gid;
-                    $globalPathStr[$gid] = $str;
-                }
-                $pathMap[$localId] = $gid;
-            }
-            $dateMap = [];
-            foreach ($dateStrById as $localId => $str) {
-                $gid = $globalDateId[$str] ?? null;
-                if ($gid === null) {
-                    $gid = $nextGlobalDateId++;
-                    $globalDateId[$str] = $gid;
-                    $globalDateStr[$gid] = $str;
-                }
-                $dateMap[$localId] = $gid;
-            }
-            $workerData[] = [$workerFlat, $workerNextPathId, $workerNextDateId, $pathMap, $dateMap];
+            $this->mergeFlat($flat, $workerFlat, $flatSize);
         }
 
-        // Phase 2: Merge flat arrays directly — no nested array overhead
-        $numDates = $nextGlobalDateId;
-        $flat = array_fill(0, $nextGlobalPathId * $numDates, 0);
+        unset($slugBaseByStr);
 
-        foreach ($workerData as [$workerFlat, $workerNextPathId, $workerNextDateId, $pathMap, $dateMap]) {
-            for ($pid = 0; $pid < $workerNextPathId; ++$pid) {
-                $localBase = $pid << 11;
-                $globalBase = $pathMap[$pid] * $numDates;
-
-                for ($did = 0; $did < $workerNextDateId; ++$did) {
-                    $count = $workerFlat[$localBase | $did];
-
-                    if ($count > 0) {
-                        $flat[$globalBase + $dateMap[$did]] += $count;
-                    }
-                }
-            }
-        }
-
-        unset($workerData);
-
-        // Phase 3: Sort dates and build final array for json_encode
-        $sortedDateMap = $globalDateStr;
-        asort($sortedDateMap);
-
+        // Build final array for json_encode.
         $visits = [];
 
-        for ($gPathId = 0; $gPathId < $nextGlobalPathId; ++$gPathId) {
+        for ($pathId = 0; $pathId < $pathCount; ++$pathId) {
             $sorted = [];
-            $base = $gPathId * $numDates;
+            $base = $pathId * self::DATE_SLOTS_PER_PATH;
 
-            foreach ($sortedDateMap as $gDateId => $dateStr) {
-                $count = $flat[$base + $gDateId];
+            for ($dateId = 0; $dateId < $numDates; ++$dateId) {
+                $count = $flat[$base + $dateId];
 
                 if ($count > 0) {
-                    $sorted[$dateStr] = $count;
+                    $sorted[$dateStrById[$dateId]] = $count;
                 }
             }
 
-            $visits[$globalPathStr[$gPathId]] = $sorted;
+            $visits[$pathStrById[$pathId]] = $sorted;
         }
 
         file_put_contents($outputPath, json_encode($visits, JSON_PRETTY_PRINT));
+    }
+
+    private function scanPathBases(string $inputPath): array
+    {
+        $slugBaseByStr = [];
+        $pathStrById = [];
+
+        $fp = fopen($inputPath, 'rb');
+
+        if ($fp === false) {
+            throw new Exception("Unable to open input file: {$inputPath}");
+        }
+
+        $buffer = fread($fp, self::SLUG_SCAN_CHUNK_BYTES);
+        fclose($fp);
+
+        if ($buffer === false) {
+            throw new Exception("Unable to read input file: {$inputPath}");
+        }
+
+        if ($buffer === '') {
+            return [$slugBaseByStr, $pathStrById];
+        }
+
+        $lastNewlinePosition = strrpos($buffer, "\n");
+
+        if ($lastNewlinePosition === false) {
+            return [$slugBaseByStr, $pathStrById];
+        }
+
+        $limit = $lastNewlinePosition + 1;
+        $pos = self::URL_SLUG_OFFSET;
+
+        while ($pos < $limit && count($pathStrById) < self::MAX_PATHS) {
+            $commaPos = strpos($buffer, ',', $pos);
+
+            if ($commaPos === false || $commaPos >= $limit) {
+                break;
+            }
+
+            $slug = substr($buffer, $pos, $commaPos - $pos);
+
+            if (! isset($slugBaseByStr[$slug])) {
+                $pathId = count($pathStrById);
+                $pathStrById[$pathId] = '/blog/' . $slug;
+                $slugBaseByStr[$slug] = $pathId * self::DATE_SLOTS_PER_PATH;
+            }
+
+            $pos = $commaPos + self::NEXT_SLUG_OFFSET;
+        }
+
+        return [$slugBaseByStr, $pathStrById];
+    }
+
+    private function buildDateStrings(): array
+    {
+        $dateStrById = [];
+        $daysInMonthsCommon = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        $daysInMonthsLeap = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+        for ($year = 2020; $year <= 2026; ++$year) {
+            $daysInMonths = ($year === 2020 || $year === 2024) ? $daysInMonthsLeap : $daysInMonthsCommon;
+
+            for ($month = 1; $month <= 12; ++$month) {
+                $daysInMonth = $daysInMonths[$month - 1];
+
+                for ($day = 1; $day <= $daysInMonth; ++$day) {
+                    $dateStrById[] = sprintf('%04d-%02d-%02d', $year, $month, $day);
+                }
+            }
+        }
+
+        return $dateStrById;
+    }
+
+    private function buildDateIdsByShort(array $dateStrById): array
+    {
+        $dateIdByShort = [];
+
+        foreach ($dateStrById as $dateId => $date) {
+            $dateIdByShort[substr($date, 2, 8)] = $dateId;
+        }
+
+        return $dateIdByShort;
+    }
+
+    private function writeFlatFile(string $tmpFile, array $flat, int $flatSize): void
+    {
+        $fp = fopen($tmpFile, 'wb');
+
+        if ($fp === false) {
+            throw new Exception("Unable to open temp file for writing: {$tmpFile}");
+        }
+
+        $chunkSize = 8192;
+
+        for ($offset = 0; $offset < $flatSize; $offset += $chunkSize) {
+            $length = min($chunkSize, $flatSize - $offset);
+            $slice = array_slice($flat, $offset, $length);
+            fwrite($fp, pack('V*', ...$slice));
+        }
+
+        fclose($fp);
+    }
+
+    private function mergeFlat(array &$targetFlat, array $sourceFlat, int $flatSize): void
+    {
+        $idx = 0;
+        $sourceIdx = 1; // unpack('V*') is 1-based
+        $limit = $flatSize - 3;
+
+        while ($idx < $limit) {
+            $value0 = $sourceFlat[$sourceIdx];
+            if ($value0 !== 0) {
+                $targetFlat[$idx] += $value0;
+            }
+
+            $value1 = $sourceFlat[$sourceIdx + 1];
+            if ($value1 !== 0) {
+                $targetFlat[$idx + 1] += $value1;
+            }
+
+            $value2 = $sourceFlat[$sourceIdx + 2];
+            if ($value2 !== 0) {
+                $targetFlat[$idx + 2] += $value2;
+            }
+
+            $value3 = $sourceFlat[$sourceIdx + 3];
+            if ($value3 !== 0) {
+                $targetFlat[$idx + 3] += $value3;
+            }
+
+            $idx += 4;
+            $sourceIdx += 4;
+        }
+
+        for (; $idx < $flatSize; ++$idx, ++$sourceIdx) {
+            $value = $sourceFlat[$sourceIdx];
+
+            if ($value !== 0) {
+                $targetFlat[$idx] += $value;
+            }
+        }
     }
 
     private function calculateBoundaries(string $inputPath, int $fileSize): array
@@ -236,69 +315,71 @@ final class Parser
         return $boundaries;
     }
 
-    private function processChunk(string $inputPath, int $startOffset, int $endOffset): array
+    private function processChunk(
+        string $inputPath,
+        int $startOffset,
+        int $endOffset,
+        array $slugBaseByStr,
+        array $dateIdByShort,
+        int $flatSize,
+    ): array
     {
-        $flat = \array_fill(0, 300 * 2048, 0);
-        $pathBaseByStr = [];
-        $pathStrById = [];
-        $nextPathId = 0;
-        $dateIdByStr = [];
-        $dateStrById = [];
-        $nextDateId = 0;
-        $buffer = \file_get_contents($inputPath, false, null, $startOffset, $endOffset - $startOffset);
+        $flat = array_fill(0, $flatSize, 0);
+        $fileHandle = fopen($inputPath, 'rb');
 
-        if ($buffer === false || $buffer === '') {
-            return [$flat, 0, 0, $pathStrById, $dateStrById];
+        if ($fileHandle === false) {
+            throw new Exception("Unable to open input file: {$inputPath}");
         }
 
-        $limit = \strlen($buffer);
-
-        if ($buffer[$limit - 1] !== "\n") {
-            $lastNewlinePosition = \strrpos($buffer, "\n");
-
-            if ($lastNewlinePosition === false) {
-                return [$flat, 0, 0, $pathStrById, $dateStrById];
-            }
-
-            $limit = $lastNewlinePosition + 1;
+        if (fseek($fileHandle, $startOffset, SEEK_SET) !== 0) {
+            fclose($fileHandle);
+            throw new Exception("Unable to seek to offset {$startOffset} in {$inputPath}");
         }
 
-        $pos = 0;
-        $pathStartOffset = 19;
-        $nextLineOffset = 27;
+        $remaining = $endOffset - $startOffset;
 
-        while ($pos < $limit) {
-            $pathStart = $pos + $pathStartOffset;
-            $commaPos = \strpos($buffer, ',', $pathStart);
-            $path = \substr($buffer, $pathStart, $commaPos - $pathStart);
-            $pathBase = $pathBaseByStr[$path] ?? null;
-            $date = \substr($buffer, $commaPos + 1, 10);
-            $dateId = $dateIdByStr[$date] ?? null;
-            if ($pathBase !== null && $dateId !== null) {
-                ++$flat[$pathBase + $dateId];
-                $pos = $commaPos + $nextLineOffset;
-                continue;
+        while ($remaining > 0) {
+            $chunk = fread($fileHandle, $remaining > self::CHUNK_SIZE ? self::CHUNK_SIZE : $remaining);
+
+            $chunkLength = strlen($chunk);
+
+            if ($chunkLength === 0) {
+                break;
             }
 
-            if ($pathBase === null) {
-                $pathBase = $nextPathId << 11;
-                $pathBaseByStr[$path] = $pathBase;
-                $pathStrById[] = $path;
-                ++$nextPathId;
+            $remaining -= $chunkLength;
+            $lastNl = strrpos($chunk, "\n");
+
+            if ($lastNl === false) {
+                break;
             }
 
-            if ($dateId === null) {
-                $dateId = $nextDateId;
-                $dateIdByStr[$date] = $dateId;
-                $dateStrById[] = $date;
-                ++$nextDateId;
+            $over = $chunkLength - $lastNl - 1;
+
+            if ($over > 0) {
+                if (fseek($fileHandle, -$over, SEEK_CUR) !== 0) {
+                    fclose($fileHandle);
+                    throw new Exception("Unable to rewind chunk overlap in {$inputPath}");
+                }
+
+                $remaining += $over;
             }
 
-            ++$flat[$pathBase + $dateId];
-            $pos = $commaPos + $nextLineOffset;
+            $pos = self::URL_SLUG_OFFSET;
+            while ($pos < $lastNl) {
+                $sep = strpos($chunk, ',', $pos);
+
+                if ($sep === false || $sep >= $lastNl) {
+                    break;
+                }
+
+                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+                $pos = $sep + self::NEXT_SLUG_OFFSET;
+            }
         }
 
-        // Return flat array directly — no nested conversion
-        return [$flat, $nextPathId, $nextDateId, $pathStrById, $dateStrById];
+        fclose($fileHandle);
+
+        return $flat;
     }
 }
