@@ -36,8 +36,8 @@ use const WNOHANG;
 
 final class Parser
 {
-    private const WORKERS = 8;
-    private const READ_CHUNK = 8388608;
+    private const WORKERS = 10;
+    private const READ_CHUNK = 16777216;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -134,6 +134,7 @@ final class Parser
         $cnt = self::worker($inputPath, $b[$w - 1], $b[$w], $pathIds, $dateIdChars, $pathCount, $dateCount);
 
         $pending = count($ch);
+        $totalSize = $pathCount * $dateCount;
         while ($pending > 0) {
             $pid = pcntl_wait($status, WNOHANG);
             if ($pid <= 0) {
@@ -144,7 +145,7 @@ final class Parser
             
             if ($useIgbinary) {
                 $wc = igbinary_unserialize($data);
-                for ($j = 0; $j < count($wc); $j++) {
+                for ($j = 0; $j < $totalSize; $j++) {
                     $cnt[$j] += $wc[$j];
                 }
             } else {
@@ -182,10 +183,12 @@ final class Parser
             }
 
             $p = 25;
-            $fc = $ln - 600;
+            $fc = $ln - 960;
 
-            
             while ($p < $fc) {
+                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
+                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
+                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
                 $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
                 $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
                 $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
