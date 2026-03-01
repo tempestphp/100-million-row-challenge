@@ -14,12 +14,22 @@ final class Parser
         $dateMap = [];
         $dateStrings = [];
         $dIdx = 0;
+
+        $paddings = [];
+        for ($i = 1; $i <= 31; $i++) {
+            $paddings[$i] = ($i < 10 ? '0' : '') . $i;
+        }
         for ($y = 2020; $y <= 2026; $y++) {
+            $yStr = $y . '-';
             for ($m = 1; $m <= 12; $m++) {
-                $mS = sprintf('%02d', $m);
-                for ($d = 1; $d <= 31; $d++) {
-                    $dS = sprintf('%02d', $d);
-                    $key = "$y-$mS-$dS";
+                $maxD = match ($m) {
+                    2 => (($y % 4 === 0 && ($y % 100 !== 0 || $y % 400 === 0)) ? 29 : 28),
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+                $ymStr = $yStr . $paddings[$m] . '-';
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $key = $ymStr . $paddings[$d];
                     $dateMap[$key] = $dIdx;
                     $dateStrings[$dIdx] = $key;
                     $dIdx++;
