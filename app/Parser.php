@@ -8,8 +8,8 @@ final class Parser
 {
     public static function parse(string $inputPath, string $outputPath): void
     {
-        $numWorkers = 14;
-        $chunkSize = 131072;
+        $numWorkers = 16;
+        $chunkSize = 262144;
         $numCounters = 8;
 
         $slugToIdx = [];
