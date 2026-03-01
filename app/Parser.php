@@ -77,7 +77,7 @@ final class Parser
     {
         $handle = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($handle, 0);
-        $chunk = \fread($handle, \min($fileSize, 204800));
+        $chunk = \fread($handle, $fileSize < 204800 ? $fileSize : 204800);
         \fclose($handle);
 
         $lastNl = \strrpos($chunk, "\n");
