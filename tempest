@@ -1,10 +1,107 @@
 #!/usr/bin/env php
 <?php
 
+$timingEnabled = (getenv('TEMPEST_PROFILE') === '1');
+$timingStartNs = hrtime(true);
+$timingMarks = [];
+$markTiming = static function (string $label) use (&$timingMarks, $timingEnabled, $timingStartNs): void {
+    if (! $timingEnabled) {
+        return;
+    }
+
+    $timingMarks[] = [
+        'label' => $label,
+        'elapsed_ms' => (hrtime(true) - $timingStartNs) / 1_000_000,
+    ];
+};
+
+if ($timingEnabled) {
+    $mainPid = getmypid();
+    register_shutdown_function(static function () use (&$timingMarks, $timingStartNs, $mainPid): void {
+        if (getmypid() !== $mainPid) {
+            return;
+        }
+
+        $timingMarks[] = [
+            'label' => 'process-exit',
+            'elapsed_ms' => (hrtime(true) - $timingStartNs) / 1_000_000,
+        ];
+
+        fwrite(STDERR, "[tempest-profile]\n");
+        foreach ($timingMarks as $mark) {
+            fwrite(STDERR, sprintf("  %-24s %9.3f ms\n", $mark['label'], $mark['elapsed_ms']));
+        }
+    });
+}
+
+$markTiming('script-start');
+$argv = $_SERVER['argv'];
+
+if (($argv[1] ?? null) === 'data:parse') {
+    $markTiming('fast-path-enter');
+    require __DIR__ . '/app/Parser.php';
+    require __DIR__ . '/app/Commands/Visit.php';
+    $markTiming('fast-path-required');
+
+    $inputPath = __DIR__ . '/data/data.csv';
+    $outputPath = __DIR__ . '/data/data.json';
+    $positionals = [];
+    $argc = count($argv);
+
+    for ($i = 2; $i < $argc; $i++) {
+        $arg = $argv[$i];
+
+        if (str_starts_with($arg, '--input-path=')) {
+            $inputPath = trim(substr($arg, 13), '"\'');
+            continue;
+        }
+
+        if (str_starts_with($arg, '--output-path=')) {
+            $outputPath = trim(substr($arg, 14), '"\'');
+            continue;
+        }
+
+        if ($arg === '--input-path' && isset($argv[$i + 1])) {
+            $inputPath = trim($argv[++$i], '"\'');
+            continue;
+        }
+
+        if ($arg === '--output-path' && isset($argv[$i + 1])) {
+            $outputPath = trim($argv[++$i], '"\'');
+            continue;
+        }
+
+        if ($arg !== '' && $arg[0] !== '-') {
+            $positionals[] = $arg;
+        }
+    }
+
+    if (isset($positionals[0])) {
+        $inputPath = $positionals[0];
+    }
+
+    if (isset($positionals[1])) {
+        $outputPath = $positionals[1];
+    }
+
+    $parseStart = microtime(true);
+    (new \App\Parser())->parse($inputPath, $outputPath);
+    $parseElapsed = microtime(true) - $parseStart;
+    fwrite(STDOUT, "✓ // {$parseElapsed}\n");
+    $markTiming('fast-path-parse-done');
+    return;
+}
+
 use Tempest\Console\ConsoleApplication;
 
+$markTiming('autoload-start');
 require_once getcwd() . '/vendor/autoload.php';
+$markTiming('autoload-done');
 
-ConsoleApplication::boot(loadBuiltInCommands: false)->run();
+$app = ConsoleApplication::boot(loadBuiltInCommands: false);
+$markTiming('console-boot-done');
+$markTiming('console-run-start');
+$app->run();
+$markTiming('console-run-done');
 
 exit;

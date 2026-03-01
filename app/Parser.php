@@ -59,6 +59,41 @@ final class Parser
     public function parse($inputPath, $outputPath)
     {
         $runStartNs = \hrtime(true);
+        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
+        $phaseStartNs = $runStartNs;
+        $phaseMarks = [];
+        $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            $now = \hrtime(true);
+            $phaseMarks[] = [
+                'name' => $name,
+                'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
+                'total_ms' => ($now - $runStartNs) / 1_000_000,
+            ];
+            $phaseStartNs = $now;
+        };
+        $dumpPhases = static function (string $planId, int $workerTotal, int $chunkTotal) use (&$phaseMarks, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            \fwrite(STDERR, "[parser-profile] plan={$planId} workers={$workerTotal} chunks={$chunkTotal}\n");
+            foreach ($phaseMarks as $mark) {
+                \fwrite(
+                    STDERR,
+                    \sprintf(
+                        "  %-24s delta=%8.3f ms total=%8.3f ms\n",
+                        $mark['name'],
+                        $mark['delta_ms'],
+                        $mark['total_ms'],
+                    ),
+                );
+            }
+        };
+
         gc_disable();
 
         $inputBytes   = filesize($inputPath);
@@ -68,6 +103,7 @@ final class Parser
             && function_exists('sem_remove');
         $tuningState = self::loadTuningState();
         [$tuningKey, $planId, $workerTotal, $chunkTotal] = self::pickRuntimePlan($tuningState, $inputBytes, $canUseSem);
+        $markPhase('runtime-plan');
 
         $dayIdByKey   = [];
         $dayKeyById     = [];
@@ -96,6 +132,7 @@ final class Parser
         foreach ($dayIdByKey as $date => $id) {
             $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
+        $markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -123,6 +160,7 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
+        $markPhase('slug-scan');
 
         foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, self::URL_PREFIX_BYTES);
@@ -132,6 +170,7 @@ final class Parser
                 $slugTotal++;
             }
         }
+        $markPhase('visit-merge');
 
         $scaledPlans = [];
         foreach (self::planCatalog() as $candidatePlanId => $plan) {
@@ -152,6 +191,7 @@ final class Parser
             $workerTotal = $scaledPlans[$planId]['workers'];
             $chunkTotal = $scaledPlans[$planId]['chunks'];
         }
+        $markPhase('in-run-pilot');
 
         $chunkOffsets = [0];
         $bh = fopen($inputPath, 'rb');
@@ -162,6 +202,7 @@ final class Parser
         }
         fclose($bh);
         $chunkOffsets[] = $inputBytes;
+        $markPhase('chunk-offsets');
 
         $tmpDir    = sys_get_temp_dir();
         $myPid     = getmypid();
@@ -209,6 +250,7 @@ final class Parser
             $queueFile = $tmpPrefix . '_queue';
             file_put_contents($queueFile, pack('V', 0));
         }
+        $markPhase('ipc-setup');
 
         $childMap = [];
 
@@ -301,6 +343,7 @@ final class Parser
                 $counts[$j] += $childCounts[$k];
             }
         }
+        $markPhase('parse-and-reduce');
 
         if ($useSemQueue) {
             shmop_delete($queueShm);
@@ -310,10 +353,13 @@ final class Parser
         }
 
         self::flushJsonOutput($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
+        $markPhase('json-output');
 
         $elapsedMs = (\hrtime(true) - $runStartNs) / 1_000_000;
         self::rememberPlanRun($tuningState, $tuningKey, $planId, $elapsedMs);
         self::persistTuningState($tuningState);
+        $markPhase('tuning-persist');
+        $dumpPhases($planId, $workerTotal, $chunkTotal);
     }
 
     /**
