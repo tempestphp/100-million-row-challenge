@@ -2,7 +2,6 @@
 
 namespace App;
 
-use function count;
 use function array_fill;
 use function fgets;
 use function file_put_contents;
@@ -33,15 +32,21 @@ final class Parser
                     default => 31,
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
-                $ymStr = "20{$y}-{$mStr}-";
+                $ymStr = "{$y}-{$mStr}-";
+                $fullYmStr = "20{$y}-{$mStr}-";
                 for ($d = 1; $d <= $maxD; $d++) {
-                    $key = $ymStr . (($d < 10 ? '0' : '') . $d);
-                    $dateIds[$key] = $dateCount;
-                    $dates[$dateCount] = $key;
+                    $dStr = ($d < 10 ? '0' : '') . $d;
+                    $dateIds[$ymStr . $dStr] = $dateCount;
+                    $dates[$dateCount] = $fullYmStr . $dStr;
                     $dateCount++;
                 }
             }
         }
+
+        $pathIds = [];
+        $paths = [];
+        $escapedPaths = [];
+        $pathCount = 0;
 
         $outputData = [];
 
@@ -53,47 +58,51 @@ final class Parser
             // we know url path is 19 chars from left, because host and protocol stay the same
             // and each line ends with ",YYYY-MM-DDTHH:MM:SS+00:00"
             $path = substr($line, 19, -27);
-            $date = substr($line, -26, 10);
+            $date = substr($line, -24, 8);
 
             // use dateIds for insertion because those are correctly ordered
             $dateId = $dateIds[$date];
 
-            if (!isset($outputData[$path])) {
-                $outputData[$path] = array_fill(0, $dateCount, 0);
+            $pathId = $pathIds[$path] ?? null;
+            if ($pathId === null) {
+                $pathId = $pathCount;
+                $pathIds[$path] = $pathId;
+                $paths[$pathId] = $path;
+                $escapedPaths[$pathId] = str_replace('/', '\/', $path);
+                $outputData[$pathId] = array_fill(0, $dateCount, 0);
+                $pathCount++;
             }
 
-            $outputData[$path][$dateId]++;
+            $outputData[$pathId][$dateId]++;
         }
 
         // write output
         $outputJson = "{" . PHP_EOL;
 
-        $totalPathsCount = count($outputData);
+        $totalPathsCount = $pathCount;
         $pathIndex = 0;
-        foreach ($outputData as $path => $pathCounts) {
-            $escapedPath = str_replace('/', '\/', $path);
+        foreach ($paths as $pathId => $_path) {
+            $pathCounts = $outputData[$pathId];
+            $escapedPath = $escapedPaths[$pathId];
             $outputJson .= "    \"$escapedPath\": {" . PHP_EOL;
 
-            $totalDatesCount = count($pathCounts);
-            $dateIndex = 0;
+            $firstDate = true;
 
-            foreach ($dateIds as $dateId) {
+            for ($dateId = 0; $dateId < $dateCount; $dateId++) {
                 $count = $pathCounts[$dateId];
                 if ($count === 0) {
                     continue;
                 }
 
-                // reconstruct date from id
-                $date = $dates[$dateId];
-
-                $outputJson .= "        \"$date\": $count";
-                if ($dateIndex < $totalDatesCount - 1) {
-                    $outputJson .= ",";
+                if (! $firstDate) {
+                    $outputJson .= "," . PHP_EOL;
                 }
-                $outputJson .= PHP_EOL;
-
-                $dateIndex++;
+                $date = $dates[$dateId];
+                $outputJson .= "        \"$date\": $count";
+                $firstDate = false;
             }
+
+            $outputJson .= PHP_EOL;
 
             $outputJson .= "    }";
             if ($pathIndex < $totalPathsCount - 1) {
