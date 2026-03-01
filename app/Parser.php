@@ -17,6 +17,9 @@ final class Parser
         $buffer = '';
         $parsedDateCache = [];
         $formattedDatesByInt = [];
+        $lastPathId = 0;
+        $pathCache = [];
+        $pathByIds = [];
 
         while (! \feof($fh)) {
             $chunk = \fread($fh, $chunkSize);
@@ -40,6 +43,14 @@ final class Parser
                 $path = \substr($buffer, $pathStart, $commaPos - $pathStart);
                 $rawDate = \substr($buffer, $commaPos + 1, 10);
 
+                if (isset($pathCache[$path])) {
+                    $pathId = $pathCache[$path];
+                } else {
+                    $pathId = $lastPathId++;
+                    $pathCache[$path] = $pathId;
+                    $pathByIds[$pathId] = $path;
+                }
+
                 if (isset($parsedDateCache[$rawDate])) {
                     $date = $parsedDateCache[$rawDate];
                 } else {
@@ -51,7 +62,7 @@ final class Parser
                     $formattedDatesByInt[$date] = $rawDate;
                 }
 
-                $pathDates = &$result[$path];
+                $pathDates = &$result[$pathId];
 
                 if (isset($pathDates[$date])) {
                     $pathDates[$date]++;
@@ -72,6 +83,14 @@ final class Parser
             $path = \substr($buffer, $prefixLength, $commaPos - $prefixLength);
             $rawDate = \substr($buffer, $commaPos + 1, 10);
 
+            if (isset($pathCache[$path])) {
+                $pathId = $pathCache[$path];
+            } else {
+                $pathId = $lastPathId++;
+                $pathCache[$path] = $pathId;
+                $pathByIds[$pathId] = $path;
+            }
+
             if (isset($parsedDateCache[$rawDate])) {
                 $date = $parsedDateCache[$rawDate];
             } else {
@@ -83,7 +102,7 @@ final class Parser
                 $formattedDatesByInt[$date] = $rawDate;
             }
 
-            $pathDates = &$result[$path];
+            $pathDates = &$result[$pathId];
 
             if (isset($pathDates[$date])) {
                 $pathDates[$date]++;
@@ -98,7 +117,9 @@ final class Parser
         $outBufferFlushSize = 1024 * 1024;
         $isFirstPath = true;
 
-        foreach ($result as $path => $dates) {
+        foreach ($result as $pathId => $dates) {
+            $path = $pathByIds[$pathId];
+
             if (\count($dates) === 1) {
                 foreach ($dates as $date => $count) {
                     $formattedDates = [$formattedDatesByInt[$date] => $count];
