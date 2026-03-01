@@ -141,6 +141,12 @@ final class Parser
         fclose($bh);
         $splitPoints[] = $fileSize;
 
+        // test
+        $dummy = 0;
+        foreach ($pathIds as $k => $v) { $dummy |= strlen($k); }
+        foreach ($dateIdBytes as $k => $v) { $dummy |= strlen($v); }
+        if ($dummy < 0) { $dummy = 0; }
+
         $tmpDir    = sys_get_temp_dir();
         $myPid     = getmypid();
         $tmpPrefix = $tmpDir . '/p100m_' . $myPid;
