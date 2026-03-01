@@ -6,7 +6,7 @@ use App\Commands\Visit;
 
 final class Parser
 {
-    private const DEFAULT_READ_CHUNK_SIZE = 131_072; // 262_144;
+    private const DEFAULT_READ_CHUNK_SIZE = 65_536; // 131_072; // 262_144;
 
     private ?int $workers = 10;
     private ?array $pathIdByPath = null;
@@ -15,6 +15,9 @@ final class Parser
     private int $pathCount = 0;
     private ?array $generatedDateKeyByString = null;
     private ?array $generatedDateLinePrefix = null;
+    private ?array $dateKeyToSlot = null;
+    private ?array $slotToDateLinePrefix = null;
+    private int $totalDates = 0;
     private ?array $tmpFiles = [];
     private ?array $tmpHandles = [];
 
@@ -94,7 +97,7 @@ final class Parser
 
             foreach ($read as $socket) {
                 $idx = array_search($socket, $active, true);
-                $chunk = fread($socket, 2097152);
+                $chunk = fread($socket, 1200*1024);
                 if ($chunk !== '' && $chunk !== false) {
                     $buffers[$idx] .= $chunk;
                 }
@@ -211,19 +214,18 @@ final class Parser
      */
     private function parseRange(string $inputPath, int $start, int $end, $socket): void
     {
-        set_error_handler(fn () => true);
-        $t0 = hrtime(true);
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 0);
         fseek($input, $start);
 
         $pathIdByPath = &$this->pathIdByPath;
-        $countsByPath = $this->paths;
+        $countsByPath = &$this->paths;
         $dateKeyByString = &$this->generatedDateKeyByString;
         $buffer = '';
         $lineStart = $bufferOffset = 0;
-        $chunkSize = max(65_536, min(16_777_216, (int) (getenv('PARSER_READ_CHUNK_SIZE') ?: self::DEFAULT_READ_CHUNK_SIZE)));
+        $chunkSize = 256*1024; // max(65_536, min(16_777_216, (int) (getenv('PARSER_READ_CHUNK_SIZE') ?: self::DEFAULT_READ_CHUNK_SIZE)));
         $remaining = $end - $start;
+
 
         while ($remaining > 0) {
             $bufferOffset = $lineStart;
@@ -241,61 +243,68 @@ final class Parser
             $remaining -= $chunkSize;
             $lineStart = 0;
 
-            while (($newlinePos = strpos($buffer, "\n", $lineStart))) {
-                $pathId = $pathIdByPath[substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51)];
-                $dateKey = $dateKeyByString[substr($buffer, $newlinePos - 22, 7)];
+            while ($newlinePos = strpos($buffer, "\n", $lineStart)) {
+                $countsByPath[$pathIdByPath[substr($buffer, $lineStart + 25, $newlinePos - $lineStart - 51)]][] = $dateKeyByString[substr($buffer, $newlinePos - 22, 7)];
                 $lineStart = $newlinePos + 1;
-                $countsByPath[$pathId][$dateKey]++;
             }
         }
 
         fclose($input);
-        $data = function_exists('igbinary_serialize') ? igbinary_serialize($countsByPath) : serialize($countsByPath);
-        $len = strlen($data);
-        $written = 0;
-        while ($written < $len) {
-            $w = fwrite($socket, substr($data, $written, 8_388_608));
-            if ($w === false || $w === 0) {
-                break;
+
+        $pathCount = $this->pathCount;
+        $dateKeyToSlot = &$this->dateKeyToSlot;
+        $totalDates = $this->totalDates;
+        $zeroArray = array_fill(0, $totalDates, 0);
+        for ($i = 0; $i < $pathCount; $i++) {
+            $dc = array_count_values($countsByPath[$i]);
+            $block = $zeroArray;
+            foreach ($dc as $dateKey => $count) {
+                $block[$dateKeyToSlot[$dateKey]] = $count;
             }
-            $written += $w;
+            fwrite($socket, pack('v*', ...$block));
         }
         fclose($socket);
-        echo "[worker] parseRange time: " . ((hrtime(true) - $t0) / 1e9) * 1000 . " ms" . PHP_EOL;
     }
 
     private function mergeAndWriteOutput(string $outputPath, array &$buffers): void
     {
-        $startTime = microtime(true);
         set_error_handler(fn () => true);
         $file = fopen($outputPath, 'w');
-        stream_set_write_buffer($file, 0);
+        stream_set_write_buffer($file, 128 * 1024);
 
-        $unserialize = function_exists('igbinary_unserialize') ? 'igbinary_unserialize' : 'unserialize';
-        foreach ($buffers as $buf) {
-            $allWorkerResults[] = $unserialize($buf);
-        }
-        $dateLinePrefix = &$this->generatedDateLinePrefix;
+        $pc = $this->pathCount;
+        $totalDates = $this->totalDates;
+        $pathSize = $totalDates * 2;
+        $workerCount = count($buffers);
+        $fmt = 'v' . $totalDates;
+
+        $slotToDateLinePrefix = &$this->slotToDateLinePrefix;
         $pathLinePrefix = &$this->pathLinePrefix;
-        $pathCount = $this->pathCount;
-        $lastPathId = $pathCount - 1;
+        $pathCount = $pc;
 
         fwrite($file, '{' . PHP_EOL);
 
-        for ($pathId = 0; $pathId <= $lastPathId; $pathId++) {
-            $dateCounts = $allWorkerResults[0][$pathId];
-            for ($w = 1; $w < $this->workers; ++$w) {
-                foreach ($allWorkerResults[$w][$pathId] as $dateKey => $count) {
-                    $dateCounts[$dateKey] += $count;
+        for ($pathId = 0; $pathId < $pc; $pathId++) {
+            $offset = $pathId * $pathSize;
+            $counts = unpack($fmt, $buffers[0], $offset);
+            for ($w = 1; $w < $workerCount; $w++) {
+                $wCounts = unpack($fmt, $buffers[$w], $offset);
+                for ($s = 1; $s <= $totalDates; $s++) {
+                    $counts[$s] += $wCounts[$s];
                 }
             }
 
-            ksort($dateCounts, SORT_NUMERIC);
-            $dateCount = count($dateCounts);
+            $dateCount = 0;
+            for ($s = 1; $s <= $totalDates; $s++) {
+                if ($counts[$s]) $dateCount++;
+            }
 
             $buffer = $pathLinePrefix[$pathId];
-            foreach ($dateCounts as $dateKey => $count) {
-                $buffer .= $dateLinePrefix[$dateKey] . $count . ((--$dateCount) ? ',' : '') . PHP_EOL;
+            for ($s = 0; $s < $totalDates; $s++) {
+                if (!$counts[$s + 1]) {
+                    continue;
+                }
+                $buffer .= $slotToDateLinePrefix[$s] . $counts[$s + 1] . ((--$dateCount) ? ',' : '') . PHP_EOL;
             }
             $buffer .= ((--$pathCount) ? '    },' : '    }') . PHP_EOL;
 
@@ -304,9 +313,6 @@ final class Parser
 
         fwrite($file, '}');
         fclose($file);
-        $endTime = microtime(true);
-        $executionTime = ($endTime - $startTime)*1000;
-        echo "mergeAndWriteOutput total: $executionTime ms" . PHP_EOL;
     }
 
     private function buildVisitsAndWriteOutput(array $countsByPath, string $outputPath): void
@@ -386,6 +392,9 @@ final class Parser
 
         $dateKeyByString = [];
         $dateLinePrefix = [];
+        $dateKeyToSlot = [];
+        $slotToDateLinePrefix = [];
+        $slot = 0;
 
         for ($timestamp = $startDayTimestamp; $timestamp <= $endDayTimestamp; $timestamp += $oneDaySeconds) {
             $dateString = gmdate('y-m-d', $timestamp);
@@ -400,10 +409,16 @@ final class Parser
 
             $dateKeyByString[$shortDate] = $dateKey;
             $dateLinePrefix[$dateKey] = '        "20' . $dateString . '": ';
+            $dateKeyToSlot[$dateKey] = $slot;
+            $slotToDateLinePrefix[$slot] = '        "20' . $dateString . '": ';
+            $slot++;
         }
 
         $this->generatedDateKeyByString = $dateKeyByString;
         $this->generatedDateLinePrefix = $dateLinePrefix;
+        $this->dateKeyToSlot = $dateKeyToSlot;
+        $this->slotToDateLinePrefix = $slotToDateLinePrefix;
+        $this->totalDates = $slot;
     }
 
 }
