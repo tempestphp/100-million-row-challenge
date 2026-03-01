@@ -9,7 +9,7 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         $visitStats = [];
-        $readLimit = 1024 * 1024 * 5; // 5MB
+        $readLimit = 1024 * 1024; // 1MB
         $writeLimit = 1024 * 1024; // 1MB
 
         // open the input file and read line by line
@@ -42,17 +42,7 @@ final class Parser
                 }
             }
         }
-        if ($previousRaw !== '') { // if somehow the input file does not end with a newline
-            $line = $previousRaw;
-            $comma = \strpos($line, ',', $baseUrlLen);
-            $url = \substr($line, $baseUrlLen, $comma - $baseUrlLen);
-            $date = \substr($line, $comma + 1, 10);
-            if (!isset($visitStats[$url])) {
-                $visitStats[$url] = [$date => 1];
-            } else {
-                $visitStats[$url][$date] = ($visitStats[$url][$date] ?? 0) + 1;
-            }
-        }
+        assert($previousRaw === '', 'The input file does not end with a newline character');
         \fclose($inputRes);
 
         // write the result to the output file
