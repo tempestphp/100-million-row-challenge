@@ -98,10 +98,18 @@ final class Parser
                     }
 
                     $i = 25;
-                    $fence = $lastNl - 600;
+                    $fence = $lastNl - 1000;
 
                     if ($i < $fence) {
                         do {
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
+
+                            $c = \strpos($raw, ',', $i);
+                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
+                            $i = $c + 52;
+
                             $c = \strpos($raw, ',', $i);
                             $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
                             $i = $c + 52;
