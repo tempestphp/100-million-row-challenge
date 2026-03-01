@@ -73,7 +73,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, 2_097_152); // discovery 2MB
+        $raw = fread($handle, 131072);
         fclose($handle);
 
         $pathIds = [];
@@ -83,18 +83,18 @@ final class Parser
         $lastNl = strrpos($raw, "\n");
 
         while ($pos < $lastNl) {
-            $nlPos = strpos($raw, "\n", $pos + 52);
+            $sep = strpos($raw, ',', $pos + 25);
 
-            $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
+            $slug = substr($raw, $pos + 25, $sep - $pos - 25);
             if (isset($pathIds[$slug])) {
-                $pos = $nlPos + 1;
+                $pos = $sep + 27;
                 continue;
             }
             $pathIds[$slug] = $pathCount;
             $paths[$pathCount] = $slug;
             $pathCount++;
 
-            $pos = $nlPos + 1;
+            $pos = $sep + 27;
         }
         unset($raw);
 
