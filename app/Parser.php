@@ -9,28 +9,28 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
+use function file_get_contents;
+use function file_put_contents;
 use function fopen;
 use function fread;
 use function fseek;
 use function ftell;
-use function ftok;
 use function fwrite;
 use function gc_disable;
+use function getmypid;
 use function implode;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
 use function str_replace;
-use function shmop_delete;
-use function shmop_open;
-use function shmop_read;
-use function shmop_write;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function sys_get_temp_dir;
+use function unlink;
 use function unpack;
 use const SEEK_CUR;
 use const WNOHANG;
@@ -118,26 +118,22 @@ final class Parser
         fclose($bh);
         $boundaries[] = $fileSize;
 
-        $shmSize = $pathCount * $dateCount * 2;
-        $shmKeys = [];
-        for ($w = 0; $w < 9; $w++) {
-            $shmKeys[$w] = ftok($inputPath, chr($w + 1));
-        }
-
+        $tmpDir = sys_get_temp_dir();
+        $myPid = getmypid();
         $childMap = [];
 
         for ($w = 0; $w < 9; $w++) {
+            $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
             $pid = pcntl_fork();
             if ($pid === 0) {
                 $wCounts = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $pathIds, $dateIdChars, $pathCount, $dateCount,
                 );
-                $shm = shmop_open($shmKeys[$w], 'c', 0644, $shmSize);
-                shmop_write($shm, pack('v*', ...$wCounts), 0);
+                file_put_contents($tmpFile, pack('v*', ...$wCounts));
                 exit(0);
             }
-            $childMap[$pid] = $w;
+            $childMap[$pid] = $tmpFile;
         }
 
         $counts = self::parseRange(
@@ -151,10 +147,9 @@ final class Parser
             if ($pid <= 0) {
                 $pid = pcntl_wait($status);
             }
-            $w = $childMap[$pid];
-            $shm = shmop_open($shmKeys[$w], 'w', 0, 0);
-            $wCounts = unpack('v*', shmop_read($shm, 0, $shmSize));
-            shmop_delete($shm);
+            $tmpFile = $childMap[$pid];
+            $wCounts = unpack('v*', file_get_contents($tmpFile));
+            unlink($tmpFile);
             $j = 0;
             foreach ($wCounts as $v) {
                 $counts[$j] += $v;
