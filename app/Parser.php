@@ -150,7 +150,7 @@ final class Parser
             $bytesProcessed += $lastNl + 1;
 
             $p = 25;
-            $limit = $lastNl - 1200;
+            $limit = $lastNl - 600;
             while ($p < $limit) {
                 $c = \strpos($chunk, ",", $p);
                 $counts[$pathBases[\substr($chunk, $p, $c - $p)] + $dateInts[\substr($chunk, $c + 4, 7)]]++;
