@@ -72,20 +72,23 @@ function parse($i, $o)
         $ncpu = PHP_OS_FAMILY === 'Darwin'
             ? (int)trim(shell_exec('sysctl -n hw.ncpu'))
             : (int)(trim(shell_exec('nproc 2>/dev/null') ?: '8'));
-        $numWorkers = $ncpu + 4;
+        $numWorkers = $ncpu;
+        $numChunks = $ncpu * 5;
 
         $handle = fopen($i, 'rb');
-        $splits = [0];
-        for ($s = 1; $s < $numWorkers; $s++) {
-            fseek($handle, (int)($fileSize * $s / $numWorkers));
+        $chunkBounds = [0];
+        for ($c = 1; $c < $numChunks; $c++) {
+            fseek($handle, (int)($fileSize * $c / $numChunks));
             fgets($handle);
-            $splits[] = ftell($handle);
+            $chunkBounds[] = ftell($handle);
         }
-        $splits[] = $fileSize;
+        $chunkBounds[] = $fileSize;
         fclose($handle);
 
         $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
         $tmpPrefix = $tmpDir . '/p_' . getmypid() . '_';
+        $counterFile = $tmpDir . '/c_' . getmypid();
+        file_put_contents($counterFile, pack('V', 0));
 
         $childPids = [];
         for ($w = 1; $w < $numWorkers; $w++) {
@@ -97,54 +100,66 @@ function parse($i, $o)
                 $buckets = [];
                 foreach ($trIds as $t => $_) $buckets[$t] = '';
 
-                fseek($handle, $splits[$w]);
-                $remaining = $splits[$w + 1] - $splits[$w];
+                $lockFp = fopen($counterFile, 'c+b');
+                while (true) {
+                    flock($lockFp, LOCK_EX);
+                    fseek($lockFp, 0);
+                    $ci = unpack('V', fread($lockFp, 4))[1];
+                    if ($ci >= $numChunks) { flock($lockFp, LOCK_UN); break; }
+                    fseek($lockFp, 0);
+                    fwrite($lockFp, pack('V', $ci + 1));
+                    flock($lockFp, LOCK_UN);
 
-                while ($remaining > 0) {
-                    $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
-                    $chunk = fread($handle, $toRead);
-                    if ($chunk === false || $chunk === '') break;
-                    $chunkLen = strlen($chunk);
-                    $remaining -= $chunkLen;
+                    fseek($handle, $chunkBounds[$ci]);
+                    $remaining = $chunkBounds[$ci + 1] - $chunkBounds[$ci];
 
-                    $lastNl = strrpos($chunk, "\n");
-                    if ($lastNl === false) continue;
+                    while ($remaining > 0) {
+                        $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
+                        $chunk = fread($handle, $toRead);
+                        if ($chunk === false || $chunk === '') break;
+                        $chunkLen = strlen($chunk);
+                        $remaining -= $chunkLen;
 
-                    $tail = $chunkLen - $lastNl - 1;
-                    if ($tail > 0) {
-                        fseek($handle, -$tail, SEEK_CUR);
-                        $remaining += $tail;
-                    }
+                        $lastNl = strrpos($chunk, "\n");
+                        if ($lastNl === false) continue;
 
-                    $fence = $lastNl - 620;
-                    $s = 29;
-                    while ($s < $fence) {
-                        $sep = strpos($chunk, ',', $s);
-                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 56;
-                        $sep = strpos($chunk, ',', $s);
-                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 56;
-                        $sep = strpos($chunk, ',', $s);
-                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 56;
-                        $sep = strpos($chunk, ',', $s);
-                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 56;
-                        $sep = strpos($chunk, ',', $s);
-                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 56;
-                        $sep = strpos($chunk, ',', $s);
-                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 56;
-                    }
-                    while ($s < $lastNl) {
-                        $sep = strpos($chunk, ',', $s);
-                        if ($sep === false || $sep > $lastNl) break;
-                        $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                        $s = $sep + 56;
+                        $tail = $chunkLen - $lastNl - 1;
+                        if ($tail > 0) {
+                            fseek($handle, -$tail, SEEK_CUR);
+                            $remaining += $tail;
+                        }
+
+                        $fence = $lastNl - 620;
+                        $s = 29;
+                        while ($s < $fence) {
+                            $sep = strpos($chunk, ',', $s);
+                            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                            $s = $sep + 56;
+                            $sep = strpos($chunk, ',', $s);
+                            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                            $s = $sep + 56;
+                            $sep = strpos($chunk, ',', $s);
+                            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                            $s = $sep + 56;
+                            $sep = strpos($chunk, ',', $s);
+                            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                            $s = $sep + 56;
+                            $sep = strpos($chunk, ',', $s);
+                            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                            $s = $sep + 56;
+                            $sep = strpos($chunk, ',', $s);
+                            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                            $s = $sep + 56;
+                        }
+                        while ($s < $lastNl) {
+                            $sep = strpos($chunk, ',', $s);
+                            if ($sep === false || $sep > $lastNl) break;
+                            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                            $s = $sep + 56;
+                        }
                     }
                 }
+                fclose($lockFp);
                 fclose($handle);
 
                 $counts = array_fill(0, $totalCells, 0);
@@ -156,7 +171,7 @@ function parse($i, $o)
                     }
                 }
                 file_put_contents($tmpPrefix . $w, pack('v*', ...$counts));
-                exit(0);
+                posix_kill(posix_getpid(), 9);
             }
             $childPids[$w] = $pid;
         }
@@ -165,54 +180,69 @@ function parse($i, $o)
         stream_set_read_buffer($handle, 0);
         $buckets = [];
         foreach ($trIds as $t => $_) $buckets[$t] = '';
-        $remaining = $splits[1];
 
-        while ($remaining > 0) {
-            $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
-            $chunk = fread($handle, $toRead);
-            if ($chunk === false || $chunk === '') break;
-            $chunkLen = strlen($chunk);
-            $remaining -= $chunkLen;
+        $lockFp = fopen($counterFile, 'c+b');
+        while (true) {
+            flock($lockFp, LOCK_EX);
+            fseek($lockFp, 0);
+            $ci = unpack('V', fread($lockFp, 4))[1];
+            if ($ci >= $numChunks) { flock($lockFp, LOCK_UN); break; }
+            fseek($lockFp, 0);
+            fwrite($lockFp, pack('V', $ci + 1));
+            flock($lockFp, LOCK_UN);
 
-            $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) continue;
+            fseek($handle, $chunkBounds[$ci]);
+            $remaining = $chunkBounds[$ci + 1] - $chunkBounds[$ci];
 
-            $tail = $chunkLen - $lastNl - 1;
-            if ($tail > 0) {
-                fseek($handle, -$tail, SEEK_CUR);
-                $remaining += $tail;
-            }
+            while ($remaining > 0) {
+                $toRead = $remaining < $chunkSize ? $remaining : $chunkSize;
+                $chunk = fread($handle, $toRead);
+                if ($chunk === false || $chunk === '') break;
+                $chunkLen = strlen($chunk);
+                $remaining -= $chunkLen;
 
-            $fence = $lastNl - 620;
-            $s = 29;
-            while ($s < $fence) {
-                $sep = strpos($chunk, ',', $s);
-                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 56;
-                $sep = strpos($chunk, ',', $s);
-                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 56;
-                $sep = strpos($chunk, ',', $s);
-                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 56;
-                $sep = strpos($chunk, ',', $s);
-                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 56;
-                $sep = strpos($chunk, ',', $s);
-                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 56;
-                $sep = strpos($chunk, ',', $s);
-                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 56;
-            }
-            while ($s < $lastNl) {
-                $sep = strpos($chunk, ',', $s);
-                if ($sep === false || $sep > $lastNl) break;
-                $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
-                $s = $sep + 56;
+                $lastNl = strrpos($chunk, "\n");
+                if ($lastNl === false) continue;
+
+                $tail = $chunkLen - $lastNl - 1;
+                if ($tail > 0) {
+                    fseek($handle, -$tail, SEEK_CUR);
+                    $remaining += $tail;
+                }
+
+                $fence = $lastNl - 620;
+                $s = 29;
+                while ($s < $fence) {
+                    $sep = strpos($chunk, ',', $s);
+                    $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                    $s = $sep + 56;
+                    $sep = strpos($chunk, ',', $s);
+                    $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                    $s = $sep + 56;
+                    $sep = strpos($chunk, ',', $s);
+                    $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                    $s = $sep + 56;
+                    $sep = strpos($chunk, ',', $s);
+                    $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                    $s = $sep + 56;
+                    $sep = strpos($chunk, ',', $s);
+                    $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                    $s = $sep + 56;
+                    $sep = strpos($chunk, ',', $s);
+                    $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                    $s = $sep + 56;
+                }
+                while ($s < $lastNl) {
+                    $sep = strpos($chunk, ',', $s);
+                    if ($sep === false || $sep > $lastNl) break;
+                    $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+                    $s = $sep + 56;
+                }
             }
         }
+        fclose($lockFp);
         fclose($handle);
+        @unlink($counterFile);
 
         $counts = array_fill(0, $totalCells, 0);
         foreach ($buckets as $t => $data) {
