@@ -52,11 +52,56 @@ final class Parser
                 while (true) {
                     $ci = self::grabChunk($qf, $numChunks);
                     if ($ci === -1) break;
-                    self::fillBuckets($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
+                    \fseek($fh, $boundaries[$ci]);
+                    $bytesProcessed = 0;
+                    $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
+                    while ($bytesProcessed < $toProcess) {
+                        $remaining = $toProcess - $bytesProcessed;
+                        $chunk = \fread($fh, $remaining > 131072 ? 131072 : $remaining);
+                        if (!$chunk) break;
+                        $lastNl = \strrpos($chunk, "\n");
+                        if ($lastNl === false) continue;
+                        $tail = \strlen($chunk) - $lastNl - 1;
+                        if ($tail > 0) {
+                            \fseek($fh, -$tail, SEEK_CUR);
+                        }
+                        $bytesProcessed += $lastNl + 1;
+                        $p = 25;
+                        $limit = $lastNl - 600;
+                        while ($p < $limit) {
+                            $c = \strpos($chunk, ",", $p);
+                            $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                            $p = $c + 52;
+                            $c = \strpos($chunk, ",", $p);
+                            $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                            $p = $c + 52;
+                            $c = \strpos($chunk, ",", $p);
+                            $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                            $p = $c + 52;
+                            $c = \strpos($chunk, ",", $p);
+                            $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                            $p = $c + 52;
+                        }
+                        while ($p < $lastNl) {
+                            $c = \strpos($chunk, ",", $p);
+                            if ($c === false || $c >= $lastNl) break;
+                            $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                            $p = $c + 52;
+                        }
+                    }
                 }
                 \fclose($qf);
                 \fclose($fh);
-                $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
+                $counts = \array_fill(0, $pathCount * $dateCount, 0);
+                $base = 0;
+                foreach ($buckets as $bucket) {
+                    if ($bucket !== '') {
+                        foreach (\array_count_values(\unpack('v*', $bucket)) as $dateId => $n) {
+                            $counts[$base + $dateId] += $n;
+                        }
+                    }
+                    $base += $dateCount;
+                }
                 \file_put_contents($tmpPrefix . "_{$i}", \pack('V*', ...$counts));
                 exit(0);
             }
@@ -71,11 +116,56 @@ final class Parser
         while (true) {
             $ci = self::grabChunk($qf, $numChunks);
             if ($ci === -1) break;
-            self::fillBuckets($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
+            \fseek($fh, $boundaries[$ci]);
+            $bytesProcessed = 0;
+            $toProcess = $boundaries[$ci + 1] - $boundaries[$ci];
+            while ($bytesProcessed < $toProcess) {
+                $remaining = $toProcess - $bytesProcessed;
+                $chunk = \fread($fh, $remaining > 131072 ? 131072 : $remaining);
+                if (!$chunk) break;
+                $lastNl = \strrpos($chunk, "\n");
+                if ($lastNl === false) continue;
+                $tail = \strlen($chunk) - $lastNl - 1;
+                if ($tail > 0) {
+                    \fseek($fh, -$tail, SEEK_CUR);
+                }
+                $bytesProcessed += $lastNl + 1;
+                $p = 25;
+                $limit = $lastNl - 600;
+                while ($p < $limit) {
+                    $c = \strpos($chunk, ",", $p);
+                    $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                    $p = $c + 52;
+                    $c = \strpos($chunk, ",", $p);
+                    $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                    $p = $c + 52;
+                    $c = \strpos($chunk, ",", $p);
+                    $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                    $p = $c + 52;
+                    $c = \strpos($chunk, ",", $p);
+                    $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                    $p = $c + 52;
+                }
+                while ($p < $lastNl) {
+                    $c = \strpos($chunk, ",", $p);
+                    if ($c === false || $c >= $lastNl) break;
+                    $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
+                    $p = $c + 52;
+                }
+            }
         }
         \fclose($qf);
         \fclose($fh);
-        $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
+        $counts = \array_fill(0, $pathCount * $dateCount, 0);
+        $base = 0;
+        foreach ($buckets as $bucket) {
+            if ($bucket !== '') {
+                foreach (\array_count_values(\unpack('v*', $bucket)) as $dateId => $n) {
+                    $counts[$base + $dateId] += $n;
+                }
+            }
+            $base += $dateCount;
+        }
 
         // Wait for children and merge
         while ($pids) {
@@ -198,77 +288,4 @@ final class Parser
         \flock($f, \LOCK_UN);
         return $idx;
     }
-
-    private static function fillBuckets($handle, $start, $end, &$pathIds, &$dateChars, &$buckets)
-    {
-        \fseek($handle, $start);
-
-        $bytesProcessed = 0;
-        $toProcess = $end - $start;
-
-        while ($bytesProcessed < $toProcess) {
-            $remaining = $toProcess - $bytesProcessed;
-            $chunk = \fread($handle, $remaining > 131072 ? 131072 : $remaining);
-            if (!$chunk) break;
-
-            $lastNl = \strrpos($chunk, "\n");
-            if ($lastNl === false) continue;
-
-            $tail = \strlen($chunk) - $lastNl - 1;
-            if ($tail > 0) {
-                \fseek($handle, -$tail, SEEK_CUR);
-            }
-            $bytesProcessed += $lastNl + 1;
-
-            $p = 25;
-            $limit = $lastNl - 600;
-            while ($p < $limit) {
-                $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
-                $p = $c + 52;
-
-                $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
-                $p = $c + 52;
-
-                $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
-                $p = $c + 52;
-
-                $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
-                $p = $c + 52;
-
-                $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
-                $p = $c + 52;
-
-                $c = \strpos($chunk, ",", $p);
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
-                $p = $c + 52;
-            }
-            while ($p < $lastNl) {
-                $c = \strpos($chunk, ",", $p);
-                if ($c === false || $c >= $lastNl) break;
-                $buckets[$pathIds[\substr($chunk, $p, $c - $p)]] .= $dateChars[\substr($chunk, $c + 4, 7)];
-                $p = $c + 52;
-            }
-        }
-    }
-
-    private static function bucketsToCounts(&$buckets, $pathCount, $dateCount)
-    {
-        $counts = \array_fill(0, $pathCount * $dateCount, 0);
-        $base = 0;
-        foreach ($buckets as $bucket) {
-            if ($bucket !== '') {
-                foreach (\array_count_values(\unpack('v*', $bucket)) as $dateId => $n) {
-                    $counts[$base + $dateId] += $n;
-                }
-            }
-            $base += $dateCount;
-        }
-        return $counts;
-    }
-
 }
