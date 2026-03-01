@@ -15,7 +15,7 @@ final class Parser
             if ($pid === 0) {
                 $f = fopen($inputPath, 'rb');
                 $job = $this->parseChunk($f, $i, $chunk);
-                fwrite($tmp, igbinary_serialize($job));
+                fwrite($tmp, serialize($job));
                 die; // children work is done, parachute
             }
             $children[$pid] = $tmp;
@@ -26,7 +26,7 @@ final class Parser
             $pid = pcntl_waitpid($pid, $status);
             rewind($tmp);
             $c = stream_get_contents($tmp);
-            $p = igbinary_unserialize($c);
+            $p = unserialize($c);
 
             foreach ($p as $k => $v) {
                 foreach ($v as $d => $c) {
@@ -53,18 +53,15 @@ final class Parser
             $chunk -= strlen(fgets($f)); // go to next line (skip incomplete lines)
         }
 
-        $h = [];
-        while ($chunk > 0 && $v = fgets($f)) {
-            $k = substr($v, 12, -27);
-            $d = substr($v, -26, 10);
-            $h[$k][] = $d;
-            $chunk -= strlen($v);
+        $hits = [];
+        while ($chunk > 0 && $line = fgets($f)) {
+            $k = substr($line, 12, -27);
+            $d = substr($line, -26, 10);
+            $hits[$k][$d] ??= 0;
+            $hits[$k][$d]++;
+            $chunk -= strlen($line);
         }
 
-        foreach ($h as &$v) {
-            $v = array_count_values($v);
-        };
-
-        return $h;
+        return $hits;
     }
 }
