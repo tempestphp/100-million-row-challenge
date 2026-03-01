@@ -45,6 +45,7 @@ final class Parser
 
         $outputData = [];
 
+        // parse input
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, 4_194_304);
 
@@ -64,10 +65,8 @@ final class Parser
             $outputData[$path][$dateId] = ($outputData[$path][$dateId] ?? 0) + 1;
         }
 
-        // write JSON in memory
-        $outputJson = "";
-
-        $outputJson .= "{" . PHP_EOL;
+        // write output
+        $outputJson = "{" . PHP_EOL;
 
         $totalPathsCount = count($outputData);
         $pathIndex = 0;
