@@ -38,10 +38,9 @@ final class Parser
         $queueFile = $tmpPrefix . '_queue';
         \file_put_contents($queueFile, \pack('V', 0));
 
-        // Fork child workers with socket pairs
-        $pids = [];
+        // Fork 8 child workers — parent only merges
         $sockets = [];
-        for ($i = 0; $i < 7; $i++) {
+        for ($i = 0; $i < 8; $i++) {
             \socket_create_pair(\AF_UNIX, \SOCK_STREAM, 0, $pair);
             $pid = \pcntl_fork();
             if ($pid === -1) { \socket_close($pair[0]); \socket_close($pair[1]); continue; }
@@ -69,31 +68,17 @@ final class Parser
                 exit(0);
             }
             \socket_close($pair[1]);
-            $pids[$i] = $pid;
             $sockets[$i] = $pair[0];
         }
 
-        // Parent also steals work
-        $buckets = \array_fill(0, $pathCount, '');
-        $fh = \fopen($inputPath, 'rb');
-        \stream_set_read_buffer($fh, 0);
-        $qf = \fopen($queueFile, 'c+b');
-        while (true) {
-            $ci = self::grabChunk($qf);
-            if ($ci === -1) break;
-            self::fillBuckets($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
-        }
-        \fclose($qf);
-        \fclose($fh);
-        $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
-
-        // Read from sockets and merge
-        foreach ($sockets as $i => $sock) {
+        // Parent: merge as children finish
+        $counts = \array_fill(0, $pathCount * $dateCount, 0);
+        for ($i = 0; $i < 8; $i++) {
             $raw = '';
-            while (($buf = \socket_read($sock, 65536, \PHP_BINARY_READ)) !== '') {
+            while (($buf = \socket_read($sockets[$i], 65536, \PHP_BINARY_READ)) !== '') {
                 $raw .= $buf;
             }
-            \socket_close($sock);
+            \socket_close($sockets[$i]);
             $childCounts = \unpack('V*', $raw);
             $j = 0;
             foreach ($childCounts as $val) {
