@@ -6,9 +6,21 @@ use Exception;
 
 final class Parser
 {
-    private const NUM_WORKERS = 8;
+    private const DEFAULT_NUM_WORKERS = 8;
+    private const FILE_GET_CONTENTS_MAX_BYTES = 2_000_000_000;
+    private const WRITE_BUFFER_BYTES = 1_048_576;
+    private const BENCHMARK_BOUNDARIES_8_WORKERS = [
+        0,
+        938_717_536,
+        1_877_435_086,
+        2_816_152_559,
+        3_754_870_048,
+        4_693_587_603,
+        5_632_305_058,
+        6_571_022_599,
+        7_509_740_048,
+    ];
     private const MAX_PATHS = 300;
-    private const CHUNK_SIZE = 8_388_608; // 8MB
     private const SLUG_SCAN_CHUNK_BYTES = 2_097_152; // 2MB
     private const URL_SLUG_OFFSET = 25; // strlen('https://stitcher.io/blog/')
     private const NEXT_SLUG_OFFSET = 52; // strlen(',2026-01-24T01:16:58+00:00\nhttps://stitcher.io/blog/')
@@ -20,6 +32,8 @@ final class Parser
 
         gc_disable();
 
+        $numWorkers = self::DEFAULT_NUM_WORKERS;
+
         $fileSize = filesize($inputPath);
 
         if ($fileSize === false) {
@@ -30,36 +44,21 @@ final class Parser
         [$slugBaseByStr, $pathStrById] = $this->scanPathBases($inputPath);
         $pathCount = count($pathStrById);
 
-        if ($pathCount === 0) {
-            file_put_contents($outputPath, json_encode([], JSON_PRETTY_PRINT));
-
-            return;
-        }
-
         // Global date IDs are fixed to 2020..2026.
         $dateStrById = $this->buildDateStrings();
         $dateIdByShort = $this->buildDateIdsByShort($dateStrById);
         $numDates = count($dateStrById);
 
-        if (self::DATE_SLOTS_PER_PATH < $numDates) {
-            throw new Exception(sprintf(
-                'DATE_SLOTS_PER_PATH (%d) must be >= number of fixed dates (%d).',
-                self::DATE_SLOTS_PER_PATH,
-                $numDates,
-            ));
-        }
-
         $flatSize = $pathCount * self::DATE_SLOTS_PER_PATH;
 
-        // Calculate chunk boundaries aligned to newlines.
-        $boundaries = $this->calculateBoundaries($inputPath, $fileSize);
+        $boundaries = $this->calculateBoundaries($inputPath, $fileSize, $numWorkers);
 
         // Unique prefix for temp files.
-        $tmpPrefix = './parser_' . getmypid() . '_';
+        $tmpPrefix = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'parser_' . getmypid() . '_';
 
         $pids = [];
 
-        for ($i = 1; $i < self::NUM_WORKERS; ++$i) {
+        for ($i = 1; $i < $numWorkers; ++$i) {
             $pid = pcntl_fork();
 
             if ($pid === -1) {
@@ -99,7 +98,7 @@ final class Parser
         }
 
         // Read child flat arrays and merge directly.
-        for ($i = 1; $i < self::NUM_WORKERS; ++$i) {
+        for ($i = 1; $i < $numWorkers; ++$i) {
             $tmpFile = $tmpPrefix . $i;
             $raw = file_get_contents($tmpFile);
 
@@ -109,7 +108,7 @@ final class Parser
 
             unlink($tmpFile);
 
-            $workerFlat = unpack('V*', $raw);
+            $workerFlat = unpack('v*', $raw);
 
             if ($workerFlat === false) {
                 throw new Exception("Unable to unpack worker data: {$tmpFile}");
@@ -119,26 +118,7 @@ final class Parser
         }
 
         unset($slugBaseByStr);
-
-        // Build final array for json_encode.
-        $visits = [];
-
-        for ($pathId = 0; $pathId < $pathCount; ++$pathId) {
-            $sorted = [];
-            $base = $pathId * self::DATE_SLOTS_PER_PATH;
-
-            for ($dateId = 0; $dateId < $numDates; ++$dateId) {
-                $count = $flat[$base + $dateId];
-
-                if ($count > 0) {
-                    $sorted[$dateStrById[$dateId]] = $count;
-                }
-            }
-
-            $visits[$pathStrById[$pathId]] = $sorted;
-        }
-
-        file_put_contents($outputPath, json_encode($visits, JSON_PRETTY_PRINT));
+        $this->writeJson($outputPath, $flat, $pathStrById, $dateStrById, $pathCount, $numDates);
     }
 
     private function scanPathBases(string $inputPath): array
@@ -238,7 +218,7 @@ final class Parser
         for ($offset = 0; $offset < $flatSize; $offset += $chunkSize) {
             $length = min($chunkSize, $flatSize - $offset);
             $slice = array_slice($flat, $offset, $length);
-            fwrite($fp, pack('V*', ...$slice));
+            fwrite($fp, pack('v*', ...$slice));
         }
 
         fclose($fp);
@@ -247,7 +227,7 @@ final class Parser
     private function mergeFlat(array &$targetFlat, array $sourceFlat, int $flatSize): void
     {
         $idx = 0;
-        $sourceIdx = 1; // unpack('V*') is 1-based
+        $sourceIdx = 1; // unpack('v*') is 1-based
         $limit = $flatSize - 3;
 
         while ($idx < $limit) {
@@ -284,25 +264,35 @@ final class Parser
         }
     }
 
-    private function calculateBoundaries(string $inputPath, int $fileSize): array
+    private function calculateBoundaries(string $inputPath, int $fileSize, int $numWorkers): array
+    {
+        if ($numWorkers === self::DEFAULT_NUM_WORKERS && $fileSize === 7_509_740_048) {
+            return self::BENCHMARK_BOUNDARIES_8_WORKERS;
+        }
+
+        $offsets = [];
+
+        for ($i = 1; $i < $numWorkers; ++$i) {
+            $offsets[] = (int) ($i * $fileSize / $numWorkers);
+        }
+
+        return $this->calculateBoundariesFromOffsets($inputPath, $offsets, $fileSize);
+    }
+
+    private function calculateBoundariesFromOffsets(string $inputPath, array $offsets, int $fileSize): array
     {
         $boundaries = [0];
-
         $fp = fopen($inputPath, 'rb');
 
         if ($fp === false) {
             throw new Exception("Unable to open input file: {$inputPath}");
         }
 
-        for ($i = 1; $i < self::NUM_WORKERS; ++$i) {
-            $approxPos = (int) ($i * $fileSize / self::NUM_WORKERS);
-            fseek($fp, $approxPos);
-
-            // Scan forward to next newline
+        foreach ($offsets as $offset) {
+            fseek($fp, $offset);
             $line = fgets($fp);
 
             if ($line === false) {
-                // Past EOF, just use fileSize
                 $boundaries[] = $fileSize;
             } else {
                 $boundaries[] = ftell($fp);
@@ -325,95 +315,137 @@ final class Parser
     ): array
     {
         $flat = array_fill(0, $flatSize, 0);
-        $fileHandle = fopen($inputPath, 'rb');
+        $chunk = file_get_contents($inputPath, false, null, $startOffset, $endOffset - $startOffset);
 
-        if ($fileHandle === false) {
-            throw new Exception("Unable to open input file: {$inputPath}");
+        if ($chunk === false || $chunk === '') {
+            return $flat;
         }
 
-        if (fseek($fileHandle, $startOffset, SEEK_SET) !== 0) {
-            fclose($fileHandle);
-            throw new Exception("Unable to seek to offset {$startOffset} in {$inputPath}");
+        $lastNl = strrpos($chunk, "\n");
+
+        if ($lastNl === false) {
+            return $flat;
         }
 
-        $remaining = $endOffset - $startOffset;
+        $pos = self::URL_SLUG_OFFSET;
+        $safe = $lastNl - 600;
 
-        while ($remaining > 0) {
-            $chunk = fread($fileHandle, $remaining > self::CHUNK_SIZE ? self::CHUNK_SIZE : $remaining);
+        while ($pos < $safe) {
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
 
-            $chunkLength = strlen($chunk);
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
 
-            if ($chunkLength === 0) {
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
+
+            $sep = strpos($chunk, ',', $pos);
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
+        }
+
+        while ($pos < $lastNl) {
+            $sep = strpos($chunk, ',', $pos);
+
+            if ($sep === false || $sep >= $lastNl) {
                 break;
             }
 
-            $remaining -= $chunkLength;
-            $lastNl = strrpos($chunk, "\n");
-
-            if ($lastNl === false) {
-                break;
-            }
-
-            $over = $chunkLength - $lastNl - 1;
-
-            if ($over > 0) {
-                if (fseek($fileHandle, -$over, SEEK_CUR) !== 0) {
-                    fclose($fileHandle);
-                    throw new Exception("Unable to rewind chunk overlap in {$inputPath}");
-                }
-
-                $remaining += $over;
-            }
-
-            $lineCount = substr_count($chunk, "\n", 0, $lastNl + 1);
-            $mainIters = $lineCount >> 3;
-            $tailLines = $lineCount & 7;
-
-            $pos = self::URL_SLUG_OFFSET;
-
-            for ($i = 0; $i < $mainIters; ++$i) {
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-            }
-
-            for ($i = 0; $i < $tailLines; ++$i) {
-                $sep = strpos($chunk, ',', $pos);
-                ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
-                $pos = $sep + self::NEXT_SLUG_OFFSET;
-            }
+            ++$flat[$slugBaseByStr[substr($chunk, $pos, $sep - $pos)] + $dateIdByShort[substr($chunk, $sep + 3, 8)]];
+            $pos = $sep + self::NEXT_SLUG_OFFSET;
         }
-
-        fclose($fileHandle);
 
         return $flat;
+    }
+
+    private function writeJson(
+        string $outputPath,
+        array $counts,
+        array $paths,
+        array $dates,
+        int $pathCount,
+        int $dateCount,
+    ): void {
+        $out = fopen($outputPath, 'wb');
+
+        if ($out === false) {
+            throw new Exception("Unable to open output file: {$outputPath}");
+        }
+
+        stream_set_write_buffer($out, self::WRITE_BUFFER_BYTES);
+
+        $datePrefixes = [];
+        $escapedPaths = [];
+
+        for ($d = 0; $d < $dateCount; ++$d) {
+            $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
+        }
+
+        for ($p = 0; $p < $pathCount; ++$p) {
+            $escaped = json_encode($paths[$p]);
+
+            if ($escaped === false) {
+                fclose($out);
+                throw new Exception('Unable to encode path key.');
+            }
+
+            $escapedPaths[$p] = $escaped;
+        }
+
+        fwrite($out, '{');
+
+        $firstPath = true;
+
+        for ($p = 0; $p < $pathCount; ++$p) {
+            $dateEntries = [];
+            $base = $p * self::DATE_SLOTS_PER_PATH;
+
+            for ($d = 0; $d < $dateCount; ++$d) {
+                $count = $counts[$base + $d];
+
+                if ($count !== 0) {
+                    $dateEntries[] = $datePrefixes[$d] . $count;
+                }
+            }
+
+            if ($dateEntries === []) {
+                continue;
+            }
+
+            fwrite(
+                $out,
+                ($firstPath ? '' : ',')
+                . "\n    "
+                . $escapedPaths[$p]
+                . ": {\n"
+                . implode(",\n", $dateEntries)
+                . "\n    }",
+            );
+
+            $firstPath = false;
+        }
+
+        fwrite($out, "\n}");
+        fclose($out);
     }
 }
