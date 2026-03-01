@@ -7,7 +7,6 @@ use RuntimeException;
 use function array_keys;
 use function array_unique;
 use function array_values;
-use function call_user_func;
 use function count;
 use function fclose;
 use function fgets;
@@ -17,6 +16,8 @@ use function fopen;
 use function fseek;
 use function ftell;
 use function fwrite;
+use function igbinary_serialize;
+use function igbinary_unserialize;
 use function intdiv;
 use function is_array;
 use function is_int;
@@ -24,8 +25,6 @@ use function is_resource;
 use function is_string;
 use function json_encode;
 use function ksort;
-use function max;
-use function min;
 use function pcntl_fork;
 use function pcntl_waitpid;
 use function pcntl_wexitstatus;
@@ -43,8 +42,6 @@ final class Parser
     private const int TIMESTAMP_LENGTH = 25;
     private const int HOST_PREFIX_LENGTH = 19;
     private const int DEFAULT_WORKERS = 12;
-    private const int MAX_WORKERS = 32;
-    private const int MIN_BYTES_PER_WORKER = 128 * 1024 * 1024;
     private const int SOCKET_HEADER_LENGTH = 20;
 
     /**
@@ -148,8 +145,7 @@ final class Parser
      */
     private function parseParallel(string $inputPath, int $fileSize): array
     {
-        $workers = $this->determineWorkerCount($fileSize);
-        $segments = $this->buildSegments($inputPath, $fileSize, $workers);
+        $segments = $this->buildSegments($inputPath, $fileSize);
 
         if ($segments === []) {
             return [];
@@ -399,7 +395,7 @@ final class Parser
     /**
      * @return list<array{0: int, 1: int}>
      */
-    private function buildSegments(string $inputPath, int $fileSize, int $workers): array
+    private function buildSegments(string $inputPath, int $fileSize): array
     {
         if ($fileSize <= 0) {
             return [];
@@ -413,8 +409,8 @@ final class Parser
 
         $offsets = [0];
 
-        for ($worker = 1; $worker < $workers; $worker++) {
-            $target = intdiv($fileSize * $worker, $workers);
+        for ($worker = 1; $worker < self::DEFAULT_WORKERS; $worker++) {
+            $target = intdiv($fileSize * $worker, self::DEFAULT_WORKERS);
 
             if (fseek($handle, $target) !== 0) {
                 continue;
@@ -451,13 +447,6 @@ final class Parser
         }
 
         return $segments;
-    }
-
-    private function determineWorkerCount(int $fileSize): int
-    {
-        $maxBySize = max(1, intdiv($fileSize, self::MIN_BYTES_PER_WORKER));
-
-        return max(1, min(self::MAX_WORKERS, self::DEFAULT_WORKERS, $maxBySize));
     }
 
     /**
