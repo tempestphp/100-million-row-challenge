@@ -2,592 +2,453 @@
 
 namespace App;
 
-\gc_disable();
+use App\Commands\Visit;
+
+use function array_count_values;
+use function array_fill;
+use function chr;
+use function count;
+use function fclose;
+use function fgets;
+use function file_get_contents;
+use function file_put_contents;
+use function filesize;
+use function fopen;
+use function fread;
+use function fseek;
+use function ftell;
+use function fwrite;
+use function gc_disable;
+use function getmypid;
+use function implode;
+use function intdiv;
+use function min;
+use function pack;
+use function pcntl_fork;
+use function pcntl_wait;
+use function sem_acquire;
+use function sem_get;
+use function sem_release;
+use function sem_remove;
+use function set_error_handler;
+use function shmop_delete;
+use function shmop_open;
+use function shmop_read;
+use function shmop_write;
+use function str_replace;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function strlen;
+use function strpos;
+use function strrpos;
+use function substr;
+use function sys_get_temp_dir;
+use function unlink;
+use function unpack;
+
+use const SEEK_CUR;
 
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    private const int BUFFER_SIZE = 163_840;
+    private const int DISC_SIZE   = 2_097_152;
+    private const int PREFIX_LEN  = 25;
+    private const int WORKERS     = 8;
+    private const int CHUNKS      = 16;
+
+    public function parse($inputPath, $outputPath)
     {
-        $workerCount = 14;
-        $chunkBytes = 163840;
-        $counterCount = 12;
+        gc_disable();
 
-        [$slugIndexByKey, $slugOrder] = $this->discoverSlugs($inputPath, 524288);
-        [$dateToBinaryId, $dateJsonPrefix, $dateCount] = $this->buildDateMetadata();
+        $fileSize   = filesize($inputPath);
+        $numWorkers = self::WORKERS;
+        $numChunks  = self::CHUNKS;
 
-        $fileSize = \filesize($inputPath);
-        if ($fileSize === 0 || $slugOrder === []) {
-            \file_put_contents($outputPath, "{}\n");
-            return;
+        $dateIds   = [];
+        $dates     = [];
+        $dateCount = 0;
+
+        for ($y = 21; $y <= 26; $y++) {
+            $yStr = (string)$y;
+            for ($m = 1; $m <= 12; $m++) {
+                $maxD = match ($m) {
+                    2           => $y === 24 ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default     => 31,
+                };
+                $mStr  = ($m < 10 ? '0' : '') . $m;
+                $ymStr = $yStr . '-' . $mStr . '-';
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $key               = $ymStr . (($d < 10 ? '0' : '') . $d);
+                    $dateIds[$key]     = $dateCount;
+                    $dates[$dateCount] = $key;
+                    $dateCount++;
+                }
+            }
         }
 
-        if ($fileSize < $chunkBytes * 4) {
-            $workerCount = 1;
+        $dateIdBytes = [];
+        foreach ($dateIds as $date => $id) {
+            $dateIdBytes[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
 
-        if ($counterCount > \count($slugOrder)) {
-            $counterCount = \count($slugOrder);
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $raw = fread($handle, min(self::DISC_SIZE, $fileSize));
+        fclose($handle);
+
+        $pathIds   = [];
+        $paths     = [];
+        $pathCount = 0;
+        $pos       = 0;
+        $lastNl    = strrpos($raw, "\n") ?: 0;
+
+        while ($pos < $lastNl) {
+            $nl = strpos($raw, "\n", $pos + 52);
+            if ($nl === false) break;
+
+            $slug = substr($raw, $pos + self::PREFIX_LEN, $nl - $pos - 51);
+
+            if (!isset($pathIds[$slug])) {
+                $pathIds[$slug]    = $pathCount;
+                $paths[$pathCount] = $slug;
+                $pathCount++;
+            }
+
+            $pos = $nl + 1;
+        }
+        unset($raw);
+
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, self::PREFIX_LEN);
+            if (!isset($pathIds[$slug])) {
+                $pathIds[$slug]    = $pathCount;
+                $paths[$pathCount] = $slug;
+                $pathCount++;
+            }
         }
 
-        $boundaries = $this->computeBoundaries($inputPath, $fileSize, $workerCount);
+        $splitPoints = [0];
+        $bh = fopen($inputPath, 'rb');
+        for ($i = 1; $i < $numChunks; $i++) {
+            fseek($bh, intdiv($fileSize * $i, $numChunks));
+            fgets($bh);
+            $splitPoints[] = ftell($bh);
+        }
+        fclose($bh);
+        $splitPoints[] = $fileSize;
 
-        $mergedBuckets = $this->collectBucketsFromWorkers(
-            $inputPath,
-            $boundaries,
-            $workerCount,
-            $chunkBytes,
-            $slugOrder,
-            $slugIndexByKey,
-            $dateToBinaryId,
-        );
+        $tmpDir    = sys_get_temp_dir();
+        $myPid     = getmypid();
+        $tmpPrefix = $tmpDir . '/p100m_' . $myPid;
 
-        $this->writeOutputJson(
-            $outputPath,
-            $mergedBuckets,
-            $slugOrder,
-            $dateJsonPrefix,
-            $counterCount,
-        );
-    }
+        $shmSegSize = $pathCount * $dateCount * 2;
+        $shmHandles = [];
+        $useShm     = false;
 
-    /**
-     * @return array{0: array<string,int>, 1: list<string>}
-     */
-    private function discoverSlugs(string $inputPath, int $sampleBytes): array
-    {
-        $slugIndexByKey = [];
-        $nextSlugIndex = 0;
-
-        $handle = \fopen($inputPath, 'rb');
-        $sample = \fread($handle, $sampleBytes);
-        \fclose($handle);
-
-        $sampleLength = \strlen($sample);
-        $lineStart = 0;
-
-        while ($lineStart + 29 < $sampleLength) {
-            $commaPos = \strpos($sample, ',', $lineStart + 29);
-            if ($commaPos === false) {
+        $allOk = true;
+        for ($w = 0; $w < $numWorkers - 1; $w++) {
+            $shmKey = $myPid * 100 + $w;
+            set_error_handler(null);
+            $shm = @shmop_open($shmKey, 'c', 0644, $shmSegSize);
+            set_error_handler(null);
+            if ($shm === false) {
+                foreach ($shmHandles as [$k, $s]) {
+                    shmop_delete($s);
+                }
+                $shmHandles = [];
+                $allOk      = false;
                 break;
             }
+            $shmHandles[$w] = [$shmKey, $shm];
+        }
+        $useShm = $allOk;
 
-            $slugKey = \substr($sample, $lineStart + 25, $commaPos - $lineStart - 25);
+        $useSemQueue = false;
+        $semKey      = $myPid + 1;
+        $queueShmKey = $myPid + 2;
+        $queueShm    = null;
+        $sem         = null;
 
-            if (!isset($slugIndexByKey[$slugKey])) {
-                $slugIndexByKey[$slugKey] = $nextSlugIndex++;
-            }
-
-            $lineStart = $commaPos + 27;
+        if (
+            function_exists('sem_get')
+            && function_exists('sem_acquire')
+            && function_exists('sem_release')
+            && function_exists('sem_remove')
+        ) {
+            set_error_handler(null);
+            $sem      = @sem_get($semKey, 1, 0644, true);
+            $queueShm = @shmop_open($queueShmKey, 'c', 0644, 4);
+            set_error_handler(null);
         }
 
-        return [$slugIndexByKey, \array_keys($slugIndexByKey)];
-    }
-
-    /**
-     * @return array{0: array<string,string>, 1: array<int,string>, 2: int}
-     */
-    private function buildDateMetadata(): array
-    {
-        $dateToBinaryId = [];
-        $dateJsonPrefix = [];
-        $dateId = 0;
-
-        $daysInMonth = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        $monthStrings = [];
-        for ($month = 1; $month <= 12; $month++) {
-            $monthStrings[$month] = $month < 10 ? '0' . $month : (string) $month;
+        if ($sem !== false && $sem !== null && $queueShm !== false && $queueShm !== null) {
+            shmop_write($queueShm, pack('V', 0), 0);
+            $useSemQueue = true;
+        } else {
+            $queueFile = $tmpPrefix . '_queue';
+            file_put_contents($queueFile, pack('V', 0));
         }
 
-        $dayStrings = [];
-        for ($day = 1; $day <= 31; $day++) {
-            $dayStrings[$day] = $day < 10 ? '0' . $day : (string) $day;
-        }
+        $childMap = [];
 
-        for ($year = 2021; $year <= 2026; $year++) {
-            $yy = $year - 2000;
-            $yyString = $yy < 10 ? '0' . $yy : (string) $yy;
-            $yearString = (string) $year;
-
-            for ($month = 1; $month <= 12; $month++) {
-                $days = $daysInMonth[$month];
-                if ($month === 2 && $year === 2024) {
-                    $days = 29;
-                }
-
-                $monthString = $monthStrings[$month];
-
-                for ($day = 1; $day <= $days; $day++) {
-                    $dayString = $dayStrings[$day];
-                    $dateKey = $yyString . '-' . $monthString . '-' . $dayString;
-
-                    $dateToBinaryId[$dateKey] = \chr($dateId & 0xFF) . \chr($dateId >> 8);
-                    $dateJsonPrefix[$dateId] = '        "'
-                        . $yearString . '-' . $monthString . '-' . $dayString
-                        . '": ';
-
-                    $dateId++;
-                }
-            }
-        }
-
-        return [$dateToBinaryId, $dateJsonPrefix, $dateId];
-    }
-
-    /**
-     * @return list<int>
-     */
-    private function computeBoundaries(string $inputPath, int $fileSize, int $workerCount): array
-    {
-        if ($workerCount <= 1) {
-            return [0, $fileSize];
-        }
-
-        $boundaries = [0];
-
-        $handle = \fopen($inputPath, 'rb');
-
-        for ($workerIndex = 1; $workerIndex < $workerCount; $workerIndex++) {
-            \fseek($handle, (int) ($fileSize * $workerIndex / $workerCount));
-            \fgets($handle);
-            $boundaries[] = \ftell($handle);
-        }
-
-        \fclose($handle);
-        $boundaries[] = $fileSize;
-
-        return $boundaries;
-    }
-
-    /**
-     * @param list<int> $boundaries
-     * @param list<string> $slugOrder
-     * @param array<string,int> $slugIndexByKey
-     * @param array<string,string> $dateToBinaryId
-     * @return array<string,string>
-     */
-    private function collectBucketsFromWorkers(
-        string $inputPath,
-        array $boundaries,
-        int $workerCount,
-        int $chunkBytes,
-        array $slugOrder,
-        array $slugIndexByKey,
-        array $dateToBinaryId,
-    ): array {
-        if ($workerCount === 1) {
-            return $this->parseWorkerSegment(
-                $inputPath,
-                $boundaries[0],
-                $boundaries[1],
-                $chunkBytes,
-                $slugOrder,
-                $dateToBinaryId,
-            );
-        }
-
-        $tmpDir = \sys_get_temp_dir();
-        $pidToWorker = [];
-
-        for ($workerIndex = 0; $workerIndex < $workerCount; $workerIndex++) {
-            $pid = \pcntl_fork();
+        for ($w = 0; $w < $numWorkers - 1; $w++) {
+            $tmpFile = $tmpPrefix . '_' . $w;
+            $pid     = pcntl_fork();
+            if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
-                $buckets = $this->parseWorkerSegment(
-                    $inputPath,
-                    $boundaries[$workerIndex],
-                    $boundaries[$workerIndex + 1],
-                    $chunkBytes,
-                    $slugOrder,
-                    $dateToBinaryId,
-                );
+                $buckets = array_fill(0, $pathCount, '');
+                $fh      = fopen($inputPath, 'rb');
+                stream_set_read_buffer($fh, 0);
 
-                $encoded = $this->encodeWorkerBuckets($buckets, $slugIndexByKey);
-                if ($encoded !== '') {
-                    \file_put_contents($tmpDir . '/parser_w' . $workerIndex, $encoded);
+                if ($useSemQueue) {
+                    while (true) {
+                        $ci = self::grabChunkSem($queueShm, $sem, $numChunks);
+                        if ($ci === -1) break;
+                        self::fillBuckets($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $pathIds, $dateIdBytes, $buckets);
+                    }
+                } else {
+                    $qf = fopen($queueFile, 'c+b');
+                    while (true) {
+                        $ci = self::grabChunkFlock($qf, $numChunks);
+                        if ($ci === -1) break;
+                        self::fillBuckets($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $pathIds, $dateIdBytes, $buckets);
+                    }
+                    fclose($qf);
                 }
 
-                \posix_kill(\posix_getpid(), 9);
+                fclose($fh);
+
+                $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
+                $packed = pack('v*', ...$counts);
+
+                if ($useShm) {
+                    shmop_write($shmHandles[$w][1], $packed, 0);
+                } else {
+                    file_put_contents($tmpFile, $packed);
+                }
+
                 exit(0);
             }
 
-            $pidToWorker[$pid] = $workerIndex;
+            $childMap[$pid] = $w;
         }
 
-        $mergedBuckets = \array_fill_keys($slugOrder, '');
-        $completedWorkers = 0;
+        $buckets = array_fill(0, $pathCount, '');
+        $fh      = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fh, 0);
 
-        do {
-            $pid = \pcntl_waitpid(-1, $status);
-            if ($pid <= 0) {
-                continue;
+        if ($useSemQueue) {
+            while (true) {
+                $ci = self::grabChunkSem($queueShm, $sem, $numChunks);
+                if ($ci === -1) break;
+                self::fillBuckets($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $pathIds, $dateIdBytes, $buckets);
+            }
+        } else {
+            $qf = fopen($queueFile, 'c+b');
+            while (true) {
+                $ci = self::grabChunkFlock($qf, $numChunks);
+                if ($ci === -1) break;
+                self::fillBuckets($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $pathIds, $dateIdBytes, $buckets);
+            }
+            fclose($qf);
+        }
+
+        fclose($fh);
+
+        $counts = self::bucketsToCounts($buckets, $pathCount, $dateCount);
+        $n      = $pathCount * $dateCount;
+
+        while ($childMap) {
+            $pid = pcntl_wait($status);
+            if (!isset($childMap[$pid])) continue;
+
+            $w = $childMap[$pid];
+            unset($childMap[$pid]);
+
+            if ($useShm) {
+                $packed = shmop_read($shmHandles[$w][1], 0, $shmSegSize);
+                shmop_delete($shmHandles[$w][1]);
+            } else {
+                $tmpFile = $tmpPrefix . '_' . $w;
+                $packed  = file_get_contents($tmpFile);
+                unlink($tmpFile);
             }
 
-            if (!isset($pidToWorker[$pid])) {
-                continue;
+            $childCounts = unpack('v*', $packed);
+            for ($j = 0, $k = 1; $j < $n; $j++, $k++) {
+                $counts[$j] += $childCounts[$k];
             }
+        }
 
-            $workerIndex = $pidToWorker[$pid];
-            $tmpFile = $tmpDir . '/parser_w' . $workerIndex;
-            if (!\is_file($tmpFile)) {
-                $completedWorkers++;
-                continue;
-            }
+        if ($useSemQueue) {
+            shmop_delete($queueShm);
+            sem_remove($sem);
+        } else {
+            unlink($queueFile);
+        }
 
-            $payload = \file_get_contents($tmpFile);
-            \unlink($tmpFile);
-
-            if ($payload === false || $payload === '') {
-                $completedWorkers++;
-                continue;
-            }
-
-            $this->mergeWorkerPayload($mergedBuckets, $slugOrder, $payload);
-            $completedWorkers++;
-        } while ($completedWorkers < $workerCount);
-
-        return $mergedBuckets;
+        self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
     }
 
-    /**
-     * @param list<string> $slugOrder
-     * @param array<string,string> $dateToBinaryId
-     * @return array<string,string>
-     */
-    private function parseWorkerSegment(
-        string $inputPath,
-        int $start,
-        int $end,
-        int $chunkBytes,
-        array $slugOrder,
-        array $dateToBinaryId,
-    ): array {
-        $buckets = \array_fill_keys($slugOrder, '');
-        if ($start >= $end) {
-            return $buckets;
+    private static function grabChunkSem($queueShm, $sem, $numChunks)
+    {
+        sem_acquire($sem);
+        $idx = unpack('V', shmop_read($queueShm, 0, 4))[1];
+        if ($idx >= $numChunks) {
+            sem_release($sem);
+            return -1;
         }
+        shmop_write($queueShm, pack('V', $idx + 1), 0);
+        sem_release($sem);
+        return $idx;
+    }
 
-        $handle = \fopen($inputPath, 'rb');
-        \stream_set_read_buffer($handle, 0);
-        \fseek($handle, $start);
+    private static function grabChunkFlock($qf, $numChunks)
+    {
+        flock($qf, LOCK_EX);
+        fseek($qf, 0);
+        $idx = unpack('V', fread($qf, 4))[1];
+        if ($idx >= $numChunks) {
+            flock($qf, LOCK_UN);
+            return -1;
+        }
+        fseek($qf, 0);
+        fwrite($qf, pack('V', $idx + 1));
+        fflush($qf);
+        flock($qf, LOCK_UN);
+        return $idx;
+    }
+
+    private static function fillBuckets($handle, $start, $end, $pathIds, $dateIdBytes, &$buckets)
+    {
+        fseek($handle, $start);
 
         $remaining = $end - $start;
+        $bufSize   = self::BUFFER_SIZE;
+        $prefixLen = self::PREFIX_LEN;
 
-        do {
-            $toRead = $remaining > $chunkBytes ? $chunkBytes : $remaining;
-            $raw = \fread($handle, $toRead);
+        while ($remaining > 0) {
+            $toRead = $remaining > $bufSize ? $bufSize : $remaining;
+            $chunk  = fread($handle, $toRead);
+            if (!$chunk) break;
 
-            if ($raw === false || $raw === '') {
-                break;
+            $chunkLen   = strlen($chunk);
+            $remaining -= $chunkLen;
+
+            $lastNl = strrpos($chunk, "\n");
+            if ($lastNl === false) continue;
+
+            $tail = $chunkLen - $lastNl - 1;
+            if ($tail > 0) {
+                fseek($handle, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
 
-            $rawLength = \strlen($raw);
-            $remaining -= $rawLength;
+            $p     = $prefixLen;
+            $fence = $lastNl - 594;
 
-            $lastNewline = \strrpos($raw, "\n");
-            if ($lastNewline === false) {
-                break;
+            while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
             }
 
-            $tailLength = $rawLength - $lastNewline - 1;
-            if ($tailLength > 0) {
-                \fseek($handle, -$tailLength, SEEK_CUR);
-                $remaining += $tailLength;
+            while ($p < $lastNl) {
+                $sep = strpos($chunk, ',', $p);
+                if ($sep === false || $sep >= $lastNl) break;
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdBytes[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
             }
-
-            $slugPos = 25;
-            $searchPos = 29;
-            $lineFence = $lastNewline - 25;
-            $unrolledFence = $lineFence - 600;
-
-            if ($slugPos < $unrolledFence) {
-                do {
-                    $commaPos = \strpos($raw, ',', $searchPos);
-                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $slugPos = $commaPos + 52;
-                    $searchPos = $commaPos + 56;
-
-                    $commaPos = \strpos($raw, ',', $searchPos);
-                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $slugPos = $commaPos + 52;
-                    $searchPos = $commaPos + 56;
-
-                    $commaPos = \strpos($raw, ',', $searchPos);
-                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $slugPos = $commaPos + 52;
-                    $searchPos = $commaPos + 56;
-
-                    $commaPos = \strpos($raw, ',', $searchPos);
-                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $slugPos = $commaPos + 52;
-                    $searchPos = $commaPos + 56;
-
-                    $commaPos = \strpos($raw, ',', $searchPos);
-                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $slugPos = $commaPos + 52;
-                    $searchPos = $commaPos + 56;
-
-                    $commaPos = \strpos($raw, ',', $searchPos);
-                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $slugPos = $commaPos + 52;
-                    $searchPos = $commaPos + 56;
-                } while ($slugPos < $unrolledFence);
-            }
-
-            if ($slugPos < $lineFence) {
-                do {
-                    $commaPos = \strpos($raw, ',', $searchPos);
-                    if ($commaPos === false || $commaPos > $lastNewline) {
-                        break;
-                    }
-
-                    $buckets[\substr($raw, $slugPos, $commaPos - $slugPos)] .= $dateToBinaryId[\substr($raw, $commaPos + 3, 8)];
-                    $slugPos = $commaPos + 52;
-                    $searchPos = $commaPos + 56;
-                } while ($slugPos < $lineFence);
-            }
-        } while ($remaining > 0);
-
-        \fclose($handle);
-
-        return $buckets;
+        }
     }
 
-    /**
-     * @param array<string,string> $buckets
-     * @param array<string,int> $slugIndexByKey
-     */
-    private function encodeWorkerBuckets(array $buckets, array $slugIndexByKey): string
+    private static function bucketsToCounts(&$buckets, $pathCount, $dateCount)
     {
-        $payload = '';
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
+        $base   = 0;
+        foreach ($buckets as $bucket) {
+            if ($bucket !== '') {
+                foreach (array_count_values(unpack('v*', $bucket)) as $did => $cnt) {
+                    $counts[$base + $did] += $cnt;
+                }
+            }
+            $base += $dateCount;
+        }
+        return $counts;
+    }
 
-        foreach ($buckets as $slugKey => $packedDates) {
-            if ($packedDates === '') {
+    private static function writeJson($outputPath, $counts, $paths, $dates, $dateCount)
+    {
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 1_048_576);
+
+        $pathCount    = count($paths);
+        $datePrefixes = [];
+        $escapedPaths = [];
+
+        for ($d = 0; $d < $dateCount; $d++) {
+            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+        }
+
+        for ($p = 0; $p < $pathCount; $p++) {
+            $escapedPaths[$p] = "\"\\/blog\\/" . str_replace('/', '\\/', $paths[$p]) . '"';
+        }
+
+        fwrite($out, '{');
+        $firstPath = true;
+        $base      = 0;
+
+        for ($p = 0; $p < $pathCount; $p++) {
+            $dateEntries = [];
+
+            for ($d = 0; $d < $dateCount; $d++) {
+                $count = $counts[$base + $d];
+                if ($count !== 0) {
+                    $dateEntries[] = $datePrefixes[$d] . $count;
+                }
+            }
+
+            if (empty($dateEntries)) {
+                $base += $dateCount;
                 continue;
             }
 
-            $payload .= \pack('vV', $slugIndexByKey[$slugKey], \strlen($packedDates)) . $packedDates;
+            $sep2      = $firstPath ? '' : ',';
+            $firstPath = false;
+
+            fwrite($out,
+                $sep2 .
+                "\n    " . $escapedPaths[$p] . ": {\n" .
+                implode(",\n", $dateEntries) .
+                "\n    }"
+            );
+
+            $base += $dateCount;
         }
 
-        return $payload;
-    }
-
-    /**
-     * @param array<string,string> $mergedBuckets
-     * @param list<string> $slugOrder
-     */
-    private function mergeWorkerPayload(array &$mergedBuckets, array $slugOrder, string $payload): void
-    {
-        if ($payload === '') {
-            return;
-        }
-
-        $offset = 0;
-        $payloadLength = \strlen($payload);
-
-        while ($offset < $payloadLength) {
-            $slugIndex = \ord($payload[$offset]) | (\ord($payload[$offset + 1]) << 8);
-
-            $bucketLength = \ord($payload[$offset + 2])
-                | (\ord($payload[$offset + 3]) << 8)
-                | (\ord($payload[$offset + 4]) << 16)
-                | (\ord($payload[$offset + 5]) << 24);
-
-            $offset += 6;
-            $mergedBuckets[$slugOrder[$slugIndex]] .= \substr($payload, $offset, $bucketLength);
-            $offset += $bucketLength;
-        }
-    }
-
-    /**
-     * @param array<string,string> $mergedBuckets
-     * @param list<string> $slugOrder
-     * @param array<int,string> $dateJsonPrefix
-     */
-    private function writeOutputJson(
-        string $outputPath,
-        array $mergedBuckets,
-        array $slugOrder,
-        array $dateJsonPrefix,
-        int $counterCount,
-    ): void {
-        $nonEmptySlugOrder = [];
-        foreach ($slugOrder as $slugKey) {
-            if ($mergedBuckets[$slugKey] !== '') {
-                $nonEmptySlugOrder[] = $slugKey;
-            }
-        }
-
-        if ($nonEmptySlugOrder === []) {
-            \file_put_contents($outputPath, "{}\n");
-            return;
-        }
-
-        $slugOrder = $nonEmptySlugOrder;
-        if ($counterCount > \count($slugOrder)) {
-            $counterCount = \count($slugOrder);
-        }
-
-        $slugJsonHeaders = [];
-        foreach ($slugOrder as $slugKey) {
-            $slugJsonHeaders[$slugKey] = '    "\/blog\/' . $slugKey . '": {' . "\n";
-        }
-
-        if ($counterCount === 1) {
-            $slugFragments = [];
-            foreach ($slugOrder as $slugKey) {
-                $packedDates = $mergedBuckets[$slugKey];
-                $counts = \array_count_values(\unpack('v*', $packedDates));
-                if (\count($counts) > 1) {
-                    \ksort($counts, SORT_NUMERIC);
-                }
-
-                $jsonFragment = $slugJsonHeaders[$slugKey];
-                $first = true;
-                foreach ($counts as $dateId => $count) {
-                    if (!$first) {
-                        $jsonFragment .= ",\n";
-                    }
-                    $jsonFragment .= $dateJsonPrefix[$dateId] . $count;
-                    $first = false;
-                }
-
-                $jsonFragment .= "\n    }";
-                $slugFragments[] = $jsonFragment;
-            }
-
-            \file_put_contents($outputPath, "{\n" . \implode(",\n", $slugFragments) . "\n}");
-            return;
-        }
-
-        $counterPipes = $this->createCounterPipes($counterCount);
-
-        $slugCount = \count($slugOrder);
-        $slugsPerCounter = intdiv($slugCount + $counterCount - 1, $counterCount);
-        $counterPids = [];
-
-        for ($counterIndex = 0; $counterIndex < $counterCount; $counterIndex++) {
-            $pid = \pcntl_fork();
-
-            if ($pid === 0) {
-                for ($pipeIndex = 0; $pipeIndex < $counterCount; $pipeIndex++) {
-                    \fclose($counterPipes[$pipeIndex][0]);
-                    if ($pipeIndex !== $counterIndex) {
-                        \fclose($counterPipes[$pipeIndex][1]);
-                    }
-                }
-
-                $rangeStart = $counterIndex * $slugsPerCounter;
-                $rangeEnd = \min(($counterIndex + 1) * $slugsPerCounter, $slugCount);
-                $slugFragments = [];
-
-                for ($slugPos = $rangeStart; $slugPos < $rangeEnd; $slugPos++) {
-                    $slugKey = $slugOrder[$slugPos];
-                    $packedDates = $mergedBuckets[$slugKey];
-                    $counts = \array_count_values(\unpack('v*', $packedDates));
-                    if (\count($counts) > 1) {
-                        \ksort($counts, SORT_NUMERIC);
-                    }
-                    $jsonFragment = $slugJsonHeaders[$slugKey];
-                    $first = true;
-                    foreach ($counts as $dateId => $count) {
-                        if (!$first) {
-                            $jsonFragment .= ",\n";
-                        }
-
-                        $jsonFragment .= $dateJsonPrefix[$dateId] . $count;
-                        $first = false;
-                    }
-
-                    $jsonFragment .= "\n    }";
-                    $slugFragments[] = $jsonFragment;
-                }
-
-                if ($slugFragments !== []) {
-                    $fragment = \implode(",\n", $slugFragments);
-                    $this->writeSocketFully($counterPipes[$counterIndex][1], $fragment);
-                }
-                \fclose($counterPipes[$counterIndex][1]);
-
-                \posix_kill(\posix_getpid(), 9);
-                exit(0);
-            }
-
-            $counterPids[] = $pid;
-        }
-
-        for ($counterIndex = 0; $counterIndex < $counterCount; $counterIndex++) {
-            \fclose($counterPipes[$counterIndex][1]);
-        }
-
-        unset($mergedBuckets);
-
-        $outputHandle = \fopen($outputPath, 'wb');
-        \fwrite($outputHandle, "{\n");
-
-        $hasFragment = false;
-        for ($counterIndex = 0; $counterIndex < $counterCount; $counterIndex++) {
-            $fragment = \stream_get_contents($counterPipes[$counterIndex][0]);
-            \fclose($counterPipes[$counterIndex][0]);
-
-            if ($fragment === '') {
-                continue;
-            }
-
-            if ($hasFragment) {
-                \fwrite($outputHandle, ",\n");
-            }
-
-            \fwrite($outputHandle, $fragment);
-            $hasFragment = true;
-        }
-
-        \fwrite($outputHandle, "\n}");
-        \fclose($outputHandle);
-
-        foreach ($counterPids as $pid) {
-            \pcntl_waitpid($pid, $status);
-        }
-    }
-
-    /**
-     * @return array<int, array{0: resource, 1: resource}>
-     */
-    private function createCounterPipes(int $counterCount): array
-    {
-        $pipes = [];
-
-        for ($counterIndex = 0; $counterIndex < $counterCount; $counterIndex++) {
-            \socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $rawPair);
-            \socket_set_option($rawPair[0], SOL_SOCKET, SO_RCVBUF, 2097152);
-            \socket_set_option($rawPair[1], SOL_SOCKET, SO_SNDBUF, 2097152);
-
-            $pipes[$counterIndex] = [
-                \socket_export_stream($rawPair[0]),
-                \socket_export_stream($rawPair[1]),
-            ];
-        }
-
-        return $pipes;
-    }
-
-    /**
-     * @param resource $socket
-     */
-    private function writeSocketFully($socket, string $payload): void
-    {
-        $written = 0;
-        $payloadLength = \strlen($payload);
-        if ($payloadLength === 0) {
-            return;
-        }
-
-        while ($written < $payloadLength) {
-            $bytes = \fwrite($socket, \substr($payload, $written, 131072));
-            if ($bytes === false) {
-                break;
-            }
-
-            $written += $bytes;
-        }
+        fwrite($out, "\n}");
+        fclose($out);
     }
 }
