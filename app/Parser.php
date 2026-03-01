@@ -128,24 +128,18 @@ final class Parser
             } else {
                 \ksort($dates, \SORT_NUMERIC);
 
-                $formattedDates = [];
-
-                foreach ($dates as $date => $count) {
-                    $formattedDates[$formattedDatesByInt[$date]] = $count;
-                }
-
                 $outBuffer .= '    "\/blog\/' . $path . "\": {\n";
 
                 $isFirstDate = true;
 
-                foreach ($formattedDates as $date => $count) {
+                foreach ($dates as $date => $count) {
                     if ($isFirstDate) {
                         $isFirstDate = false;
                     } else {
                         $outBuffer .= ",\n";
                     }
 
-                    $outBuffer .= '        "' . $date . '": ' . $count;
+                    $outBuffer .= '        "' . $formattedDatesByInt[$date] . '": ' . $count;
                 }
 
                 $outBuffer .= "\n    }";
