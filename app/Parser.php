@@ -376,17 +376,20 @@ final class Parser
                     }
 
                     $counts = \array_count_values(\unpack('v*', $packedDates));
-                    $dateLines = [];
-
-                    for ($dateId = 0; $dateId < $dateCount; $dateId++) {
-                        if (!isset($counts[$dateId])) {
-                            continue;
+                    \ksort($counts, SORT_NUMERIC);
+                    $jsonFragment = $slugJsonHeaders[$slugKey];
+                    $first = true;
+                    foreach ($counts as $dateId => $count) {
+                        if (!$first) {
+                            $jsonFragment .= ",\n";
                         }
 
-                        $dateLines[] = $dateJsonPrefix[$dateId] . $counts[$dateId];
+                        $jsonFragment .= $dateJsonPrefix[$dateId] . $count;
+                        $first = false;
                     }
 
-                    $slugFragments[] = $slugJsonHeaders[$slugKey] . \implode(",\n", $dateLines) . "\n    }";
+                    $jsonFragment .= "\n    }";
+                    $slugFragments[] = $jsonFragment;
                 }
 
                 $fragment = \implode(",\n", $slugFragments);
