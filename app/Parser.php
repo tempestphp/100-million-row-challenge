@@ -23,7 +23,7 @@ final class Parser
         $pathByIds = [];
 
         foreach (Visit::all() as $pathId => $visit) {
-            $path = substr($visit->uri, $prefixLength);
+            $path = \substr($visit->uri, $prefixLength);
             $pathCache[$path] = $pathId;
             $pathByIds[$pathId] = $path;
         }
