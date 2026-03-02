@@ -19,7 +19,7 @@ final class DataParseCommand
 
         $startTime = microtime(true);
 
-        new Parser()->parse($inputPath, $outputPath);
+        Parser::parse($inputPath, $outputPath);
 
         $endTime = microtime(true);
         $executionTime = $endTime - $startTime;
