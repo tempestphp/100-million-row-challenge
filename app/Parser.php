@@ -10,8 +10,6 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
-use function file_get_contents;
-use function file_put_contents;
 use function filesize;
 use function fopen;
 use function fread;
@@ -26,7 +24,6 @@ use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
-use function set_error_handler;
 use function shmop_delete;
 use function shmop_open;
 use function shmop_read;
@@ -38,8 +35,6 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function sys_get_temp_dir;
-use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
@@ -49,7 +44,7 @@ final class Parser
     private const int READ_BLOCK_BYTES = 163_840;
     private const int SLUG_SCAN_BYTES   = 2_097_152;
     private const int URL_PREFIX_BYTES  = 25;
-    private const int PROCESS_COUNT     = 8;
+    private const int PROCESS_COUNT     = 4;
 
     public function parse($inputPath, $outputPath)
     {
@@ -173,37 +168,12 @@ final class Parser
         $chunkOffsets[] = $inputBytes;
         $markPhase('chunk-offsets');
 
-        $tmpDir    = sys_get_temp_dir();
-        $myPid     = getmypid();
-        $tmpPrefix = $tmpDir . '/p100m_' . $myPid;
-
+        $myPid      = getmypid();
         $shmSegSize = $slugTotal * $dateCount * 2;
-        $shmHandles = [];
-        $useShm     = false;
-
-        $allOk = true;
-        for ($w = 0; $w < $workerTotal - 1; $w++) {
-            $shmKey = $myPid * 100 + $w;
-            set_error_handler(null);
-            $shm = @shmop_open($shmKey, 'c', 0644, $shmSegSize);
-            set_error_handler(null);
-            if ($shm === false) {
-                foreach ($shmHandles as [$k, $s]) {
-                    shmop_delete($s);
-                }
-                $shmHandles = [];
-                $allOk      = false;
-                break;
-            }
-            $shmHandles[$w] = [$shmKey, $shm];
-        }
-        $useShm = $allOk;
-
-        $childMap = [];
+        $childMap   = [];
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
-            $tmpFile = $tmpPrefix . '_' . $w;
-            $pid     = pcntl_fork();
+            $pid = pcntl_fork();
             if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
@@ -218,11 +188,8 @@ final class Parser
                 $counts = self::reduceBucketsToCounts($buckets, $slugTotal, $dateCount);
                 $packed = pack('v*', ...$counts);
 
-                if ($useShm) {
-                    shmop_write($shmHandles[$w][1], $packed, 0);
-                } else {
-                    file_put_contents($tmpFile, $packed);
-                }
+                $shm = shmop_open($myPid * 10 + $w, 'c', 0644, $shmSegSize);
+                shmop_write($shm, $packed, 0);
 
                 exit(0);
             }
@@ -249,18 +216,15 @@ final class Parser
             $w = $childMap[$pid];
             unset($childMap[$pid]);
 
-            if ($useShm) {
-                $packed = shmop_read($shmHandles[$w][1], 0, $shmSegSize);
-                shmop_delete($shmHandles[$w][1]);
-            } else {
-                $tmpFile = $tmpPrefix . '_' . $w;
-                $packed  = file_get_contents($tmpFile);
-                unlink($tmpFile);
-            }
+            $shm    = shmop_open($myPid * 10 + $w, 'a', 0, 0);
+            $packed = shmop_read($shm, 0, $shmSegSize);
+            shmop_delete($shm);
 
             $childCounts = unpack('v*', $packed);
             for ($j = 0, $k = 1; $j < $n; $j++, $k++) {
-                $counts[$j] += $childCounts[$k];
+                if ($v = $childCounts[$k]) {
+                    $counts[$j] += $v;
+                }
             }
         }
         $markPhase('parse-and-reduce');
