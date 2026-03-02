@@ -15,10 +15,10 @@ final class Parser
     const NEWLINE_SEARCH_SIZE = 256;
 
     // 16MB read/write buffers.
-    const STREAM_BUFFER_SIZE = 16 << 20;
+    const STREAM_BUFFER_SIZE = 1 << 20;
 
     // 128MB chunk size when reading input.
-    const READ_CHUNK_SIZE = 128 << 20;
+    const READ_CHUNK_SIZE = 8 << 20;
 
     // Number of workers to split the input into.
     const WORKER_COUNT = 8;
