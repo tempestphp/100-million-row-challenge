@@ -1,6 +1,42 @@
 #!/usr/bin/env php
 <?php
 
+// Fast-path: skip entire Tempest framework boot for data:parse
+// The benchmark command is: php tempest data:parse --input-path=... --output-path=...
+if (isset($argv[1]) && $argv[1] === 'data:parse') {
+    // Parse --input-path and --output-path from CLI args
+    $inputPath = __DIR__.'/data/data.csv';
+    $outputPath = __DIR__.'/data/data.json';
+
+    for ($i = 2; $i < $argc; $i++) {
+        $arg = $argv[$i];
+        if (str_starts_with($arg, '--input-path=')) {
+            $inputPath = substr($arg, 13);
+            // Strip surrounding quotes if present (from escapeshellarg)
+            $inputPath = trim($inputPath, "'\"");
+        } elseif (str_starts_with($arg, '--output-path=')) {
+            $outputPath = substr($arg, 14);
+            $outputPath = trim($outputPath, "'\"");
+        }
+    }
+
+    // Minimal autoloader — only load what we need
+    require_once __DIR__ . '/vendor/autoload.php';
+
+    $startTime = microtime(true);
+
+    \App\Parser::parse($inputPath, $outputPath);
+
+    $endTime = microtime(true);
+    $executionTime = $endTime - $startTime;
+
+    // Output execution time (matches what DataParseCommand does)
+    echo "\033[32m{$executionTime}\033[0m" . PHP_EOL;
+
+    exit(0);
+}
+
+// Normal Tempest framework boot for all other commands
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
