@@ -6,6 +6,8 @@ namespace App;
 
 final class Parser
 {
+    private const int COMMA = -26; // from end of line (including newline)
+
     public function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
@@ -14,9 +16,8 @@ final class Parser
         $data = [];
 
         while ($line = fgets($stream)) {
-            $comma = strpos($line, ',');
-            $path = substr($line, 19, $comma - 19);
-            $date = substr($line, $comma + 1, 10);
+            $path = substr($line, 19, self::COMMA - 1);
+            $date = substr($line, self::COMMA, 10);
 
             if (!isset($data[$path])) {
                 $data[$path] = [$date => 1];
