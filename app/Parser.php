@@ -27,23 +27,21 @@ use function pcntl_fork;
 use function pcntl_wait;
 use function pcntl_signal;
 use function pcntl_async_signals;
-use function sem_acquire;
-use function sem_get;
-use function sem_release;
-use function sem_remove;
-use function shmop_delete;
-use function shmop_open;
-use function shmop_read;
-use function shmop_write;
-use function set_error_handler;
-use function restore_error_handler;
+use function stream_get_contents;
+use function stream_select;
+use function stream_set_blocking;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
+use function stream_socket_pair;
 
 use const SEEK_CUR;
 use const SIG_DFL;
 use const SIGTERM;
 use const SIGINT;
+use const WNOHANG;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
+use const STREAM_IPPROTO_IP;
 
 final class Parser
 {
@@ -53,11 +51,11 @@ final class Parser
     private const int SEGMENT_COUNT = 32;
     private const int URI_OFFSET    = 25;
     private const int FILE_SIZE     = 7_509_674_827;
+    private const int LOOP_FENCE    = 1600; // 16 * (48 + 52)
+    private const int MIN_SLUG_LEN  = 4;
 
     private array $childPids = [];
-
-    private ?array $ipcQueue   = null;
-    private ?array $ipcShmConf = null;
+    private array $pipes     = [];
 
     public static function parse(string $source, string $destination): void
     {
@@ -79,11 +77,23 @@ final class Parser
         }
 
         $boundaries = $this->calculateSplits($input);
-        $shmConfig  = $this->setupSharedMemory($slugCount, $dateCount);
-        $queue      = $this->initWorkQueue();
 
-        $this->ipcQueue   = $queue;
-        $this->ipcShmConf = $shmConfig;
+        // Strided assignment: worker $i owns segments $i, $i+W, $i+2W ...
+        // 32 segments / 8 workers = exactly 4 segments each.
+        $workerSegments = [];
+        for ($s = 0; $s < self::SEGMENT_COUNT; $s++) {
+            $workerSegments[$s % self::WORKER_COUNT][] = $s;
+        }
+
+        // Create one pipe pair per child worker before any forking.
+        // [0] = child write end, [1] = parent read end.
+        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
+            $this->pipes[$i] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            if ($this->pipes[$i] === false) {
+                throw new \RuntimeException("stream_socket_pair() failed for worker $i");
+            }
+        }
+
         $this->registerShutdownHandlers();
 
         $pids = [];
@@ -98,35 +108,87 @@ final class Parser
                 pcntl_signal(SIGTERM, SIG_DFL);
                 pcntl_signal(SIGINT,  SIG_DFL);
 
-                $this->runWorker($input, $boundaries, $slugMap, $dateIds, $dateCount, $slugCount, $queue, $shmConfig, $i);
+                // Child only needs its own write end — close the parent's read end
+                // of our pipe and let the OS clean up everything else on exit.
+                fclose($this->pipes[$i][1]);
+
+                $this->runWorker(
+                    $input, $boundaries, $slugMap, $dateIds,
+                    $dateCount, $slugCount,
+                    $workerSegments[$i], $this->pipes[$i][0]
+                );
                 exit(0);
             }
+
+            // Parent closes the child's write end after forking.
+            fclose($this->pipes[$i][0]);
 
             $pids[$pid]          = $i;
             $this->childPids[$i] = $pid;
         }
 
-        $aggregated = array_fill(0, $slugCount * $dateCount, 0);
-        $this->consumeQueue($input, $boundaries, $slugMap, $dateIds, $queue, $aggregated);
+        // Parent processes its own segments while children work in parallel.
+        $aggregated     = array_fill(0, $slugCount * $dateCount, 0);
+        $parentSegments = $workerSegments[self::WORKER_COUNT - 1];
 
-        while ($pids) {
-            $pid = pcntl_wait($status);
-            if ($pid <= 0) continue;
+        $fh = fopen($input, 'rb');
+        stream_set_read_buffer($fh, 0);
+        foreach ($parentSegments as $s) {
+            $this->parseRange($fh, $boundaries[$s], $boundaries[$s + 1], $slugMap, $dateIds, $aggregated);
+        }
+        fclose($fh);
 
-            $workerIdx    = $pids[$pid];
-            unset($pids[$pid], $this->childPids[$workerIdx]);
+        // Drain pipes concurrently to avoid deadlock: children may produce more
+        // data than the pipe buffer can hold (~64KB on Linux). We must read from
+        // the pipes while also waiting for children to exit.
+        $workerBuffers = array_fill(0, self::WORKER_COUNT - 1, '');
 
-            $workerData   = $this->retrieveWorkerResult($shmConfig, $workerIdx);
-            $workerCounts = array_values(unpack('v*', $workerData));
-            $total        = $slugCount * $dateCount;
+        // Set all parent read ends to non-blocking so stream_select can drain them.
+        $readPipes = [];
+        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
+            stream_set_blocking($this->pipes[$i][1], false);
+            $readPipes[$i] = $this->pipes[$i][1];
+        }
 
+        while ($pids || $readPipes) {
+            // Drain whatever is available right now across all open pipes.
+            if ($readPipes) {
+                $read   = array_values($readPipes);
+                $write  = null;
+                $except = null;
+                if (stream_select($read, $write, $except, 0, 50_000)) {
+                    foreach ($read as $pipe) {
+                        $idx   = array_search($pipe, $readPipes);
+                        $chunk = fread($pipe, 65_536);
+                        if ($chunk !== false && $chunk !== '') {
+                            $workerBuffers[$idx] .= $chunk;
+                        }
+                        if (feof($pipe)) {
+                            fclose($pipe);
+                            unset($readPipes[$idx]);
+                        }
+                    }
+                }
+            }
+
+            // Non-blocking wait: reap any child that has already exited.
+            if ($pids) {
+                $pid = pcntl_wait($status, WNOHANG);
+                if ($pid > 0) {
+                    $workerIdx = $pids[$pid];
+                    unset($pids[$pid], $this->childPids[$workerIdx]);
+                }
+            }
+        }
+
+        // Aggregate all child results into $aggregated.
+        $total = $slugCount * $dateCount;
+        for ($w = 0; $w < self::WORKER_COUNT - 1; $w++) {
+            $workerCounts = array_values(unpack('v*', $workerBuffers[$w]));
             for ($j = 0; $j < $total; $j++) {
                 $aggregated[$j] += $workerCounts[$j];
             }
         }
-
-        $this->cleanupIPC($queue);
-        $this->ipcQueue = $this->ipcShmConf = null;
 
         $this->generateJson($output, $aggregated, $slugs, $dateList);
     }
@@ -142,9 +204,10 @@ final class Parser
             foreach ($this->childPids as $pid) {
                 @pcntl_waitpid($pid, $status);
             }
-            if ($this->ipcQueue !== null) {
-                $this->cleanupIPC($this->ipcQueue);
-                $this->ipcQueue = null;
+            foreach ($this->pipes as $pair) {
+                foreach ($pair as $fd) {
+                    @fclose($fd);
+                }
             }
             exit(1);
         };
@@ -153,27 +216,22 @@ final class Parser
         pcntl_signal(SIGINT,  $handler);
     }
 
-    private function runWorker($path, $splits, $slugMap, $dateIds, $dateCount, $slugCount, $queue, $shm, $idx): void
-    {
+    private function runWorker(
+        string $path, array $splits, array $slugMap, array $dateIds,
+        int $dateCount, int $slugCount,
+        array $segments, $pipe
+    ): void {
         $counts = array_fill(0, $slugCount * $dateCount, 0);
-        $this->consumeQueue($path, $splits, $slugMap, $dateIds, $queue, $counts);
-        $packed = pack('v*', ...$counts);
 
-        if ($shm['handles'][$idx] === false) {
-            throw new \RuntimeException("Shared memory handle for worker $idx is invalid.");
-        }
-
-        shmop_write($shm['handles'][$idx], $packed, 0);
-    }
-
-    private function consumeQueue($path, $splits, $slugMap, $dateIds, $queue, &$counts): void
-    {
         $fh = fopen($path, 'rb');
         stream_set_read_buffer($fh, 0);
-        while (($chunkIdx = $this->nextJob($queue)) !== -1) {
-            $this->parseRange($fh, $splits[$chunkIdx], $splits[$chunkIdx + 1], $slugMap, $dateIds, $counts);
+        foreach ($segments as $s) {
+            $this->parseRange($fh, $splits[$s], $splits[$s + 1], $slugMap, $dateIds, $counts);
         }
         fclose($fh);
+
+        fwrite($pipe, pack('v*', ...$counts));
+        fclose($pipe);
     }
 
     private function parseRange($fh, $start, $end, $slugMap, $dateIds, &$counts): void
@@ -199,166 +257,80 @@ final class Parser
             }
 
             $p     = self::URI_OFFSET;
-            $fence = $lastNl - (16 * (49 + 52)); // 1616
+            $fence = $lastNl - self::LOOP_FENCE;
 
             while ($p < $fence) {
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
 
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
             }
 
             while ($p < $lastNl) {
-                $comma = strpos($buffer, ',', $p);
+                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
                 $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
                 $p = $comma + 52;
             }
         }
-    }
-
-    private function nextJob(array $queue): int
-    {
-        sem_acquire($queue['sem']);
-        $val = unpack('V', shmop_read($queue['shm'], 0, 4))[1];
-        if ($val < self::SEGMENT_COUNT) {
-            shmop_write($queue['shm'], pack('V', $val + 1), 0);
-        } else {
-            $val = -1;
-        }
-        sem_release($queue['sem']);
-        return $val;
-    }
-
-    private function shmopCreate(int $key, int $size): \Shmop
-    {
-        set_error_handler(static fn() => true);
-
-        $handle = @shmop_open($key, 'n', 0644, $size);
-
-        if ($handle === false) {
-            $stale = @shmop_open($key, 'w', 0, 0);
-            if ($stale !== false) {
-                shmop_delete($stale);
-            }
-            $handle = @shmop_open($key, 'n', 0644, $size);
-        }
-
-        restore_error_handler();
-
-        if ($handle === false) {
-            throw new \RuntimeException(
-                "shmop_open() failed for key $key (size $size). " .
-                "Check kernel shmmax: `sysctl kern.sysv.shmmax` on macOS."
-            );
-        }
-
-        return $handle;
-    }
-
-    private function setupSharedMemory(int $sCount, int $dCount): array
-    {
-        $size    = $sCount * $dCount * 2;
-        $pid     = getmypid();
-        $handles = [];
-
-        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
-            $handles[$i] = $this->shmopCreate($pid + 100 + $i, $size);
-        }
-
-        return ['handles' => $handles, 'size' => $size];
-    }
-
-    private function initWorkQueue(): array
-    {
-        $pid = getmypid();
-
-        set_error_handler(static fn() => true);
-
-        $sem = @sem_get($pid + 1, 1, 0644, true);
-        if ($sem === false) {
-            restore_error_handler();
-            throw new \RuntimeException("sem_get() failed for key " . ($pid + 1));
-        }
-
-        restore_error_handler();
-
-        $shm = $this->shmopCreate($pid + 2, 4);
-        shmop_write($shm, pack('V', 0), 0);
-
-        return ['sem' => $sem, 'shm' => $shm];
-    }
-
-    private function retrieveWorkerResult(array $config, int $idx): string
-    {
-        $handle = $config['handles'][$idx];
-        $data   = shmop_read($handle, 0, $config['size']);
-        shmop_delete($handle);
-        return $data;
-    }
-
-    private function cleanupIPC(array $queue): void
-    {
-        @shmop_delete($queue['shm']);
-        @sem_remove($queue['sem']);
     }
 
     private function buildDateRegistry(): array
