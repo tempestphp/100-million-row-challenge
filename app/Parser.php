@@ -33,11 +33,13 @@ use function shmop_delete;
 use function shmop_open;
 use function shmop_read;
 use function shmop_write;
+use function file_get_contents;
+use function file_put_contents;
 use function str_replace;
-use function stream_socket_pair;
 use function stream_set_read_buffer;
-use function sys_get_temp_dir;
 use function stream_set_write_buffer;
+use function sys_get_temp_dir;
+use function unlink;
 use function strlen;
 use function strpos;
 use function strrpos;
@@ -199,17 +201,33 @@ final class Parser
             \file_put_contents($queueFile, pack('V', 0));
         }
 
-        $sockets  = [];
+        $shmSegSize = $slugTotal * $dateCount * 2;
+        $shmHandles = [];
+        $useShm     = true;
+
+        for ($w = 0; $w < $workerTotal - 1; $w++) {
+            $shmKey = $myPid * 100 + $w;
+            set_error_handler(null);
+            $shm = @shmop_open($shmKey, 'c', 0644, $shmSegSize);
+            set_error_handler(null);
+            if ($shm === false) {
+                foreach ($shmHandles as [$k, $s]) {
+                    shmop_delete($s);
+                }
+                $shmHandles = [];
+                $useShm     = false;
+                break;
+            }
+            $shmHandles[$w] = [$shmKey, $shm];
+        }
+
         $childMap = [];
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
-            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
-            $pid  = pcntl_fork();
+            $pid = pcntl_fork();
             if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
-                fclose($pair[0]);
-
                 $buckets = array_fill(0, $slugTotal, '');
                 $fh      = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
@@ -231,14 +249,15 @@ final class Parser
                 $counts = self::q3($buckets, $slugTotal, $dateCount);
                 $packed = pack('v*', ...$counts);
 
-                fwrite($pair[1], $packed);
-                fclose($pair[1]);
+                if ($useShm) {
+                    shmop_write($shmHandles[$w][1], $packed, 0);
+                } else {
+                    file_put_contents($tmpPrefix . '_' . $w, $packed);
+                }
 
                 exit(0);
             }
 
-            fclose($pair[1]);
-            $sockets[$pid] = $pair[0];
             $childMap[$pid] = $w;
         }
 
@@ -261,41 +280,27 @@ final class Parser
         fclose($fh);
 
         $counts = self::q3($buckets, $slugTotal, $dateCount);
-        $n      = $slugTotal * $dateCount;
 
-        $childData = [];
-        $remaining = $sockets; 
-
-        while ($remaining) {
-            $read = array_values($remaining);
-            $w = null;
-            $e = null;
-            stream_select($read, $w, $e, 300);
-
-            foreach ($read as $sock) {
-                $pid = array_search($sock, $remaining, true);
-                $chunk = fread($sock, 131072);
-                if ($chunk === '' || $chunk === false) {
-                    fclose($sock);
-                    unset($remaining[$pid]);
-                } else {
-                    $childData[$pid] = ($childData[$pid] ?? '') . $chunk;
-                }
-            }
-        }
-
-        // Reap children
         while ($childMap) {
             $pid = pcntl_wait($status);
-            if (isset($childMap[$pid])) unset($childMap[$pid]);
-        }
+            if (!isset($childMap[$pid])) continue;
 
-        foreach ($childData as $packed) {
-            $childCounts = unpack('v*', $packed);
-            for ($j = 0, $k = 1; $j < $n; $j++, $k++) {
-                if ($v = $childCounts[$k]) {
-                    $counts[$j] += $v;
-                }
+            $w = $childMap[$pid];
+            unset($childMap[$pid]);
+
+            if ($useShm) {
+                $packed = shmop_read($shmHandles[$w][1], 0, $shmSegSize);
+                shmop_delete($shmHandles[$w][1]);
+            } else {
+                $tmpFile = $tmpPrefix . '_' . $w;
+                $packed  = file_get_contents($tmpFile);
+                unlink($tmpFile);
+            }
+
+            $j = 0;
+            foreach (unpack('v*', $packed) as $v) {
+                $counts[$j] += $v;
+                $j++;
             }
         }
         if ($useSemQueue) {
