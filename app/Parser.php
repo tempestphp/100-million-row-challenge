@@ -9,23 +9,23 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
+        var_dump(func_get_args());
+
+
         $t = hrtime(true);
         $h = fopen($inputPath, 'r');
         if (!$h) {
             throw new Exception("Failed to open file: $inputPath");
         }
-        var_dump($t - hrtime(true));
 
-        $res = [];
-        foreach (Visit::all() as $visit) {
-            $res[substr($visit->uri, 19)] = array_fill_keys(
-                array_keys(self::DATES),
-                0,
-            );
-        }
+        $keymap = [];
+
+        $keymapLen = 268;
+        $dmLen = 1909;
 
         var_dump($t - hrtime(true));
 
+        $res = array_fill(0, $keymapLen * $dmLen, 0);
         $a = $b = $c = $d = 0;
         while (true) {
             $a += hrtime(true);
@@ -36,16 +36,19 @@ final class Parser
             }
 
             $b += hrtime(true);
-            $comma = strpos($line, ',');
+            $dt = substr($line, -26, -16);
             $b -= hrtime(true);
+
             $c += hrtime(true);
-            $u = substr($line, 19, $comma - 19);
-            $dt = substr($line, $comma + 1, 10);
+            $u = substr($line, 19, -27);
             $c -= hrtime(true);
 
+            $keymap[$u] ??= count($keymap);
+
+            $idx = $keymap[$u] * $dmLen + self::DATES[$dt];
+
             $d += hrtime(true);
-            //$res[$u][$dt] ??= 0;
-            $res[$u][$dt]++;
+            $res[$idx]++;
             $d -= hrtime(true);
         }
 
@@ -56,30 +59,31 @@ final class Parser
             'd' => $d,
         ]);
 
-        var_dump($t - hrtime(true));
         fclose($h);
+
+        var_dump($t - hrtime(true));
+        $keymapFlip = array_flip($keymap);
         var_dump($t - hrtime(true));
 
-
+        $finalRes = [];
         foreach ($res as $k => $indexed) {
-            foreach ($indexed as $dt => $item) {
-                if ($item === 0) {
-                    unset($res[$k][$dt]);
-                }
+            if (!$indexed) {
+                continue;
             }
 
-            if (!$res[$k]) {
-                unset($res[$k]);
-            } else {
-                ksort($indexed);
-            }
+
+            $u = $keymapFlip[intdiv($k, $dmLen)];
+            $d = self::FLIP[$k % $dmLen];
+
+            $finalRes[$u] ??= [];
+            $finalRes[$u][$d] = $indexed;
         }
 
         var_dump($t - hrtime(true));
 
         file_put_contents(
             $outputPath,
-            json_encode($res, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+            json_encode($finalRes, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
         );
         var_dump($t - hrtime(true));
     }
