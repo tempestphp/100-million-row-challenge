@@ -5,17 +5,22 @@ namespace App;
 final class Parser
 {
     private const int URL_COUNT = 268;
-    private const int URL_BITS = 9;
-    private const int YEAR_BITS = 3;
-    private const int MONTH_BITS = 4;
-    private const int DAY_BITS = 5;
-    private const int DAY_MONTH_BITS = self::MONTH_BITS + self::DAY_BITS;
-    private const int DATE_BITS = self::YEAR_BITS + self::DAY_MONTH_BITS;
-    private const int HASH_BITS = self::URL_BITS + self::DATE_BITS;
-    private const int HASH_SIZE = 2 ** self::HASH_BITS;
+    private const int DATE_BITS = 11;
+    private const int DATE_COUNT = 1885;
+    private const int HASH_SIZE = (2 ** self::DATE_BITS) * self::URL_COUNT;
+    private const int DATE_MASK = 2 ** self::DATE_BITS - 1;
 
     public function parse(string $inputPath, string $outputPath): void
     {
+        $date = new \DateTime('2021-01-01');
+        $day = new \DateInterval('P1D');
+        $dateMap = [];
+        for ($i = 0; $i < self::DATE_COUNT; $i++) {
+            $dateMap[$date->format('Y-m-d')] = $i;
+            $date->add($day);
+        }
+        $dateLookup = \array_flip($dateMap);
+
         $outputData = \array_fill(0, self::HASH_SIZE, 0);
 
         $inputStream = \fopen($inputPath, 'r');
@@ -25,19 +30,15 @@ final class Parser
         while ($urlCount < self::URL_COUNT && $line = \fgets($inputStream)) {
             $path = \substr($line, 25, -27);
             $urlMap[$path] ??= $urlCount++ << self::DATE_BITS;
-            $y = ((int) \substr($line, -23, 1)) << self::DAY_MONTH_BITS;
-            $m = ((int) \substr($line, -21, 2)) << self::DAY_BITS;
-            $d = ((int) \substr($line, -18, 2));
-            $hash = $urlMap[$path] | $y | $m | $d;
+            $date = \substr($line, -26, 10);
+            $hash = $urlMap[$path] | $dateMap[$date];
             $outputData[$hash]++;
         }
 
         while ($line = \fgets($inputStream)) {
             $path = \substr($line, 25, -27);
-            $y = ((int) \substr($line, -26, 1)) << self::DAY_MONTH_BITS;
-            $m = ((int) \substr($line, -21, 2)) << self::DAY_BITS;
-            $d = ((int) \substr($line, -18, 2));
-            $hash = $urlMap[$path] | $y | $m | $d;
+            $date = \substr($line, -26, 10);
+            $hash = $urlMap[$path] | $dateMap[$date];
             $outputData[$hash]++;
         }
 
@@ -49,13 +50,10 @@ final class Parser
         foreach ($urlMap as $url => $urlHash) {
             \fwrite($outputStream, "    \"\/blog\/{$url}\": {\n");
 
-            $end = $urlHash + (2 ** self::DATE_BITS);
+            $end = $urlHash + self::DATE_COUNT;
             for ($i = $urlHash; $i < $end; $i++) {
                 if ($outputData[$i] > 0) {
-                    $y = ($i >> self::DAY_MONTH_BITS) & 0b111;
-                    $m = ($i >> self::DAY_BITS) & 0b1111;
-                    $d = $i & 0b11111;
-                    \fwrite($outputStream, \sprintf('        "202%d-%02d-%02d": %d,', $y, $m, $d, $outputData[$i]) . "\n");
+                    \fwrite($outputStream, "        \"{$dateLookup[$i & self::DATE_MASK]}\": {$outputData[$i]},\n");
                 }
             }
 
