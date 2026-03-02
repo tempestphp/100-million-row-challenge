@@ -57,11 +57,6 @@ final class Parser
         }
         unset($idToDate);
 
-        $slugJsonHeaders = [];
-        foreach ($slugOrderList as $slug) {
-            $slugJsonHeaders[$slug] = '    "\/blog\/' . $slug . '": {' . "\n";
-        }
-
         $fileSize = \filesize($inputPath);
         $boundaries = [0];
         for ($w = 1; $w < $numWorkers; $w++) {
@@ -185,6 +180,11 @@ final class Parser
         } while ($drained < $numWorkers);
 
         $numSlugs = \count($slugOrderList);
+
+        $slugJsonHeaders = [];
+        foreach ($slugOrderList as $slug) {
+            $slugJsonHeaders[$slug] = '    "\/blog\/' . $slug . '": {' . "\n";
+        }
         $slugsPerCounter = (int)\ceil($numSlugs / $numCounters);
 
         $countPipes = [];
