@@ -29,7 +29,7 @@ final class Parser
         }
 
         foreach ($data as &$dates) {
-            ksort($dates);
+            ksort($dates, SORT_STRING);
         }
 
         file_put_contents($outputPath, json_encode($data, JSON_PRETTY_PRINT, 2));
