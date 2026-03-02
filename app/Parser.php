@@ -22,15 +22,17 @@ final class Parser
         $urlCount = 0;
         $urlMap = [];
 
-        while ($urlCount < self::URL_COUNT && $line = \fgets($inputStream, 101)) {
-            \preg_match('#^.{25}([^,]+).{4}(\d)-(\d{2})-(\d{2})#s', $line, $m);
-            $urlMap[$m[1]] ??= $urlCount++ << self::DATE_BITS;
-            $outputData[$urlMap[$m[1]] | ((int) $m[2] << self::DAY_MONTH_BITS) | ((int) $m[3] << self::DAY_BITS) | ((int) $m[4])]++;
+        while ($urlCount < self::URL_COUNT && $line = \fgets($inputStream)) {
+            \preg_match('#^https://stitcher\.io/blog/([^,]+),202(\d)-(\d\d)-(\d\d)#', $line, $matches);
+            $urlMap[$matches[1]] ??= $urlCount++ << self::DATE_BITS;
+            $hash = $urlMap[$matches[1]] | ((int) $matches[2] << self::DAY_MONTH_BITS) | ((int) $matches[3] << self::DAY_BITS) | ((int) $matches[4]);
+            $outputData[$hash]++;
         }
 
-        while ($line = \fgets($inputStream, 101)) {
-            \preg_match('#^.{25}([^,]+).{4}(\d)-(\d{2})-(\d{2})#s', $line, $m);
-            $outputData[$urlMap[$m[1]] | ((int) $m[2] << self::DAY_MONTH_BITS) | ((int) $m[3] << self::DAY_BITS) | ((int) $m[4])]++;
+        while ($line = \fgets($inputStream)) {
+            \preg_match('#^https://stitcher\.io/blog/([^,]+),202(\d)-(\d\d)-(\d\d)#', $line, $matches);
+            $hash = $urlMap[$matches[1]] | ((int) $matches[2] << self::DAY_MONTH_BITS) | ((int) $matches[3] << self::DAY_BITS) | ((int) $matches[4]);
+            $outputData[$hash]++;
         }
 
         \fclose($inputStream);
