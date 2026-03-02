@@ -10,7 +10,6 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
-use function filesize;
 use function fopen;
 use function fread;
 use function fseek;
@@ -20,7 +19,6 @@ use function gc_disable;
 use function getmypid;
 use function implode;
 use function intdiv;
-use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
@@ -47,14 +45,16 @@ use function substr;
 use function unpack;
 
 use const SEEK_CUR;
+use const WNOHANG;
 
 final class Parser
 {
     private const int K0 = 163_840;
-    private const int K1   = 2_097_152;
-    private const int K2  = 25;
-    private const int K3     = 10;
-    private const int K4       = 20;
+    private const int K1 = 262_144;
+    private const int K2 = 25;
+    private const int K3 = 10;
+    private const int K4 = 20;
+    private const int K5 = 7_509_674_827;
 
     public function parse($inputPath, $outputPath)
     {
@@ -96,7 +96,7 @@ final class Parser
 
         gc_disable();
 
-        $inputBytes   = filesize($inputPath);
+        $inputBytes  = self::K5;
         $workerTotal = self::K3;
         $planId      = 'default';
 
@@ -131,7 +131,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, min(self::K1, $inputBytes));
+        $raw = fread($handle, self::K1);
         fclose($handle);
 
         $slugIdByKey   = [];
@@ -139,12 +139,13 @@ final class Parser
         $slugTotal = 0;
         $pos       = 0;
         $lastNl    = strrpos($raw, "\n") ?: 0;
+        $prefixLen = self::K2;
 
         while ($pos < $lastNl) {
-            $nl = strpos($raw, "\n", $pos + 52);
-            if ($nl === false) break;
+            $sep = strpos($raw, ',', $pos + $prefixLen);
+            if ($sep === false) break;
 
-            $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
+            $slug = substr($raw, $pos + $prefixLen, $sep - $pos - $prefixLen);
 
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
@@ -152,7 +153,7 @@ final class Parser
                 $slugTotal++;
             }
 
-            $pos = $nl + 1;
+            $pos = $sep + 27;
         }
         unset($raw);
         $markPhase('slug-scan');
@@ -281,8 +282,12 @@ final class Parser
 
         $counts = self::q3($buckets, $slugTotal, $dateCount);
 
-        while ($childMap) {
-            $pid = pcntl_wait($status);
+        $pending = count($childMap);
+        while ($pending > 0) {
+            $pid = pcntl_wait($status, WNOHANG);
+            if ($pid <= 0) {
+                $pid = pcntl_wait($status);
+            }
             if (!isset($childMap[$pid])) continue;
 
             $w = $childMap[$pid];
@@ -297,11 +302,12 @@ final class Parser
                 unlink($tmpFile);
             }
 
+            $wCounts = unpack('v*', $packed);
             $j = 0;
-            foreach (unpack('v*', $packed) as $v) {
-                $counts[$j] += $v;
-                $j++;
+            foreach ($wCounts as $v) {
+                $counts[$j++] += $v;
             }
+            $pending--;
         }
         if ($useSemQueue) {
             shmop_delete($queueShm);
@@ -410,7 +416,6 @@ final class Parser
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                if ($sep === false || $sep >= $lastNl) break;
                 $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
