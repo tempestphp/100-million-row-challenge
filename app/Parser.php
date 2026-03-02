@@ -29,7 +29,6 @@ use function pcntl_wait;
 use function getmypid;
 use function sys_get_temp_dir;
 use function stream_set_read_buffer;
-use function stream_set_write_buffer;
 use function unlink;
 use function count;
 use function flock;
@@ -42,8 +41,8 @@ use const SEEK_CUR;
 final class Parser
 {
     private const WORKERS = 8;
-    private const CHUNKS = 16;
-    private const READ_CHUNK = 163_840;
+    private const CHUNKS = 32;
+    private const READ_CHUNK = 4_194_304;
 
     public function parse(string $inputPath, string $outputPath): void
     {
@@ -339,10 +338,6 @@ final class Parser
 
     private static function writeJson(string $outputPath, array $cnt, array $paths, array $dates, int $dateCount): void
     {
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
-        fwrite($out, '{');
-
         $datePrefixes = [];
         for ($d = 0; $d < $dateCount; $d++) {
             $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
@@ -355,6 +350,7 @@ final class Parser
         }
 
         $first = true;
+        $parts = ['{'];
         for ($p = 0; $p < $pc; $p++) {
             $base = $p * $dateCount;
             $de = [];
@@ -365,13 +361,12 @@ final class Parser
             }
             if (!$de) continue;
 
-            $buf = $first ? "\n    " : ",\n    ";
+            $sep = $first ? "\n    " : ",\n    ";
             $first = false;
-            $buf .= $escapedPaths[$p] . ": {\n" . implode(",\n", $de) . "\n    }";
-            fwrite($out, $buf);
+            $parts[] = $sep . $escapedPaths[$p] . ": {\n" . implode(",\n", $de) . "\n    }";
         }
 
-        fwrite($out, "\n}");
-        fclose($out);
+        $parts[] = "\n}";
+        file_put_contents($outputPath, implode('', $parts));
     }
 }
