@@ -348,7 +348,7 @@ final class Parser
 
     private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
-        extract([]);
+        compact('slugIdByKey', 'dayIdTokens', 'buckets');
         fseek($handle, $start);
 
         $remaining = $end - $start;
