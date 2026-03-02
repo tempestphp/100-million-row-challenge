@@ -15,34 +15,19 @@ final class Parser
 
         $visits = [];
 
+        
         while (($line = fgets($handle)) !== false) {
-            $lineLength = strlen($line);
-            if ($lineLength < 27) {
+            $separatorPosition = strrpos($line, ',');
+            if ($separatorPosition === false || $separatorPosition < self::PATH_START) {
                 continue;
             }
 
-            $eolLength = ($lineLength > 1 && $line[$lineLength - 2] === "\r") ? 2 : 1;
-            $separatorPosition = $lineLength - (26 + $eolLength);
-
-            if ($line[$separatorPosition] !== ',') {
-                continue;
-            }
-
-            $pathStart = self::PATH_START;
-            if ($pathStart >= $separatorPosition) {
-                continue;
-            }
-
-            if ($line[$pathStart] !== '/') {
-                $path = '/';
-            } else {
-                $pathLength = strcspn($line, '?#,', $pathStart);
-                $path = substr($line, $pathStart, $pathLength);
-            }
+            $path = substr($line, self::PATH_START, $separatorPosition - self::PATH_START);
 
             $date = substr($line, $separatorPosition + 1, 10);
             $visits[$path][$date] = ($visits[$path][$date] ?? 0) + 1;
         }
+
 
         foreach ($visits as &$dailyVisits) {
             if (count($dailyVisits) > 1) {
@@ -51,16 +36,19 @@ final class Parser
         }
         unset($dailyVisits);
 
-        $json = json_encode($visits, JSON_PRETTY_PRINT);
 
-        if ($json === false) {
-            return;
-        }
-
-        if (PHP_EOL !== "\n") {
-            $json = str_replace("\n", PHP_EOL, $json);
-        }
-
-        file_put_contents($outputPath, $json);
+        // Only for Windows
+        // $json = json_encode($visits, JSON_PRETTY_PRINT);
+        //
+        // if ($json === false) {
+        //     return;
+        // }
+        //
+        // if (PHP_EOL !== "\n") {
+        //     $json = str_replace("\n", PHP_EOL, $json);
+        // }
+        //
+        // file_put_contents($outputPath, $json);
+        file_put_contents($outputPath, json_encode($visits, JSON_PRETTY_PRINT));
     }
 }
