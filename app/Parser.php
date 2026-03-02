@@ -23,21 +23,15 @@ final class Parser
         $urlMap = [];
 
         while ($urlCount < self::URL_COUNT && $line = \fgets($inputStream)) {
-            $path = \substr($line, 25, -27);
-            $urlMap[$path] ??= $urlCount++ << self::DATE_BITS;
-            $y = ((int) \substr($line, -23, 1)) << self::DAY_MONTH_BITS;
-            $m = ((int) \substr($line, -21, 2)) << self::DAY_BITS;
-            $d = ((int) \substr($line, -18, 2));
-            $hash = $urlMap[$path] | $y | $m | $d;
+            \preg_match('#^https://stitcher\.io/blog/([^,]+),202(\d)-(\d\d)-(\d\d)#', $line, $matches);
+            $urlMap[$matches[1]] ??= $urlCount++ << self::DATE_BITS;
+            $hash = $urlMap[$matches[1]] | ((int) $matches[2] << self::DAY_MONTH_BITS) | ((int) $matches[3] << self::DAY_BITS) | ((int) $matches[4]);
             $outputData[$hash]++;
         }
 
         while ($line = \fgets($inputStream)) {
-            $path = \substr($line, 25, -27);
-            $y = ((int) \substr($line, -26, 1)) << self::DAY_MONTH_BITS;
-            $m = ((int) \substr($line, -21, 2)) << self::DAY_BITS;
-            $d = ((int) \substr($line, -18, 2));
-            $hash = $urlMap[$path] | $y | $m | $d;
+            \preg_match('#^https://stitcher\.io/blog/([^,]+),202(\d)-(\d\d)-(\d\d)#', $line, $matches);
+            $hash = $urlMap[$matches[1]] | ((int) $matches[2] << self::DAY_MONTH_BITS) | ((int) $matches[3] << self::DAY_BITS) | ((int) $matches[4]);
             $outputData[$hash]++;
         }
 
