@@ -7,7 +7,7 @@ final class Parser
     private const int URL_COUNT = 268;
     private const int DATE_BITS = 11;
     private const int DATE_COUNT = 1885;
-    private const int HASH_SIZE = (2 ** self::DATE_BITS) * self::URL_COUNT;
+    private const int ARRAY_SIZE = (2 ** self::DATE_BITS) * self::URL_COUNT;
     private const int DATE_MASK = 2 ** self::DATE_BITS - 1;
 
     public function parse(string $inputPath, string $outputPath): void
@@ -21,25 +21,19 @@ final class Parser
         }
         $dateLookup = \array_flip($dateMap);
 
-        $outputData = \array_fill(0, self::HASH_SIZE, 0);
-
         $inputStream = \fopen($inputPath, 'r');
         $urlCount = 0;
         $urlMap = [];
+        $outputData = \array_fill(0, self::ARRAY_SIZE, 0);
 
         while ($urlCount < self::URL_COUNT && $line = \fgets($inputStream)) {
             $path = \substr($line, 19, -27);
             $urlMap[$path] ??= $urlCount++ << self::DATE_BITS;
-            $date = \substr($line, -26, 10);
-            $hash = $urlMap[$path] | $dateMap[$date];
-            $outputData[$hash]++;
+            $outputData[$urlMap[$path] | $dateMap[\substr($line, -26, 10)]]++;
         }
 
         while ($line = \fgets($inputStream)) {
-            $path = \substr($line, 19, -27);
-            $date = \substr($line, -26, 10);
-            $hash = $urlMap[$path] | $dateMap[$date];
-            $outputData[$hash]++;
+            $outputData[$urlMap[\substr($line, 19, -27)] | $dateMap[\substr($line, -26, 10)]]++;
         }
 
         \fclose($inputStream);
