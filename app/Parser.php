@@ -10,7 +10,7 @@ final class Parser
         $visits = [];
     
         while (($line = fgets($handle)) !== false) {
-            $separatorPosition = strrpos($line, ',');
+            $separatorPosition = strlen($line) - 27;
             $path = substr($line, 19, $separatorPosition - 19);
             $date = substr($line, $separatorPosition + 1, 10);
             
