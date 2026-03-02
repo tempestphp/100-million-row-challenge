@@ -8,7 +8,6 @@ use function array_count_values;
 use function array_fill;
 use function array_keys;
 use function array_search;
-use function date;
 use function fclose;
 use function fflush;
 use function fgets;
@@ -33,7 +32,6 @@ use function stream_set_write_buffer;
 use function strlen;
 use function strpos;
 use function strrpos;
-use function strtotime;
 use function substr;
 use function sys_get_temp_dir;
 use function unlink;
@@ -47,6 +45,7 @@ final class Parser
 {
     public function parse($inputPath, $outputPath)
     {
+        \gc_disable();
         $fileSize = filesize($inputPath);
         $numChunks = 16;
 
