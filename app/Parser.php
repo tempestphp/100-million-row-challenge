@@ -17,29 +17,37 @@ final class Parser
         \stream_set_read_buffer($inputRes, 0);
         $baseUrlLen = 0;
         $previousRaw = '';
+        $timestampLen = 25; // e.g. 2024-09-13T06:26:07+00:00
         while (true) {
             $raw = \fread($inputRes, $readLimit);
             if ($raw === '' || $raw === false) {
                 break;
             }
-            $lines = \explode("\n", $previousRaw . $raw);
-            $lineCount = \count($lines);
-            $previousRaw = $lines[$lineCount - 1];
-            $lineCount--;
-            for ($i = 0; $i < $lineCount; $i++) {
-                $line = $lines[$i];
-                if ($baseUrlLen === 0) {
-                    $baseUrlLen = \strpos($line, ':') + 3;
-                    $baseUrlLen = \strpos($line, '/', $baseUrlLen) + 1;
+            $raw = $previousRaw . $raw;
+            $from = 0;
+            while (true) {
+                $newlinePos = \strpos($raw, "\n", $from);
+                if ($newlinePos === false) {
+                    $previousRaw = \substr($raw, $from);
+                    break;
                 }
-                $comma = \strpos($line, ',', $baseUrlLen);
-                $url = \substr($line, $baseUrlLen, $comma - $baseUrlLen);
-                $date = \substr($line, $comma + 1, 10);
+                $comma = $newlinePos - $timestampLen - 1;
+                if ($baseUrlLen === 0) {
+                    $baseUrlLen = \strpos($raw, ':', $from) + 3;
+                    $baseUrlLen = \strpos($raw, '/', $baseUrlLen) + 1;
+                }
+
+                $from += $baseUrlLen;
+                $url = \substr($raw, $from, $comma - $from);
+                // first two year digits are always 20, so we can skip them
+                $date = \substr($raw, $comma + 3, 8);
                 if (!isset($visitStats[$url])) {
                     $visitStats[$url] = [$date => 1];
                 } else {
                     $visitStats[$url][$date] = ($visitStats[$url][$date] ?? 0) + 1;
                 }
+
+                $from = $newlinePos + 1;
             }
         }
         assert($previousRaw === '', 'The input file does not end with a newline character');
@@ -58,26 +66,26 @@ final class Parser
             }
             $hasFirstUrlWritten = true;
             $url = \str_replace('/', '\/', $url);
-            $temp = "    \"\\/$url\": {\n";
-
+            $buffer .= "    \"\\/$url\": {\n";
+            $bufferLen += 40; // rough estimate of the length of the URL
             \ksort($data, \SORT_STRING);
             $hasFirstDateWritten = false;
             foreach ($data as $date => $count) {
                 if ($hasFirstDateWritten) {
-                    $temp .= ",\n";
+                    $buffer .= ",\n";
+                    $bufferLen += 2;
                 }
                 $hasFirstDateWritten = true;
-                $temp .= "        \"$date\": $count";
+                $buffer .= "        \"20$date\": $count";
+                $bufferLen += 23; // rough estimate of the length of the date and count
+                if ($bufferLen > $writeLimit) {
+                    \fwrite($outputRes, $buffer);
+                    $buffer = '';
+                    $bufferLen = 0;
+                }
             }
-            $temp .= "\n    }";
-            $buffer .= $temp;
-            $bufferLen += \strlen($temp);
-
-            if ($bufferLen > $writeLimit) {
-                \fwrite($outputRes, $buffer);
-                $buffer = '';
-                $bufferLen = 0;
-            }
+            $buffer .= "\n    }";
+            $bufferLen += 6;
         }
 
         $buffer .= "\n}";
