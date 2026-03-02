@@ -24,15 +24,8 @@ use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
-use function file_get_contents;
-use function file_put_contents;
-use function shmop_delete;
-use function shmop_open;
-use function shmop_read;
-use function shmop_write;
 use function str_replace;
-use function sys_get_temp_dir;
-use function unlink;
+use function stream_socket_pair;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function strlen;
@@ -45,17 +38,54 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int READ_BLOCK_BYTES = 131_072;
+    private const int READ_BLOCK_BYTES = 163_840;
     private const int SLUG_SCAN_BYTES   = 2_097_152;
     private const int URL_PREFIX_BYTES  = 25;
-    private const int PROCESS_COUNT     = 4;
+    private const int PROCESS_COUNT     = 8;
 
     public function parse($inputPath, $outputPath)
     {
+        $runStartNs = \hrtime(true);
+        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
+        $phaseStartNs = $runStartNs;
+        $phaseMarks = [];
+        $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            $now = \hrtime(true);
+            $phaseMarks[] = [
+                'name' => $name,
+                'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
+                'total_ms' => ($now - $runStartNs) / 1_000_000,
+            ];
+            $phaseStartNs = $now;
+        };
+        $dumpPhases = static function (string $planId, int $workerTotal, int $chunkTotal) use (&$phaseMarks, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            \fwrite(STDERR, "[parser-profile] plan={$planId} workers={$workerTotal} chunks={$chunkTotal}\n");
+            foreach ($phaseMarks as $mark) {
+                \fwrite(
+                    STDERR,
+                    \sprintf(
+                        "  %-24s delta=%8.3f ms total=%8.3f ms\n",
+                        $mark['name'],
+                        $mark['delta_ms'],
+                        $mark['total_ms'],
+                    ),
+                );
+            }
+        };
+
         gc_disable();
 
         $inputBytes   = filesize($inputPath);
         $workerTotal = self::PROCESS_COUNT;
+        $planId      = 'default';
 
         $dayIdByKey   = [];
         $dayKeyById     = [];
@@ -84,6 +114,8 @@ final class Parser
         foreach ($dayIdByKey as $date => $id) {
             $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
+        $markPhase('date-maps');
+
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         $raw = fread($handle, min(self::SLUG_SCAN_BYTES, $inputBytes));
@@ -110,6 +142,8 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
+        $markPhase('slug-scan');
+
         foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, self::URL_PREFIX_BYTES);
             if (!isset($slugIdByKey[$slug])) {
@@ -118,6 +152,8 @@ final class Parser
                 $slugTotal++;
             }
         }
+        $markPhase('visit-merge');
+
         $chunkOffsets = [0];
         $bh = fopen($inputPath, 'rb');
         for ($i = 1; $i < $workerTotal; $i++) {
@@ -127,16 +163,19 @@ final class Parser
         }
         fclose($bh);
         $chunkOffsets[] = $inputBytes;
-        $myPid      = getmypid();
-        $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
-        $shmSegSize = $slugTotal * $dateCount * 2;
-        $childMap   = [];
+        $markPhase('chunk-offsets');
+
+        $sockets  = [];
+        $childMap = [];
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
-            $pid = pcntl_fork();
+            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
+            $pid  = pcntl_fork();
             if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
+                fclose($pair[0]);
+
                 $buckets = array_fill(0, $slugTotal, '');
                 $fh      = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
@@ -148,16 +187,14 @@ final class Parser
                 $counts = self::reduceBucketsToCounts($buckets, $slugTotal, $dateCount);
                 $packed = pack('v*', ...$counts);
 
-                $shm = @shmop_open($myPid * 10 + $w, 'c', 0644, $shmSegSize);
-                if ($shm !== false) {
-                    shmop_write($shm, $packed, 0);
-                } else {
-                    file_put_contents($tmpPrefix . '_' . $w, $packed);
-                }
+                fwrite($pair[1], $packed);
+                fclose($pair[1]);
 
                 exit(0);
             }
 
+            fclose($pair[1]);
+            $sockets[$pid] = $pair[0];
             $childMap[$pid] = $w;
         }
 
@@ -173,23 +210,36 @@ final class Parser
         $counts = self::reduceBucketsToCounts($buckets, $slugTotal, $dateCount);
         $n      = $slugTotal * $dateCount;
 
+        // Read all child data via stream_select (prevents deadlock from full socket buffers)
+        $childData = [];
+        $remaining = $sockets; // [pid => stream]
+
+        while ($remaining) {
+            $read = array_values($remaining);
+            $w = null;
+            $e = null;
+            stream_select($read, $w, $e, 300);
+
+            foreach ($read as $sock) {
+                $pid = array_search($sock, $remaining, true);
+                $chunk = fread($sock, 131072);
+                if ($chunk === '' || $chunk === false) {
+                    fclose($sock);
+                    unset($remaining[$pid]);
+                } else {
+                    $childData[$pid] = ($childData[$pid] ?? '') . $chunk;
+                }
+            }
+        }
+
+        // Reap children
         while ($childMap) {
             $pid = pcntl_wait($status);
-            if (!isset($childMap[$pid])) continue;
+            if (isset($childMap[$pid])) unset($childMap[$pid]);
+        }
 
-            $w = $childMap[$pid];
-            unset($childMap[$pid]);
-
-            $shm = @shmop_open($myPid * 10 + $w, 'a', 0, 0);
-            if ($shm !== false) {
-                $packed = shmop_read($shm, 0, $shmSegSize);
-                shmop_delete($shm);
-            } else {
-                $tmpFile = $tmpPrefix . '_' . $w;
-                $packed  = file_get_contents($tmpFile);
-                unlink($tmpFile);
-            }
-
+        // Merge child counts
+        foreach ($childData as $packed) {
             $childCounts = unpack('v*', $packed);
             for ($j = 0, $k = 1; $j < $n; $j++, $k++) {
                 if ($v = $childCounts[$k]) {
@@ -197,7 +247,12 @@ final class Parser
                 }
             }
         }
+        $markPhase('parse-and-reduce');
+
         self::flushJsonOutput($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
+        $markPhase('json-output');
+
+        $dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
     private static function consumeRangeIntoBuckets($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
