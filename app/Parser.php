@@ -20,12 +20,22 @@ final class Parser
         }
 
         $outputData = [];
-        while (\count($outputData) < 268 && $line = \fgets($inputStream, 101)) {
+        $count = 0;
+        while ((\count($outputData) < 268 || ($count % 5) !== 0) && $line = \fgets($inputStream, 101)) {
             $outputData[\substr($line, 19, -27)] ??= $datesInit;
             $outputData[\substr($line, 19, -27)][\substr($line, -26, 10)]++;
+            $count++;
         }
 
         while ($line = \fgets($inputStream, 101)) {
+            $outputData[\substr($line, 19, -27)][\substr($line, -26, 10)]++;
+            $line = \fgets($inputStream, 101);
+            $outputData[\substr($line, 19, -27)][\substr($line, -26, 10)]++;
+            $line = \fgets($inputStream, 101);
+            $outputData[\substr($line, 19, -27)][\substr($line, -26, 10)]++;
+            $line = \fgets($inputStream, 101);
+            $outputData[\substr($line, 19, -27)][\substr($line, -26, 10)]++;
+            $line = \fgets($inputStream, 101);
             $outputData[\substr($line, 19, -27)][\substr($line, -26, 10)]++;
         }
 
