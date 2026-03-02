@@ -3,6 +3,7 @@
 namespace App;
 
 use App\Commands\Visit;
+
 use function array_count_values;
 use function array_fill;
 use function chr;
@@ -156,7 +157,8 @@ final class Parser
         unset($raw);
         $markPhase('slug-scan');
 
-        foreach (Visit::SLUGS as $slug) {
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, self::K2);
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
                 $slugKeyById[$slugTotal] = $slug;
@@ -420,11 +422,11 @@ final class Parser
         $counts = array_fill(0, $slugTotal * $dateCount, 0);
         $base   = 0;
         foreach ($buckets as $bucket) {
-            if ($bucket !== '') {
+            //if ($bucket !== '') {
                 foreach (array_count_values(unpack('v*', $bucket)) as $did => $cnt) {
                     $counts[$base + $did] += $cnt;
                 }
-            }
+            //}
             $base += $dateCount;
         }
         return $counts;
