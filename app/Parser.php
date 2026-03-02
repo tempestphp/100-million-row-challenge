@@ -15,7 +15,7 @@ final class Parser
         $slugToIdx = [];
         $slugCount = 0;
         $fh = \fopen($inputPath, 'rb');
-        $sample = \fread($fh, 131072);
+        $sample = \fread($fh, 262144);
 
         $sampleLen = \strlen($sample);
         $sPos = 0;
