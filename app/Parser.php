@@ -2,116 +2,144 @@
 
 namespace App;
 
+use App\Commands\Visit;
+
 final class Parser
 {
-    private const int CHUNK_SIZE = 512 * 1024;
-    private const int PREFIX_LEN = 25;
+    private const int CHUNK_SIZE = 262_144;
+    private const int PROBE_SIZE = 2_097_152;
+    private const int WRITE_BUF = 1_048_576;
 
     public function parse(string $inputPath, string $outputPath): void
     {
         \gc_disable();
 
-        $dateMap = [];
-        $dateStrings = [];
-        $dIdx = 0;
+        $fileSize = \filesize($inputPath);
+        $dateIds = [];
+        $dateLabels = [];
+        $numDates = 0;
 
-        $paddings = [];
-        for ($i = 1; $i <= 31; $i++) {
-            $paddings[$i] = ($i < 10 ? '0' : '') . $i;
-        }
-        for ($y = 2020; $y <= 2026; $y++) {
-            $yStr = $y . '-';
+        for ($y = 19; $y <= 26; $y++) {
             for ($m = 1; $m <= 12; $m++) {
-                $maxD = match ($m) {
-                    2 => (($y % 4 === 0 && ($y % 100 !== 0 || $y % 400 === 0)) ? 29 : 28),
+                $days = match ($m) {
+                    2 => ($y % 4 === 0) ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
-                $ymStr = $yStr . $paddings[$m] . '-';
-                for ($d = 1; $d <= $maxD; $d++) {
-                    $key = $ymStr . $paddings[$d];
-                    $dateMap[$key] = $dIdx;
-                    $dateStrings[$dIdx] = $key;
-                    $dIdx++;
+                $mS = $m < 10 ? "0{$m}" : (string)$m;
+                for ($d = 1; $d <= $days; $d++) {
+                    $key = "{$y}-{$mS}-" . ($d < 10 ? "0{$d}" : (string)$d);
+                    $dateIds[$key] = $numDates;
+                    $dateLabels[$numDates] = $key;
+                    $numDates++;
                 }
             }
         }
-        $totalDates = $dIdx;
-
-        $pathIds = [];
-        $paths = [];
-        $counts = [];
-        $pathCount = 0;
 
         $h = \fopen($inputPath, 'rb');
-        \stream_set_read_buffer($h, 0);
+        $sample = \fread($h, \min($fileSize, self::PROBE_SIZE));
+        \fclose($h);
 
-        while (!\feof($h)) {
-            $chunk = \fread($h, self::CHUNK_SIZE);
-            if ($chunk === '' || $chunk === false) break;
+        $slugBase = [];
+        $slugLabels = [];
+        $numSlugs = 0;
+        $bound = \strrpos($sample, "\n");
+        for ($pos = 0; $pos < $bound;) {
+            $nl = \strpos($sample, "\n", $pos + 52);
+            if ($nl === false) break;
+            $slug = \substr($sample, $pos + 25, $nl - $pos - 51);
+            if (!isset($slugBase[$slug])) {
+                $slugBase[$slug] = $numSlugs * $numDates;
+                $slugLabels[$numSlugs] = $slug;
+                $numSlugs++;
+            }
+            $pos = $nl + 1;
+        }
+
+        foreach (Visit::all() as $visit) {
+            $slug = \substr($visit->uri, 25);
+            if (!isset($slugBase[$slug])) {
+                $slugBase[$slug] = $numSlugs * $numDates;
+                $slugLabels[$numSlugs] = $slug;
+                $numSlugs++;
+            }
+        }
+
+        $counts = \array_fill(0, $numSlugs * $numDates, 0);
+        $h = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($h, 0);
+        $remaining = $fileSize;
+
+        while ($remaining > 0) {
+            $chunk = \fread($h, \min($remaining, self::CHUNK_SIZE));
+            $len = \strlen($chunk);
+            if ($len === 0) break;
+            $remaining -= $len;
 
             $lastNl = \strrpos($chunk, "\n");
-            if ($lastNl === false) continue;
-
-            $extra = \strlen($chunk) - $lastNl - 1;
-            if ($extra > 0) {
-                \fseek($h, -$extra, \SEEK_CUR);
+            if ($lastNl === false) break;
+            $over = $len - $lastNl - 1;
+            if ($over > 0) {
+                \fseek($h, -$over, \SEEK_CUR);
+                $remaining += $over;
             }
 
-            $p = 0;
-            while ($p < $lastNl) {
-                $comma = \strpos($chunk, ',', $p + self::PREFIX_LEN);
-                if ($comma === false || $comma > $lastNl) break;
+            $pos = 25;
+            $safe = $lastNl - 600;
 
-                $slug = \substr($chunk, $p + self::PREFIX_LEN, $comma - ($p + self::PREFIX_LEN));
-                $dateKey = \substr($chunk, $comma + 1, 10);
+            while ($pos < $safe) {
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+            }
 
-                $p = \strpos($chunk, "\n", $comma) + 1;
-
-                if (!isset($pathIds[$slug])) {
-                    $pathIds[$slug] = $pathCount;
-                    $paths[$pathCount] = $slug;
-                    for ($i = 0; $i < $totalDates; $i++) {
-                        $counts[$pathCount * $totalDates + $i] = 0;
-                    }
-                    $pathCount++;
-                }
-
-                if (isset($dateMap[$dateKey])) {
-                    $counts[($pathIds[$slug] * $totalDates) + $dateMap[$dateKey]]++;
-                }
+            while ($pos < $lastNl) {
+                $s = \strpos($chunk, ',', $pos);
+                if ($s === false || $s >= $lastNl) break;
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
             }
         }
         \fclose($h);
 
-        $this->writeFinalJson($outputPath, $paths, $dateStrings, $counts, $totalDates);
+        $this->writeFinalJson($outputPath, $slugLabels, $dateLabels, $counts, $numSlugs, $numDates);
     }
 
-    private function writeFinalJson($outPath, $paths, $dateStrings, $counts, $totalDates): void
+    private function writeFinalJson(string $path, array $slugs, array $dates, array &$counts, int $numSlugs, int $numDates): void
     {
-        $fp = \fopen($outPath, 'wb');
-        \fwrite($fp, "{\n");
+        $out = \fopen($path, 'wb');
+        \stream_set_write_buffer($out, self::WRITE_BUF);
 
-        $isFirstPath = true;
-        foreach ($paths as $pIdx => $slug) {
-            $base = $pIdx * $totalDates;
-            $entries = [];
+        $datePfx = [];
+        for ($i = 0; $i < $numDates; $i++) {
+            $datePfx[$i] = '        "20' . $dates[$i] . '": ';
+        }
 
-            for ($d = 0; $d < $totalDates; $d++) {
-                $val = $counts[$base + $d];
-                if ($val > 0) {
-                    $entries[] = "        \"{$dateStrings[$d]}\": {$val}";
+        \fwrite($out, '{');
+        $firstSlug = true;
+
+        for ($sId = 0; $sId < $numSlugs; $sId++) {
+            $base = $sId * $numDates;
+            $body = '';
+            $sep = '';
+            for ($dId = 0; $dId < $numDates; $dId++) {
+                if (($val = $counts[$base + $dId]) > 0) {
+                    $body .= $sep . $datePfx[$dId] . $val;
+                    $sep = ",\n";
                 }
             }
 
-            if (!empty($entries)) {
-                if (!$isFirstPath) \fwrite($fp, ",\n");
-                $escaped = \str_replace('/', '\/', $slug);
-                \fwrite($fp, "    \"\/blog\/{$escaped}\": {\n" . \implode(",\n", $entries) . "\n    }");
-                $isFirstPath = false;
-            }
+            $hdr = '"\/blog\/' . \str_replace('/', '\/', $slugs[$sId]) . '"';
+            \fwrite($out, ($firstSlug ? '' : ',') . "\n    " . $hdr . ": {\n" . $body . "\n    }");
+            $firstSlug = false;
         }
-        \fwrite($fp, "\n}");
-        \fclose($fp);
+        \fwrite($out, "\n}");
+        \fclose($out);
     }
 }
