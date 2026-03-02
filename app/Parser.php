@@ -286,9 +286,8 @@ final class Parser
             }
 
             $childCounts = unpack('v*', $packed);
-            $j = 0;
-            foreach ($childCounts as $v) {
-                $counts[$j++] += $v;
+            for ($j = 0, $k = 1; $j < $n; $j++, $k++) {
+                $counts[$j] += $childCounts[$k];
             }
             $pending--;
         }
