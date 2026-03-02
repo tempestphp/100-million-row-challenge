@@ -70,7 +70,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $sample = fread($handle, 131_072);
+        $sample = fread($handle, 262_144);
         fclose($handle);
 
         $pathIds = [];
