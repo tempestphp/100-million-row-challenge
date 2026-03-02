@@ -142,7 +142,7 @@ final class Parser
 
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
-            if ($nl === false) break;
+            #if ($nl === false) break;
 
             $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
 
@@ -225,7 +225,7 @@ final class Parser
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pid = pcntl_fork();
-            # if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
+            #if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
                 $buckets = array_fill(0, $slugTotal, '');
@@ -283,7 +283,7 @@ final class Parser
 
         while ($childMap) {
             $pid = pcntl_wait($status);
-            if (!isset($childMap[$pid])) continue;
+            #if (!isset($childMap[$pid])) continue;
 
             $w = $childMap[$pid];
             unset($childMap[$pid]);
@@ -348,7 +348,7 @@ final class Parser
 
     private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
-        $_ = static function () use (&$buckets, $slugIdByKey, $dayIdTokens) {};
+        extract([]);
         fseek($handle, $start);
 
         $remaining = $end - $start;
@@ -358,13 +358,13 @@ final class Parser
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
             $chunk  = fread($handle, $toRead);
-            if (!$chunk) break;
+            #if (!$chunk) break;
 
             $chunkLen   = strlen($chunk);
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) continue;
+            #if ($lastNl === false) continue;
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
@@ -411,7 +411,7 @@ final class Parser
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                if ($sep === false || $sep >= $lastNl) break;
+                #if ($sep === false || $sep >= $lastNl) break;
                 $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
