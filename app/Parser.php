@@ -10,7 +10,6 @@ use function substr;
 use function fwrite;
 use function array_fill;
 use function pcntl_wait;
-use function shmop_read;
 use function fread;
 use function gc_disable;
 use function strpos;
@@ -19,20 +18,17 @@ use function chr;
 use function stream_set_read_buffer;
 use function fopen;
 use function pcntl_fork;
-use function shmop_write;
 use function str_replace;
 use function file_get_contents;
+use function file_put_contents;
 use function strrpos;
 use function ini_set;
 use function fclose;
-use function shmop_open;
 use function ftell;
 use function getmypid;
 use function stream_set_write_buffer;
-use function file_put_contents;
 use function array_count_values;
 use function filesize;
-use function shmop_delete;
 use function fgets;
 use function sys_get_temp_dir;
 use function unlink;
@@ -102,32 +98,14 @@ final class Parser
         fclose($fh);
         $bnd[] = $sz;
 
-        $cells = $pc * $dc;
-        $segSz = $cells * 2;
-        $pid0 = getmypid();
-        $shms = [];
-        $ok = true;
-        for ($w = 0; $w < self::W - 1; $w++) {
-            $shm = @shmop_open($pid0 * 100 + $w, 'c', 0600, $segSz);
-            if ($shm === false) {
-                $ok = false;
-                break;
-            }
-            $shms[$w] = $shm;
-        }
-
-        $pfx = sys_get_temp_dir() . "/p_{$pid0}_";
+        $pfx = sys_get_temp_dir() . "/p_" . getmypid() . "_";
         $cmap = [];
         for ($w = 0; $w < self::W - 1; $w++) {
             $pid = pcntl_fork();
             if ($pid === 0) {
                 gc_disable();
                 $wc = static::crunch($in, $bnd[$w], $bnd[$w + 1], $pi, $db, $pc, $dc);
-                $packed = pack('v*', ...$wc);
-                if ($ok)
-                    shmop_write($shms[$w], $packed, 0);
-                else
-                    file_put_contents($pfx . $w, $packed);
+                file_put_contents($pfx . $w, pack('v*', ...$wc));
                 exit(0);
             }
             $cmap[$pid] = $w;
@@ -142,13 +120,8 @@ final class Parser
             if (!isset($cmap[$pid]))
                 continue;
             $w = $cmap[$pid];
-            if ($ok) {
-                $wc = unpack('v*', shmop_read($shms[$w], 0, $segSz));
-                shmop_delete($shms[$w]);
-            } else {
-                $wc = unpack('v*', file_get_contents($pfx . $w));
-                unlink($pfx . $w);
-            }
+            $wc = unpack('v*', file_get_contents($pfx . $w));
+            unlink($pfx . $w);
             $j = 0;
             foreach ($wc as $v)
                 $counts[$j++] += $v;
