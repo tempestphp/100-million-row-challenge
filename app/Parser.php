@@ -15,8 +15,7 @@ final class Parser
         $slugToIdx = [];
         $slugCount = 0;
         $fh = \fopen($inputPath, 'rb');
-        $sample = \fread($fh, 524288);
-        \fclose($fh);
+        $sample = \fread($fh, 131072);
 
         $sampleLen = \strlen($sample);
         $sPos = 0;
@@ -26,6 +25,7 @@ final class Parser
             $slug = \substr($sample, $sPos + 25, $c - $sPos - 25);
             if (!isset($slugToIdx[$slug])) {
                 $slugToIdx[$slug] = $slugCount++;
+                if ($slugCount >= 268) break;
             }
             $sPos = $c + 27;
         }
@@ -55,10 +55,15 @@ final class Parser
         foreach ($idToDate as $dId => $dateStr) {
             $dateJsonPrefix[$dId] = '        "' . $dateStr . '": ';
         }
+        unset($idToDate);
+
+        $slugJsonHeaders = [];
+        foreach ($slugOrderList as $slug) {
+            $slugJsonHeaders[$slug] = '    "\/blog\/' . $slug . '": {' . "\n";
+        }
 
         $fileSize = \filesize($inputPath);
         $boundaries = [0];
-        $fh = \fopen($inputPath, 'rb');
         for ($w = 1; $w < $numWorkers; $w++) {
             \fseek($fh, (int)($fileSize * $w / $numWorkers));
             \fgets($fh);
@@ -67,7 +72,7 @@ final class Parser
         $boundaries[] = $fileSize;
         \fclose($fh);
 
-        $tmpDir = \sys_get_temp_dir();
+        $tmpPrefix = \sys_get_temp_dir() . '/parser_w';
         $pidToWorker = [];
 
         for ($w = 0; $w < $numWorkers; $w++) {
@@ -98,14 +103,10 @@ final class Parser
                     }
 
                     $i = 25;
-                    $fence = $lastNl - 750;
+                    $fence = $lastNl - 625;
 
                     if ($i < $fence) {
                         do {
-                            $c = \strpos($raw, ',', $i);
-                            $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
-                            $i = $c + 52;
-
                             $c = \strpos($raw, ',', $i);
                             $buckets[\substr($raw, $i, $c - $i)] .= $dateToId[\substr($raw, $c + 3, 8)];
                             $i = $c + 52;
@@ -144,13 +145,14 @@ final class Parser
                     $out .= \pack('vV', $slugToIdx[$slug], \strlen($packed)) . $packed;
                 }
 
-                \file_put_contents($tmpDir . '/parser_w' . $w, $out);
+                \file_put_contents($tmpPrefix . $w, $out);
                 \posix_kill(\posix_getpid(), 9);
             }
             $pidToWorker[$pid] = $w;
         }
 
         $mergedBuckets = \array_fill_keys($slugOrderList, '');
+        unset($dateToId);
         $drained = 0;
 
         do {
@@ -160,7 +162,7 @@ final class Parser
             }
 
             $w = $pidToWorker[$pid];
-            $tmpFile = $tmpDir . '/parser_w' . $w;
+            $tmpFile = $tmpPrefix . $w;
             $data = \file_get_contents($tmpFile);
             \unlink($tmpFile);
 
@@ -180,11 +182,6 @@ final class Parser
 
         $numSlugs = \count($slugOrderList);
         $slugsPerCounter = (int)\ceil($numSlugs / $numCounters);
-
-        $slugJsonHeaders = [];
-        foreach ($slugOrderList as $slug) {
-            $slugJsonHeaders[$slug] = '    "\/blog\/' . $slug . '": {' . "\n";
-        }
 
         $countPipes = [];
         for ($c = 0; $c < $numCounters; $c++) {
@@ -226,13 +223,7 @@ final class Parser
                 $fragment = \implode(",\n", $slugParts);
 
                 $sock = $countPipes[$c][1];
-                $len = \strlen($fragment);
-                $written = 0;
-                while ($written < $len) {
-                    $n = \fwrite($sock, \substr($fragment, $written, 524288));
-                    if ($n === false) break;
-                    $written += $n;
-                }
+                \fwrite($sock, $fragment);
                 \fclose($sock);
                 \posix_kill(\posix_getpid(), 9);
             }
