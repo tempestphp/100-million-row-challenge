@@ -188,9 +188,17 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 606;
+            $fence = $lastNl - 808;
 
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
