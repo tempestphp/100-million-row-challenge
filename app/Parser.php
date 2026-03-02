@@ -15,14 +15,7 @@ final class Parser
             $path = substr($line, 19, -27);
             $date = substr($line, -26, 10);
 
-            if (!isset($data[$path])) {
-                $data[$path] = [$date => 1];
-                continue;
-            }
-
-            $visits = &$data[$path];
-            $visits[$date] = ($visits[$date] ?? 0) + 1;
-            // $data[$path][$date] = ($data[$path][$date] ?? 0) + 1;
+            $data[$path][$date] = ($data[$path][$date] ?? 0) + 1;
         }
 
         foreach ($data as &$dates) {
