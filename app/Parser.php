@@ -15,11 +15,13 @@ final class Parser
         $date = new \DateTime('2021-01-01');
         $day = new \DateInterval('P1D');
         $dateMap = [];
+        $dateLookup = [];
         for ($i = 0; $i < self::DATE_COUNT; $i++) {
-            $dateMap[$date->format('Y-m-d')] = $i;
+            $dateStr = $date->format('Y-m-d');
+            $dateMap[\substr($dateStr, 3)] = $i;
             $date->add($day);
+            $dateLookup[] = $dateStr;
         }
-        $dateLookup = \array_flip($dateMap);
 
         $inputStream = \fopen($inputPath, 'r');
         $urlCount = 0;
@@ -27,13 +29,13 @@ final class Parser
         $outputData = \array_fill(0, self::ARRAY_SIZE, 0);
 
         while ($urlCount < self::URL_COUNT && $line = \fgets($inputStream)) {
-            $path = \substr($line, 19, -27);
+            $path = \substr($line, 25, -27);
             $urlMap[$path] ??= $urlCount++ << self::DATE_BITS;
-            $outputData[$urlMap[$path] | $dateMap[\substr($line, -26, 10)]]++;
+            $outputData[$urlMap[$path] | $dateMap[\substr($line, -23, 7)]]++;
         }
 
         while ($line = \fgets($inputStream)) {
-            $outputData[$urlMap[\substr($line, 19, -27)] | $dateMap[\substr($line, -26, 10)]]++;
+            $outputData[$urlMap[\substr($line, 25, -27)] | $dateMap[\substr($line, -23, 7)]]++;
         }
 
         \fclose($inputStream);
@@ -41,6 +43,7 @@ final class Parser
         $finalData = [];
         foreach ($urlMap as $url => $urlHash) {
             $end = $urlHash + self::DATE_COUNT;
+            $url = "/blog/{$url}";
             for ($i = $urlHash; $i < $end; $i++) {
                 if ($outputData[$i] > 0) {
                     $finalData[$url][$dateLookup[$i & self::DATE_MASK]] = $outputData[$i];
