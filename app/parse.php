@@ -14,9 +14,9 @@ function parse($i, $o)
     $fileSize = filesize($i);
 
     $handle = fopen($i, 'rb');
+    stream_set_read_buffer($handle, 0);
     $sampleSize = $fileSize < 524288 ? $fileSize : 524288;
     $discoverChunk = fread($handle, $sampleSize);
-    fclose($handle);
 
     $pathIds = [];
     $pathList = [];
@@ -29,6 +29,7 @@ function parse($i, $o)
             $pathIds[$path] = $pathCount;
             $pathList[$pathCount] = $path;
             $pathCount++;
+            if ($pathCount >= 268) break;
         }
         $pos = $nlPos + 1;
     }
@@ -69,21 +70,21 @@ function parse($i, $o)
     $chunkSize = 262144;
 
     if ($fileSize >= 10485760) {
-        $ncpu = PHP_OS_FAMILY === 'Darwin'
-            ? (int)trim(shell_exec('sysctl -n hw.ncpu'))
-            : (int)(trim(shell_exec('nproc 2>/dev/null') ?: '8'));
+        $ncpu = (function_exists('posix_sysconf') && defined('POSIX_SC_NPROCESSORS_ONLN'))
+            ? posix_sysconf(POSIX_SC_NPROCESSORS_ONLN)
+            : (PHP_OS_FAMILY === 'Darwin'
+                ? (int)trim(shell_exec('sysctl -n hw.ncpu'))
+                : (int)(trim(shell_exec('nproc 2>/dev/null') ?: '8')));
         $numWorkers = $ncpu;
         $numChunks = $ncpu * 5;
 
-        $handle = fopen($i, 'rb');
         $chunkBounds = [0];
         for ($c = 1; $c < $numChunks; $c++) {
-            fseek($handle, (int)($fileSize * $c / $numChunks));
-            fgets($handle);
-            $chunkBounds[] = ftell($handle);
+            $pos = (int)($fileSize * $c / $numChunks);
+            fseek($handle, $pos);
+            $chunkBounds[] = $pos + strpos(fread($handle, 128), "\n") + 1;
         }
         $chunkBounds[] = $fileSize;
-        fclose($handle);
 
         $tmpDir = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
         $tmpPrefix = $tmpDir . '/p_' . getmypid() . '_';
@@ -91,6 +92,7 @@ function parse($i, $o)
         file_put_contents($counterFile, pack('V', 0));
 
         $childPids = [];
+        $pidToWorker = [];
         for ($w = 1; $w < $numWorkers; $w++) {
             $pid = pcntl_fork();
             if ($pid === -1) continue;
@@ -174,10 +176,9 @@ function parse($i, $o)
                 posix_kill(posix_getpid(), 9);
             }
             $childPids[$w] = $pid;
+            $pidToWorker[$pid] = $w;
         }
 
-        $handle = fopen($i, 'rb');
-        stream_set_read_buffer($handle, 0);
         $buckets = [];
         foreach ($trIds as $t => $_) $buckets[$t] = '';
 
@@ -255,8 +256,8 @@ function parse($i, $o)
             }
             if ($childRemaining > 0) {
                 while (($pid = pcntl_waitpid(-1, $status, WNOHANG)) > 0) {
-                    $w = array_search($pid, $childPids);
-                    if ($w === false) continue;
+                    if (!isset($pidToWorker[$pid])) continue;
+                    $w = $pidToWorker[$pid];
                     $raw = file_get_contents($tmpPrefix . $w);
                     @unlink($tmpPrefix . $w);
                     $j = 0;
@@ -272,17 +273,19 @@ function parse($i, $o)
 
         $escapedPaths = [];
         $datePrefixes = [];
+        $datePrefixesC = [];
         for ($p = 0; $p < $pathCount; $p++) {
             $escapedPaths[$p] = "\n    \"\\/blog\\/" . $pathList[$p] . "\": {";
         }
         for ($d = 0; $d < $dateCount; $d++) {
             $datePrefixes[$d] = "\n        \"" . $dateList[$d] . "\": ";
+            $datePrefixesC[$d] = ",\n        \"" . $dateList[$d] . "\": ";
         }
 
         while ($childRemaining > 0) {
             $pid = pcntl_wait($status);
-            $w = array_search($pid, $childPids);
-            if ($w === false) continue;
+            if (!isset($pidToWorker[$pid])) continue;
+            $w = $pidToWorker[$pid];
             $raw = file_get_contents($tmpPrefix . $w);
             @unlink($tmpPrefix . $w);
             $j = 0;
@@ -299,18 +302,21 @@ function parse($i, $o)
         $firstPath = true;
         for ($p = 0; $p < $pathCount; $p++) {
             $offset = $p * $stride;
-            $firstD = -1;
-            for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$offset + $d] > 0) { $firstD = $d; break; }
+            if ($counts[$offset] > 0) {
+                $firstD = 0;
+            } else {
+                $firstD = -1;
+                for ($d = 1; $d < $dateCount; $d++) {
+                    if ($counts[$offset + $d] > 0) { $firstD = $d; break; }
+                }
+                if ($firstD === -1) continue;
             }
-            if ($firstD === -1) continue;
             if (!$firstPath) $buf .= ',';
             $firstPath = false;
-            $buf .= $escapedPaths[$p];
-            $buf .= $datePrefixes[$firstD] . $counts[$offset + $firstD];
+            $buf .= $escapedPaths[$p] . $datePrefixes[$firstD] . $counts[$offset + $firstD];
             for ($d = $firstD + 1; $d < $dateCount; $d++) {
                 if ($counts[$offset + $d] === 0) continue;
-                $buf .= ',' . $datePrefixes[$d] . $counts[$offset + $d];
+                $buf .= $datePrefixesC[$d] . $counts[$offset + $d];
             }
             $buf .= "\n    }";
             if (strlen($buf) > 65536) { fwrite($fp, $buf); $buf = ''; }
@@ -326,8 +332,7 @@ function parse($i, $o)
         $pathOffsets[$path] = $id * $stride;
     }
 
-    $handle = fopen($i, 'rb');
-    stream_set_read_buffer($handle, 0);
+    fseek($handle, 0);
     $counts = array_fill(0, $totalCells, 0);
     $leftover = '';
     $remaining = $fileSize;
@@ -391,11 +396,13 @@ function parse($i, $o)
 
     $escapedPaths = [];
     $datePrefixes = [];
+    $datePrefixesC = [];
     for ($p = 0; $p < $pathCount; $p++) {
         $escapedPaths[$p] = "\n    \"\\/blog\\/" . $pathList[$p] . "\": {";
     }
     for ($d = 0; $d < $dateCount; $d++) {
         $datePrefixes[$d] = "\n        \"" . $dateList[$d] . "\": ";
+        $datePrefixesC[$d] = ",\n        \"" . $dateList[$d] . "\": ";
     }
     $fp = fopen($o, 'wb');
     stream_set_write_buffer($fp, 1048576);
@@ -403,21 +410,21 @@ function parse($i, $o)
     $firstPath = true;
     for ($p = 0; $p < $pathCount; $p++) {
         $offset = $p * $stride;
-        $hasAny = false;
-        for ($d = 0; $d < $dateCount; $d++) {
-            if ($counts[$offset + $d] > 0) { $hasAny = true; break; }
+        if ($counts[$offset] > 0) {
+            $firstD = 0;
+        } else {
+            $firstD = -1;
+            for ($d = 1; $d < $dateCount; $d++) {
+                if ($counts[$offset + $d] > 0) { $firstD = $d; break; }
+            }
+            if ($firstD === -1) continue;
         }
-        if (!$hasAny) continue;
         if (!$firstPath) $buf .= ',';
         $firstPath = false;
-        $buf .= $escapedPaths[$p];
-        $firstDate = true;
-        for ($d = 0; $d < $dateCount; $d++) {
-            $count = $counts[$offset + $d];
-            if ($count === 0) continue;
-            if (!$firstDate) $buf .= ',';
-            $firstDate = false;
-            $buf .= $datePrefixes[$d] . $count;
+        $buf .= $escapedPaths[$p] . $datePrefixes[$firstD] . $counts[$offset + $firstD];
+        for ($d = $firstD + 1; $d < $dateCount; $d++) {
+            if ($counts[$offset + $d] === 0) continue;
+            $buf .= $datePrefixesC[$d] . $counts[$offset + $d];
         }
         $buf .= "\n    }";
         if (strlen($buf) > 65536) { fwrite($fp, $buf); $buf = ''; }
