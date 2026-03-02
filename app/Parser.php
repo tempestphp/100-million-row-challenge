@@ -373,52 +373,46 @@ final class Parser
 
             $p     = $prefixLen;
             $fence = $lastNl - 792;
-            $local = [];
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
-            }
-
-            foreach ($local as $id => $s) {
-                $buckets[$id] .= $s;
             }
         }
     }
