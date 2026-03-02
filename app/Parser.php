@@ -22,18 +22,18 @@ final class Parser
             $next[\chr($i)] = \chr($i+1);
         }
 
-        $file = new SplFileObject($inputPath);
-        $file->setFlags(SplFileObject::READ_AHEAD | SplFileObject::DROP_NEW_LINE | SplFileObject::SKIP_EMPTY);
-        $file->fseek($start);
+        $file = \fopen($inputPath, "r");
+        \stream_set_read_buffer($file, 0);
+        \fseek($file, $start);
 
         $order = [];
         $chunks = 0;
-        while (!$file->eof() && $read < $length) {
+        while (!\feof($file) && $read < $length) {
             $lenAsked = $read + Parser::$READ_CHUNK >= $length ? $length - $read : Parser::$READ_CHUNK;
-            $buffer = $file->fread($lenAsked);
+            $buffer = \fread($file, $lenAsked);
 
             if(\substr($buffer, -1) != "\n") {
-                $extra = $file->fgets()."\n";
+                $extra = \fgets($file);
                 $lenAsked += \strlen($extra);
                 $buffer .= $extra;
             }
@@ -381,16 +381,16 @@ final class Parser
         // Determine ranges
         $ranges = [];
         $start = 0;
-        $file = new SplFileObject($inputPath);
-        $file->setFlags(SplFileObject::READ_AHEAD | SplFileObject::DROP_NEW_LINE | SplFileObject::SKIP_EMPTY);
+        $file = \fopen($inputPath, "r");
         $length = \ceil(\filesize($inputPath)/Parser::$CORES);
         for($i=0; $i!=Parser::$CORES; $i++) {
-            $file->fseek($length*$i+$length);
-            $file->fgets();
-            $end = $file->ftell();
+            \fseek($file, $length*$i+$length);
+            \fgets($file);
+            $end = \ftell($file);
             $ranges[$i] = [$start, $end];
             $start = $end;
         }
+        \fclose($file);
 
         // Start threads
         $threads = [];
