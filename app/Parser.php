@@ -28,7 +28,7 @@ final class Parser
         $urlMap = [];
 
         while ($urlCount < self::URL_COUNT && $line = \fgets($inputStream)) {
-            $path = \substr($line, 25, -27);
+            $path = \substr($line, 19, -27);
             $urlMap[$path] ??= $urlCount++ << self::DATE_BITS;
             $date = \substr($line, -26, 10);
             $hash = $urlMap[$path] | $dateMap[$date];
@@ -36,7 +36,7 @@ final class Parser
         }
 
         while ($line = \fgets($inputStream)) {
-            $path = \substr($line, 25, -27);
+            $path = \substr($line, 19, -27);
             $date = \substr($line, -26, 10);
             $hash = $urlMap[$path] | $dateMap[$date];
             $outputData[$hash]++;
@@ -44,25 +44,15 @@ final class Parser
 
         \fclose($inputStream);
 
-        $outputStream = \fopen($outputPath, 'w');
-        \fwrite($outputStream, "{\n");
-
+        $finalData = [];
         foreach ($urlMap as $url => $urlHash) {
-            \fwrite($outputStream, "    \"\/blog\/{$url}\": {\n");
-
             $end = $urlHash + self::DATE_COUNT;
             for ($i = $urlHash; $i < $end; $i++) {
                 if ($outputData[$i] > 0) {
-                    \fwrite($outputStream, "        \"{$dateLookup[$i & self::DATE_MASK]}\": {$outputData[$i]},\n");
+                    $finalData[$url][$dateLookup[$i & self::DATE_MASK]] = $outputData[$i];
                 }
             }
-
-            \fseek($outputStream, -2, \SEEK_CUR);
-            \fwrite($outputStream, "\n    },\n");
         }
-
-        \fseek($outputStream, -2, \SEEK_CUR);
-        \fwrite($outputStream, "\n}");
-        \fclose($outputStream);
+        \file_put_contents($outputPath, \json_encode($finalData, \JSON_PRETTY_PRINT));
     }
 }
