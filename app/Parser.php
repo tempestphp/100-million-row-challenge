@@ -4,429 +4,317 @@ namespace App;
 
 use App\Commands\Visit;
 
-use function strpos;
-use function strrpos;
-use function substr;
-use function strlen;
-use function fread;
-use function fseek;
-use function fwrite;
-use function fopen;
+use function array_count_values;
+use function array_fill;
+use function array_fill_keys;
+use function array_filter;
+use function array_slice;
+use function chr;
+use function count;
+use function date;
 use function fclose;
 use function fgets;
+use function file_exists;
+use function file_get_contents;
+use function file_put_contents;
+use function filesize;
+use function fopen;
+use function fread;
+use function fseek;
 use function ftell;
-use function pack;
-use function unpack;
-use function array_fill;
-use function array_values;
-use function implode;
-use function str_replace;
-use function count;
+use function fwrite;
 use function gc_disable;
 use function getmypid;
+use function intdiv;
+use function is_dir;
+use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
-use function pcntl_signal;
-use function pcntl_async_signals;
-use function stream_select;
-use function stream_set_blocking;
+use function posix_kill;
+use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
-use function stream_socket_pair;
+use function strlen;
+use function strpos;
+use function strrpos;
+use function strtotime;
+use function substr;
+use function sys_get_temp_dir;
+use function unlink;
+use function unpack;
 
 use const SEEK_CUR;
-use const SIG_DFL;
-use const SIGTERM;
-use const SIGINT;
+use const SIGKILL;
 use const WNOHANG;
-use const STREAM_PF_UNIX;
-use const STREAM_SOCK_STREAM;
-use const STREAM_IPPROTO_IP;
 
 final class Parser
 {
-    private const int CHUNK_SIZE    = 2_097_152;
-    private const int READ_BUFFER   = 1_048_576;
-    private const int WORKER_COUNT  = 8;
-    private const int SEGMENT_COUNT = 32;
-    private const int URI_OFFSET    = 25;
-    private const int FILE_SIZE     = 7_509_674_827;
-    private const int LOOP_FENCE    = 1600; // 16 * (48 + 52)
-    private const int MIN_SLUG_LEN  = 4;
+    private const int WORKERS    = 8;
+    private const int CHUNKS     = 8;
+    private const int READ_CHUNK = 524_288;
+    private const int DISC_SIZE  = 2_097_152;
+    private const int PREFIX_LEN = 25;
 
-    private array $childPids = [];
-    private array $pipes     = [];
+    public function __call(string $name, array $arguments): mixed
+    {
+        return static::$name(...$arguments);
+    }
 
-    public static function parse(string $source, string $destination): void
+    public static function parse($inputPath, $outputPath): void
     {
         gc_disable();
-        (new self())->execute($source, $destination);
-    }
 
-    private function execute(string $input, string $output): void
-    {
-        [$dateIds, $dateList] = $this->buildDateRegistry();
-        $dateCount = count($dateList);
+        $fileSize = filesize($inputPath);
 
-        $slugs     = $this->discoverSlugs($input);
-        $slugCount = count($slugs);
+        $dh  = fopen($inputPath, 'rb');
+        $raw = fread($dh, min(self::DISC_SIZE, $fileSize));
+        fclose($dh);
 
-        $slugMap = [];
-        foreach ($slugs as $id => $slug) {
-            $slugMap[$slug] = $id * $dateCount;
+        $pathIds   = [];
+        $paths     = [];
+        $pathCount = 0;
+        $pos       = 0;
+        $lastNl    = strrpos($raw, "\n") ?: 0;
+        $minDate   = '2026-99-99';
+        $maxDate   = '2000-00-00';
+
+        while ($pos < $lastNl) {
+            $nl = strpos($raw, "\n", $pos + 52);
+            if ($nl === false) break;
+            $slug = substr($raw, $pos + self::PREFIX_LEN, $nl - $pos - 51);
+            if (!isset($pathIds[$slug])) {
+                $pathIds[$slug]    = $pathCount;
+                $paths[$pathCount] = $slug;
+                $pathCount++;
+            }
+            $date = substr($raw, $nl - 25, 10);
+            if ($date < $minDate) $minDate = $date;
+            if ($date > $maxDate) $maxDate = $date;
+            $pos = $nl + 1;
         }
+        unset($raw);
 
-        $boundaries = $this->calculateSplits($input);
-
-        // Strided assignment: 32 segments / 8 workers = exactly 4 each.
-        $workerSegments = [];
-        for ($s = 0; $s < self::SEGMENT_COUNT; $s++) {
-            $workerSegments[$s % self::WORKER_COUNT][] = $s;
-        }
-
-        // Create pipe pairs before forking. [0] = child write, [1] = parent read.
-        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
-            $this->pipes[$i] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            if ($this->pipes[$i] === false) {
-                throw new \RuntimeException("stream_socket_pair() failed for worker $i");
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, self::PREFIX_LEN);
+            if (!isset($pathIds[$slug])) {
+                $pathIds[$slug]    = $pathCount;
+                $paths[$pathCount] = $slug;
+                $pathCount++;
             }
         }
 
-        $this->registerShutdownHandlers();
+        $dateChars = [];
+        $dates     = [];
+        $dateCount = 0;
+        $ts        = strtotime($minDate) - 86400 * 60;
+        $tsEnd     = strtotime($maxDate) + 86400 * 60;
 
-        $pids = [];
-        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
-            $pid = pcntl_fork();
+        while ($ts <= $tsEnd) {
+            $full              = date('Y-m-d', $ts);
+            $key               = substr($full, 3);
+            $dateChars[$key]   = chr($dateCount & 0xFF) . chr($dateCount >> 8);
+            $dates[$dateCount] = $full;
+            $dateCount++;
+            $ts += 86400;
+        }
 
-            if ($pid === -1) {
-                throw new \RuntimeException("pcntl_fork() failed for worker $i");
-            }
+        $pathOffsets = [];
+        foreach ($pathIds as $slug => $id) {
+            $pathOffsets[$slug] = $id * $dateCount;
+        }
 
+        $datePrefixes = [];
+        for ($d = 0; $d < $dateCount; $d++) {
+            $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
+        }
+
+        $pathPrefixes = [];
+        for ($p = 0; $p < $pathCount; $p++) {
+            $pathPrefixes[$p] = "\n    \"\\/blog\\/" . str_replace('/', '\\/', $paths[$p]) . '": {';
+        }
+
+        $splitPoints = [0];
+        $bh = fopen($inputPath, 'rb');
+        for ($i = 1; $i < self::CHUNKS; $i++) {
+            fseek($bh, intdiv($fileSize * $i, self::CHUNKS));
+            fgets($bh);
+            $splitPoints[] = ftell($bh);
+        }
+        fclose($bh);
+        $splitPoints[] = $fileSize;
+
+        $chunksPerWorker = self::CHUNKS / self::WORKERS; // = 4
+        $workerRanges    = [];
+        for ($w = 0; $w < self::WORKERS; $w++) {
+            $first              = $w * $chunksPerWorker;
+            $workerRanges[$w]   = [$splitPoints[$first], $splitPoints[$first + $chunksPerWorker]];
+        }
+
+        $myPid     = getmypid();
+        $tmpDir    = is_dir('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
+        $tmpPrefix = $tmpDir . '/p100m_' . $myPid;
+        $childMap  = [];
+
+        for ($w = 0; $w < self::WORKERS - 1; $w++) {
+            $outFile = $tmpPrefix . '_' . $w;
+            $pid     = pcntl_fork();
             if ($pid === 0) {
-                pcntl_signal(SIGTERM, SIG_DFL);
-                pcntl_signal(SIGINT,  SIG_DFL);
+                $fh = fopen($inputPath, 'rb');
+                stream_set_read_buffer($fh, 0);
 
-                fclose($this->pipes[$i][1]); // close parent's read end
+                $buckets = array_fill_keys($paths, '');
+                [$from, $to] = $workerRanges[$w];
+                self::fillBuckets($fh, $from, $to, $dateChars, $buckets);
 
-                $this->runWorker(
-                    $input, $boundaries, $slugMap, $dateIds,
-                    $dateCount, $slugCount,
-                    $workerSegments[$i], $this->pipes[$i][0]
-                );
-                exit(0);
+                fclose($fh);
+
+                $counts = self::bucketsToCounts($buckets, $pathOffsets, $pathCount, $dateCount);
+                file_put_contents($outFile, pack('v*', ...$counts));
+
+                posix_kill(posix_getpid(), SIGKILL);
             }
-
-            fclose($this->pipes[$i][0]); // close child's write end in parent
-
-            $pids[$pid]          = $i;
-            $this->childPids[$i] = $pid;
+            $childMap[$pid] = $outFile;
         }
 
-        // Set all parent read ends non-blocking for concurrent draining.
-        $readPipes     = [];
-        $workerBuffers = array_fill(0, self::WORKER_COUNT - 1, '');
-        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
-            stream_set_blocking($this->pipes[$i][1], false);
-            $readPipes[$i] = $this->pipes[$i][1];
-        }
-
-        // Parent processes its own segments, draining pipes between each one
-        // so children are never blocked on fwrite while the parent is busy.
-        $aggregated     = array_fill(0, $slugCount * $dateCount, 0);
-        $parentSegments = $workerSegments[self::WORKER_COUNT - 1];
-
-        $fh = fopen($input, 'rb');
+        $fh      = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
-        foreach ($parentSegments as $s) {
-            $this->parseRange($fh, $boundaries[$s], $boundaries[$s + 1], $slugMap, $dateIds, $aggregated);
-            $this->drainPipes($readPipes, $workerBuffers);
-        }
+        $buckets = array_fill_keys($paths, '');
+        [$from, $to] = $workerRanges[self::WORKERS - 1];
+        self::fillBuckets($fh, $from, $to, $dateChars, $buckets);
         fclose($fh);
 
-        // Final drain + reap loop.
-        while ($pids || $readPipes) {
-            $this->drainPipes($readPipes, $workerBuffers);
+        $counts  = self::bucketsToCounts($buckets, $pathOffsets, $pathCount, $dateCount);
+        $pending = count($childMap);
 
-            if ($pids) {
-                $pid = pcntl_wait($status, WNOHANG);
-                if ($pid > 0) {
-                    $workerIdx = $pids[$pid];
-                    unset($pids[$pid], $this->childPids[$workerIdx]);
-                }
+        while ($pending > 0) {
+            $pid = pcntl_wait($status, WNOHANG);
+            if ($pid <= 0) $pid = pcntl_wait($status);
+            $outFile = $childMap[$pid];
+            if (file_exists($outFile)) {
+                $childCounts = unpack('v*', file_get_contents($outFile));
+                unlink($outFile);
+                $j = 0;
+                foreach ($childCounts as $v) $counts[$j++] += $v;
             }
+            unset($childMap[$pid]);
+            $pending--;
         }
 
-        // Aggregate child results.
-        $total = $slugCount * $dateCount;
-        for ($w = 0; $w < self::WORKER_COUNT - 1; $w++) {
-            $workerCounts = array_values(unpack('v*', $workerBuffers[$w]));
-            for ($j = 0; $j < $total; $j++) {
-                $aggregated[$j] += $workerCounts[$j];
-            }
-        }
-
-        $this->generateJson($output, $aggregated, $slugs, $dateList);
+        self::writeJson($outputPath, $counts, $pathPrefixes, $datePrefixes, $pathCount, $dateCount);
     }
 
-    private function drainPipes(array &$readPipes, array &$workerBuffers): void
+    private static function fillBuckets($handle, int $start, int $end, array $dateChars, array &$buckets): void
     {
-        if (!$readPipes) return;
-
-        $read   = array_values($readPipes);
-        $write  = null;
-        $except = null;
-
-        if (!stream_select($read, $write, $except, 0, 50_000)) return;
-
-        foreach ($read as $pipe) {
-            $idx   = array_search($pipe, $readPipes, true);
-            $chunk = fread($pipe, 65_536);
-            if ($chunk !== false && $chunk !== '') {
-                $workerBuffers[$idx] .= $chunk;
-            }
-            if (feof($pipe)) {
-                fclose($pipe);
-                unset($readPipes[$idx]);
-            }
-        }
-    }
-
-    private function registerShutdownHandlers(): void
-    {
-        pcntl_async_signals(true);
-
-        $handler = function (int $sig): void {
-            foreach ($this->childPids as $pid) {
-                @posix_kill($pid, SIGTERM);
-            }
-            foreach ($this->childPids as $pid) {
-                @pcntl_waitpid($pid, $status);
-            }
-            foreach ($this->pipes as $pair) {
-                foreach ($pair as $fd) {
-                    @fclose($fd);
-                }
-            }
-            exit(1);
-        };
-
-        pcntl_signal(SIGTERM, $handler);
-        pcntl_signal(SIGINT,  $handler);
-    }
-
-    private function runWorker(
-        string $path, array $splits, array $slugMap, array $dateIds,
-        int $dateCount, int $slugCount,
-        array $segments, $pipe
-    ): void {
-        $counts = array_fill(0, $slugCount * $dateCount, 0);
-
-        $fh = fopen($path, 'rb');
-        stream_set_read_buffer($fh, 0);
-        foreach ($segments as $s) {
-            $this->parseRange($fh, $splits[$s], $splits[$s + 1], $slugMap, $dateIds, $counts);
-        }
-        fclose($fh);
-
-        fwrite($pipe, pack('v*', ...$counts));
-        fclose($pipe);
-    }
-
-    private function parseRange($fh, $start, $end, $slugMap, $dateIds, &$counts): void
-    {
-        fseek($fh, $start);
+        fseek($handle, $start);
         $remaining = $end - $start;
-        $bufSize   = self::READ_BUFFER;
 
         while ($remaining > 0) {
-            $buffer = fread($fh, $remaining > $bufSize ? $bufSize : $remaining);
-            if ($buffer === false || $buffer === '') break;
+            $toRead   = $remaining > self::READ_CHUNK ? self::READ_CHUNK : $remaining;
+            $chunk    = fread($handle, $toRead);
+            $chunkLen = strlen($chunk);
+            if ($chunkLen === 0) break;
+            $remaining -= $chunkLen;
 
-            $len       = strlen($buffer);
-            $remaining -= $len;
-            $lastNl    = strrpos($buffer, "\n");
-
+            $lastNl = strrpos($chunk, "\n");
             if ($lastNl === false) break;
-
-            $overhang = $len - $lastNl - 1;
-            if ($overhang > 0) {
-                fseek($fh, -$overhang, SEEK_CUR);
-                $remaining += $overhang;
+            $tail = $chunkLen - $lastNl - 1;
+            if ($tail > 0) {
+                fseek($handle, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
 
-            $p     = self::URI_OFFSET;
-            $fence = $lastNl - self::LOOP_FENCE;
+            $p     = self::PREFIX_LEN;
+            $fence = $lastNl - 650;
 
             while ($p < $fence) {
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dateChars[substr($chunk, $sep + 4, 7)];
+                $p = $sep + 52;
 
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dateChars[substr($chunk, $sep + 4, 7)];
+                $p = $sep + 52;
 
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dateChars[substr($chunk, $sep + 4, 7)];
+                $p = $sep + 52;
 
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dateChars[substr($chunk, $sep + 4, 7)];
+                $p = $sep + 52;
 
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dateChars[substr($chunk, $sep + 4, 7)];
+                $p = $sep + 52;
 
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
-
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
+                $sep = strpos($chunk, ',', $p);
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dateChars[substr($chunk, $sep + 4, 7)];
+                $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
-                $comma = strpos($buffer, ',', $p + self::MIN_SLUG_LEN);
-                $counts[$slugMap[substr($buffer, $p, $comma - $p)] + $dateIds[substr($buffer, $comma + 4, 7)]]++;
-                $p = $comma + 52;
+                $sep = strpos($chunk, ',', $p);
+                if ($sep === false || $sep >= $lastNl) break;
+                $slug = substr($chunk, $p, $sep - $p);
+                $key  = substr($chunk, $sep + 4, 7);
+                if (isset($dateChars[$key])) $buckets[$slug] .= $dateChars[$key];
+                $p = $sep + 52;
             }
         }
     }
 
-    private function buildDateRegistry(): array
+    private static function bucketsToCounts(array &$buckets, array $pathOffsets, int $pathCount, int $dateCount): array
     {
-        $map = []; $list = []; $id = 0;
-        for ($y = 21; $y <= 26; $y++) {
-            for ($m = 1; $m <= 12; $m++) {
-                $maxD = match ($m) {
-                    2 => ($y % 4 === 0) ? 29 : 28,
-                    4, 6, 9, 11 => 30,
-                    default => 31,
-                };
-                for ($d = 1; $d <= $maxD; $d++) {
-                    $date        = $y . '-' . ($m < 10 ? '0' : '') . $m . '-' . ($d < 10 ? '0' : '') . $d;
-                    $key         = substr($date, 1);
-                    $map[$key]   = $id;
-                    $list[$id++] = $date;
+        $counts = array_fill(0, $pathCount * $dateCount, 0);
+        foreach ($buckets as $slug => $bucket) {
+            $base = $pathOffsets[$slug];
+            foreach (array_count_values(unpack('v*', $bucket)) as $did => $cnt) {
+                $counts[$base + $did] += $cnt;
+            }
+        }
+        return $counts;
+    }
+
+    private static function writeJson(
+        string $outputPath, array $counts,
+        array $pathPrefixes, array $datePrefixes,
+        int $pathCount, int $dateCount
+    ): void {
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 1_048_576);
+
+        $buf    = '{';
+        $bufLen = 1;
+        $first  = true;
+        $base   = 0;
+
+        for ($p = 0; $p < $pathCount; $p++) {
+            $nonZero = array_filter(array_slice($counts, $base, $dateCount));
+
+            if ($nonZero) {
+                $dateBuf = '';
+                $sep     = "\n";
+                foreach ($nonZero as $d => $n) {
+                    $dateBuf .= $sep . $datePrefixes[$d] . $n;
+                    $sep = ",\n";
+                }
+
+                $entry   = ($first ? '' : ',') . $pathPrefixes[$p] . $dateBuf . "\n    }";
+                $first   = false;
+                $buf    .= $entry;
+                $bufLen += strlen($entry);
+
+                if ($bufLen > 65536) {
+                    fwrite($out, $buf);
+                    $buf    = '';
+                    $bufLen = 0;
                 }
             }
-        }
-        return [$map, $list];
-    }
 
-    private function discoverSlugs(string $path): array
-    {
-        $fh  = fopen($path, 'rb');
-        $raw = fread($fh, self::CHUNK_SIZE);
-        fclose($fh);
-
-        $slugs = [];
-        $pos   = 0;
-        $limit = strrpos($raw, "\n") ?: 0;
-        while ($pos < $limit) {
-            $eol = strpos($raw, "\n", $pos + 52);
-            if ($eol === false) break;
-            $slugs[substr($raw, $pos + self::URI_OFFSET, $eol - $pos - 51)] = true;
-            $pos = $eol + 1;
+            $base += $dateCount;
         }
 
-        foreach (Visit::all() as $v) {
-            $slugs[substr($v->uri, self::URI_OFFSET)] = true;
-        }
-        return array_keys($slugs);
-    }
-
-    private function calculateSplits(string $path): array
-    {
-        $pts     = [0];
-        $fh      = fopen($path, 'rb');
-        $segSize = (int) (self::FILE_SIZE / self::SEGMENT_COUNT);
-
-        for ($i = 1; $i < self::SEGMENT_COUNT; $i++) {
-            fseek($fh, $i * $segSize);
-            fgets($fh);
-            $pts[] = ftell($fh);
-        }
-
-        fclose($fh);
-        $pts[] = self::FILE_SIZE;
-        return $pts;
-    }
-
-    private function generateJson(string $out, array $counts, array $slugs, array $dates): void
-    {
-        $fp = fopen($out, 'wb');
-        stream_set_write_buffer($fp, 4_194_304);
-        fwrite($fp, '{');
-
-        $dCount = count($dates);
-
-        $datePrefixes = [];
-        for ($d = 0; $d < $dCount; $d++) {
-            $datePrefixes[$d] = "        \"20{$dates[$d]}\": ";
-        }
-
-        $escapedSlugs = [];
-        foreach ($slugs as $idx => $slug) {
-            $escapedSlugs[$idx] = "\"\\/blog\\/" . str_replace('/', '\\/', $slug) . "\"";
-        }
-
-        $isFirst = true;
-        $base    = 0;
-        foreach ($slugs as $sIdx => $_) {
-            $entries = [];
-            for ($d = 0; $d < $dCount; $d++) {
-                if ($val = $counts[$base + $d]) {
-                    $entries[] = $datePrefixes[$d] . $val;
-                }
-            }
-            if ($entries) {
-                $comma   = $isFirst ? "" : ",";
-                $isFirst = false;
-                fwrite($fp, "$comma\n    {$escapedSlugs[$sIdx]}: {\n" . implode(",\n", $entries) . "\n    }");
-            }
-            $base += $dCount;
-        }
-
-        fwrite($fp, "\n}");
-        fclose($fp);
+        fwrite($out, $buf . "\n}");
+        fclose($out);
     }
 }
