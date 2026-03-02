@@ -50,59 +50,49 @@ final class Parser
         $start = 0;
         $end = \filesize($inputPath);
 
-        $input = \fopen($inputPath, 'rb');
-        \stream_set_read_buffer($input,  self::STREAM_BUFFER_SIZE);
-
         $counters = \array_fill(0, self::URI_LIMIT * count($this->dates), 0);
         $uris = [];
         $uriSequence = 0;
 
+        $input = \fopen($inputPath, 'rb');
+        \stream_set_read_buffer($input,  self::STREAM_BUFFER_SIZE);
+
         // Move the file pointer to the start of the section.
         \fseek($input, $start);
 
-        $chunkSize = \min(self::READ_CHUNK_SIZE, $end - $start);
-        $chunk = \fread($input, $chunkSize);
-        $chunkLen = \strlen($chunk);
+        $this->logTime('Initialized');
+
+        $chunk = '';
         $chunkStart = 0;
-        $current = $chunkSize;
-        do {
-            // Try and find a line ending.
-            $lineEnd = \strpos($chunk, "\n", $chunkStart);
+        $current = 0;
+        while ($current < $end) {
+            $chunkSize = \min(self::READ_CHUNK_SIZE, $end - $current);
+            $chunk = \substr($chunk, $chunkStart) . \fread($input, $chunkSize);
+            $chunkStart = 0;
+            $current += $chunkSize;
 
-            // When there is no line ending, but more input to read, grab another chunk and append
-            // it to what is left of the current chunk. Keep doing this till either the next line
-            // ending is found, or the end of the section is reached.
-            while ($lineEnd === false && $current < $end) {
-                $chunkSize = \min(self::READ_CHUNK_SIZE, $end - $current);
-                $chunk = \substr($chunk, $chunkStart) . \fread($input, $chunkSize);
-                $chunkLen = \strlen($chunk);
-                $chunkStart = 0;
-                $current = $current + $chunkSize;
-                $lineEnd = \strpos($chunk, "\n", $chunkStart);
+            while (true) {
+                // Try and find a line ending, and we've run out, go onto the next chunk.
+                if (($lineEnd = \strpos($chunk, "\n", $chunkStart)) === false) {
+                    break;
+                }
+
+                // Find the comma position based on the line end.
+                $comma = $lineEnd - self::TIMESTAMP_LEN;
+
+                $uriStart = $chunkStart + self::URI_PREFIX_LEN;
+                $uri  = \substr($chunk, $uriStart, $comma - $uriStart);
+                if (($uriIndex = $uris[$uri] ?? null) === null) {
+                    $uriIndex = $uris[$uri] = $uriSequence++;
+                }
+
+                $dateIndex = $this->dates[\substr($chunk, $comma + 1, self::DATE_LEN)];
+
+                $counters[$uriIndex * $dateCount + $dateIndex]++;
+
+                $chunkStart = $lineEnd + 1;
             }
-
-            // When at the end of the file, there may not be a line ending, so set the line end to
-            // the end of the chunk.
-            if ($lineEnd === false) {
-                $lineEnd = $chunkLen;
-            }
-
-            $uriStart = $chunkStart + self::URI_PREFIX_LEN;
-
-            // Find the comma position based on the line end.
-            $comma = $lineEnd - self::TIMESTAMP_LEN;
-
-            $uri  = \substr($chunk, $uriStart, $comma - $uriStart);
-            if (($uriIndex = $uris[$uri] ?? null) === null) {
-                $uriIndex = $uris[$uri] = $uriSequence++;
-            }
-
-            $dateIndex = $this->dates[\substr($chunk, $comma + 1, self::DATE_LEN)];
-
-            $counters[$uriIndex * $dateCount + $dateIndex]++;
-
-            $chunkStart = $lineEnd + 1;
-        } while ($chunkStart < $chunkLen || $current < $end);
+        }
 
         \fclose($input);
 
