@@ -50,13 +50,27 @@ final class Parser
         $fileSize = filesize($inputPath);
         $numChunks = 16;
 
-        [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount] = self::discover($inputPath, $fileSize);
-
-        // Pre-build output strings
+        // Build all dates 2021-2026
+        $dateChars = [];
         $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = "        \"{$dateMap[$d]}\": ";
+        $dateCount = 0;
+        $dpm = [0,31,28,31,30,31,30,31,31,30,31,30,31];
+        for ($y = 2021; $y <= 2026; $y++) {
+            $dpm[2] = ($y % 4 === 0) ? 29 : 28;
+            $yStr = (string)$y;
+            for ($m = 1; $m <= 12; $m++) {
+                $mStr = ($m < 10 ? '0' : '') . $m;
+                $ym = $yStr . '-' . $mStr . '-';
+                for ($d = 1; $d <= $dpm[$m]; $d++) {
+                    $full = $ym . (($d < 10) ? '0' : '') . $d;
+                    $dateChars[substr($full, 3)] = pack('v', $dateCount);
+                    $datePrefixes[$dateCount] = "        \"{$full}\": ";
+                    $dateCount++;
+                }
+            }
         }
+
+        [$pathIds, $pathMap, $pathCount] = self::discover($inputPath, $fileSize);
         $pathPrefixes = [];
         for ($p = 0; $p < $pathCount; $p++) {
             $pathPrefixes[$p] = "\n    \"\\/blog\\/" . str_replace('/', '\\/', $pathMap[$p]) . "\": {";
@@ -291,8 +305,6 @@ final class Parser
         $lastNl = strrpos($chunk, "\n");
         $pathIds = [];
         $pathCount = 0;
-        $minDate = '9999-99-99';
-        $maxDate = '0000-00-00';
         $pos = 0;
 
         while ($pos < $lastNl) {
@@ -303,10 +315,6 @@ final class Parser
             if (!isset($pathIds[$pathStr])) {
                 $pathIds[$pathStr] = $pathCount++;
             }
-
-            $date = substr($chunk, $nlPos - 25, 10);
-            if ($date < $minDate) $minDate = $date;
-            if ($date > $maxDate) $maxDate = $date;
 
             $pos = $nlPos + 1;
         }
@@ -320,20 +328,7 @@ final class Parser
 
         $pathMap = array_keys($pathIds);
 
-        $dateChars = [];
-        $dateMap = [];
-        $dateCount = 0;
-        $ts = strtotime($minDate) - 86400 * 7;
-        $end = strtotime($maxDate) + 86400 * 7;
-        while ($ts <= $end) {
-            $full = date('Y-m-d', $ts);
-            $dateChars[substr($full, 3)] = pack('v', $dateCount);
-            $dateMap[$dateCount] = $full;
-            $dateCount++;
-            $ts += 86400;
-        }
-
-        return [$pathIds, $pathMap, $pathCount, $dateChars, $dateMap, $dateCount];
+        return [$pathIds, $pathMap, $pathCount];
     }
 
     private static function grabChunk($f, $numChunks)
