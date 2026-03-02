@@ -139,12 +139,13 @@ final class Parser
         $slugTotal = 0;
         $pos       = 0;
         $lastNl    = strrpos($raw, "\n") ?: 0;
+        $prefixLen = self::K2;
 
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
 
-            $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
+            $slug = substr($raw, $pos + $prefixLen, $nl - $pos - 51);
 
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
@@ -182,6 +183,7 @@ final class Parser
         $myPid      = getmypid();
         $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
         $childCount  = $workerTotal - 1;
+        $shmKeyBase  = $myPid * 100;
         $useSemQueue = false;
         $semKey      = $myPid + 1;
         $queueShmKey = $myPid + 2;
@@ -193,7 +195,7 @@ final class Parser
         $old = @shmop_open($queueShmKey, 'a', 0, 0);
         if ($old !== false) @shmop_delete($old);
         for ($w = 0; $w < $childCount; $w++) {
-            $old = @shmop_open($myPid * 100 + $w, 'a', 0, 0);
+            $old = @shmop_open($shmKeyBase + $w, 'a', 0, 0);
             if ($old !== false) @shmop_delete($old);
         }
         $sem      = @sem_get($semKey, 1, 0644, true);
@@ -213,7 +215,7 @@ final class Parser
         $useShm     = true;
 
         for ($w = 0; $w < $childCount; $w++) {
-            $shmKey = $myPid * 100 + $w;
+            $shmKey = $shmKeyBase + $w;
             set_error_handler(null);
             $shm = @shmop_open($shmKey, 'c', 0644, $shmSegSize);
             set_error_handler(null);
@@ -306,8 +308,7 @@ final class Parser
 
             $j = 0;
             foreach (unpack('v*', $packed) as $v) {
-                $counts[$j] += $v;
-                $j++;
+                $counts[$j++] += $v;
             }
         }
         if ($useSemQueue) {
