@@ -30,13 +30,17 @@ final class Parser
 
         for ($year = 2021; $year <= 2026; $year++) {
             for ($month = 1; $month <= 12; $month++) {
-                for ($day = 1; $day <= 31; $day++) {
-                    $rawDate = \sprintf('%d-%02d-%02d', $year, $month, $day);
-                    $parsedDateCache[$rawDate] = (int) (
-                        \substr($rawDate, 0, 4)
-                        . \substr($rawDate, 5, 2)
-                        . \substr($rawDate, 8, 2)
-                    );
+                $yearMonth = \sprintf('%d-%02d-', $year, $month);
+
+                $days = match ($month) {
+                    1, 3, 5, 7, 8, 10, 12 => 31,
+                    4, 6, 9, 11 => 30,
+                    2 => $year === 2024 ? 29 : 28,
+                };
+
+                for ($day = 1; $day <= $days; $day++) {
+                    $rawDate = $yearMonth . \sprintf('%02d', $day);
+                    $parsedDateCache[$rawDate] = (int) ($year . $month . $day);
                     $formattedDatesByInt[$parsedDateCache[$rawDate]] = $rawDate;
                 }
             }
