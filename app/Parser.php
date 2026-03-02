@@ -45,54 +45,17 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int READ_BLOCK_BYTES = 163_840;
+    private const int READ_BLOCK_BYTES = 131_072;
     private const int SLUG_SCAN_BYTES   = 2_097_152;
     private const int URL_PREFIX_BYTES  = 25;
     private const int PROCESS_COUNT     = 4;
 
     public function parse($inputPath, $outputPath)
     {
-        $runStartNs = \hrtime(true);
-        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
-        $phaseStartNs = $runStartNs;
-        $phaseMarks = [];
-        $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
-            if (! $profileEnabled) {
-                return;
-            }
-
-            $now = \hrtime(true);
-            $phaseMarks[] = [
-                'name' => $name,
-                'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
-                'total_ms' => ($now - $runStartNs) / 1_000_000,
-            ];
-            $phaseStartNs = $now;
-        };
-        $dumpPhases = static function (string $planId, int $workerTotal, int $chunkTotal) use (&$phaseMarks, $profileEnabled): void {
-            if (! $profileEnabled) {
-                return;
-            }
-
-            \fwrite(STDERR, "[parser-profile] plan={$planId} workers={$workerTotal} chunks={$chunkTotal}\n");
-            foreach ($phaseMarks as $mark) {
-                \fwrite(
-                    STDERR,
-                    \sprintf(
-                        "  %-24s delta=%8.3f ms total=%8.3f ms\n",
-                        $mark['name'],
-                        $mark['delta_ms'],
-                        $mark['total_ms'],
-                    ),
-                );
-            }
-        };
-
         gc_disable();
 
         $inputBytes   = filesize($inputPath);
         $workerTotal = self::PROCESS_COUNT;
-        $planId      = 'default';
 
         $dayIdByKey   = [];
         $dayKeyById     = [];
@@ -121,8 +84,6 @@ final class Parser
         foreach ($dayIdByKey as $date => $id) {
             $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
-        $markPhase('date-maps');
-
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         $raw = fread($handle, min(self::SLUG_SCAN_BYTES, $inputBytes));
@@ -149,8 +110,6 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
-        $markPhase('slug-scan');
-
         foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, self::URL_PREFIX_BYTES);
             if (!isset($slugIdByKey[$slug])) {
@@ -159,8 +118,6 @@ final class Parser
                 $slugTotal++;
             }
         }
-        $markPhase('visit-merge');
-
         $chunkOffsets = [0];
         $bh = fopen($inputPath, 'rb');
         for ($i = 1; $i < $workerTotal; $i++) {
@@ -170,8 +127,6 @@ final class Parser
         }
         fclose($bh);
         $chunkOffsets[] = $inputBytes;
-        $markPhase('chunk-offsets');
-
         $myPid      = getmypid();
         $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
         $shmSegSize = $slugTotal * $dateCount * 2;
@@ -242,12 +197,7 @@ final class Parser
                 }
             }
         }
-        $markPhase('parse-and-reduce');
-
         self::flushJsonOutput($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
-        $markPhase('json-output');
-
-        $dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
     private static function consumeRangeIntoBuckets($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
