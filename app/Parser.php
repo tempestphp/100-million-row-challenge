@@ -24,9 +24,19 @@ use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
+use function sem_acquire;
+use function sem_get;
+use function sem_release;
+use function sem_remove;
+use function set_error_handler;
+use function shmop_delete;
+use function shmop_open;
+use function shmop_read;
+use function shmop_write;
 use function str_replace;
 use function stream_socket_pair;
 use function stream_set_read_buffer;
+use function sys_get_temp_dir;
 use function stream_set_write_buffer;
 use function strlen;
 use function strpos;
@@ -36,12 +46,13 @@ use function unpack;
 
 use const SEEK_CUR;
 
-final class Parser
+final class ParserOf
 {
-    private const int READ_BLOCK_BYTES = 163_840;
-    private const int SLUG_SCAN_BYTES   = 2_097_152;
-    private const int URL_PREFIX_BYTES  = 25;
-    private const int PROCESS_COUNT     = 8;
+    private const int K0 = 163_840;
+    private const int K1   = 2_097_152;
+    private const int K2  = 25;
+    private const int K3     = 10;
+    private const int K4       = 20;
 
     public function parse($inputPath, $outputPath)
     {
@@ -84,7 +95,7 @@ final class Parser
         gc_disable();
 
         $inputBytes   = filesize($inputPath);
-        $workerTotal = self::PROCESS_COUNT;
+        $workerTotal = self::K3;
         $planId      = 'default';
 
         $dayIdByKey   = [];
@@ -118,7 +129,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, min(self::SLUG_SCAN_BYTES, $inputBytes));
+        $raw = fread($handle, min(self::K1, $inputBytes));
         fclose($handle);
 
         $slugIdByKey   = [];
@@ -131,7 +142,7 @@ final class Parser
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
 
-            $slug = substr($raw, $pos + self::URL_PREFIX_BYTES, $nl - $pos - 51);
+            $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
 
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
@@ -145,7 +156,7 @@ final class Parser
         $markPhase('slug-scan');
 
         foreach (Visit::all() as $visit) {
-            $slug = substr($visit->uri, self::URL_PREFIX_BYTES);
+            $slug = substr($visit->uri, self::K2);
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
                 $slugKeyById[$slugTotal] = $slug;
@@ -154,16 +165,39 @@ final class Parser
         }
         $markPhase('visit-merge');
 
+        $numChunks    = self::K4;
         $chunkOffsets = [0];
         $bh = fopen($inputPath, 'rb');
-        for ($i = 1; $i < $workerTotal; $i++) {
-            fseek($bh, intdiv($inputBytes * $i, $workerTotal));
+        for ($i = 1; $i < $numChunks; $i++) {
+            fseek($bh, intdiv($inputBytes * $i, $numChunks));
             fgets($bh);
             $chunkOffsets[] = ftell($bh);
         }
         fclose($bh);
         $chunkOffsets[] = $inputBytes;
         $markPhase('chunk-offsets');
+
+        $myPid      = getmypid();
+        $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
+        $useSemQueue = false;
+        $semKey      = $myPid + 1;
+        $queueShmKey = $myPid + 2;
+        $queueShm    = null;
+        $sem         = null;
+        $queueFile   = null;
+
+        set_error_handler(null);
+        $sem      = @sem_get($semKey, 1, 0644, true);
+        $queueShm = @shmop_open($queueShmKey, 'c', 0644, 4);
+        set_error_handler(null);
+
+        if ($sem !== false && $queueShm !== false) {
+            shmop_write($queueShm, pack('V', 0), 0);
+            $useSemQueue = true;
+        } else {
+            $queueFile = $tmpPrefix . '_queue';
+            \file_put_contents($queueFile, pack('V', 0));
+        }
 
         $sockets  = [];
         $childMap = [];
@@ -180,11 +214,21 @@ final class Parser
                 $fh      = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                self::consumeRangeIntoBuckets($fh, $chunkOffsets[$w], $chunkOffsets[$w + 1], $slugIdByKey, $dayIdTokens, $buckets);
+                if ($useSemQueue) {
+                    while (($ci = self::q0($queueShm, $sem, $numChunks)) !== -1) {
+                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
+                    }
+                } else {
+                    $qf = fopen($queueFile, 'c+b');
+                    while (($ci = self::q1($qf, $numChunks)) !== -1) {
+                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
+                    }
+                    fclose($qf);
+                }
 
                 fclose($fh);
 
-                $counts = self::reduceBucketsToCounts($buckets, $slugTotal, $dateCount);
+                $counts = self::q3($buckets, $slugTotal, $dateCount);
                 $packed = pack('v*', ...$counts);
 
                 fwrite($pair[1], $packed);
@@ -198,21 +242,29 @@ final class Parser
             $childMap[$pid] = $w;
         }
 
-        $parentIdx = $workerTotal - 1;
-        $buckets   = array_fill(0, $slugTotal, '');
-        $fh        = fopen($inputPath, 'rb');
+        $buckets = array_fill(0, $slugTotal, '');
+        $fh      = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        self::consumeRangeIntoBuckets($fh, $chunkOffsets[$parentIdx], $chunkOffsets[$parentIdx + 1], $slugIdByKey, $dayIdTokens, $buckets);
+        if ($useSemQueue) {
+            while (($ci = self::q0($queueShm, $sem, $numChunks)) !== -1) {
+                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
+            }
+        } else {
+            $qf = fopen($queueFile, 'c+b');
+            while (($ci = self::q1($qf, $numChunks)) !== -1) {
+                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
+            }
+            fclose($qf);
+        }
 
         fclose($fh);
 
-        $counts = self::reduceBucketsToCounts($buckets, $slugTotal, $dateCount);
+        $counts = self::q3($buckets, $slugTotal, $dateCount);
         $n      = $slugTotal * $dateCount;
 
-        // Read all child data via stream_select (prevents deadlock from full socket buffers)
         $childData = [];
-        $remaining = $sockets; // [pid => stream]
+        $remaining = $sockets; 
 
         while ($remaining) {
             $read = array_values($remaining);
@@ -238,7 +290,6 @@ final class Parser
             if (isset($childMap[$pid])) unset($childMap[$pid]);
         }
 
-        // Merge child counts
         foreach ($childData as $packed) {
             $childCounts = unpack('v*', $packed);
             for ($j = 0, $k = 1; $j < $n; $j++, $k++) {
@@ -247,21 +298,56 @@ final class Parser
                 }
             }
         }
+        if ($useSemQueue) {
+            shmop_delete($queueShm);
+            sem_remove($sem);
+        } else {
+            \unlink($queueFile);
+        }
         $markPhase('parse-and-reduce');
 
-        self::flushJsonOutput($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
+        self::q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
         $markPhase('json-output');
 
         $dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
-    private static function consumeRangeIntoBuckets($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
+    private static function q0($queueShm, $sem, $numChunks)
+    {
+        sem_acquire($sem);
+        $idx = unpack('V', shmop_read($queueShm, 0, 4))[1];
+        if ($idx >= $numChunks) {
+            sem_release($sem);
+            return -1;
+        }
+        shmop_write($queueShm, pack('V', $idx + 1), 0);
+        sem_release($sem);
+        return $idx;
+    }
+
+    private static function q1($qf, $numChunks)
+    {
+        \flock($qf, LOCK_EX);
+        fseek($qf, 0);
+        $idx = unpack('V', fread($qf, 4))[1];
+        if ($idx >= $numChunks) {
+            \flock($qf, LOCK_UN);
+            return -1;
+        }
+        fseek($qf, 0);
+        fwrite($qf, pack('V', $idx + 1));
+        \fflush($qf);
+        \flock($qf, LOCK_UN);
+        return $idx;
+    }
+
+    private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
         fseek($handle, $start);
 
         $remaining = $end - $start;
-        $bufSize   = self::READ_BLOCK_BYTES;
-        $prefixLen = self::URL_PREFIX_BYTES;
+        $bufSize   = self::K0;
+        $prefixLen = self::K2;
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
@@ -281,9 +367,17 @@ final class Parser
             }
 
             $p     = $prefixLen;
-            $fence = $lastNl - 594;
+            $fence = $lastNl - 792;
 
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
@@ -318,7 +412,7 @@ final class Parser
         }
     }
 
-    private static function reduceBucketsToCounts(&$buckets, $slugTotal, $dateCount)
+    private static function q3(&$buckets, $slugTotal, $dateCount)
     {
         $counts = array_fill(0, $slugTotal * $dateCount, 0);
         $base   = 0;
@@ -333,7 +427,7 @@ final class Parser
         return $counts;
     }
 
-    private static function flushJsonOutput($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount)
+    private static function q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount)
     {
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, 1_048_576);
