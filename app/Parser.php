@@ -17,6 +17,7 @@ use function fgets;
 use function fwrite;
 use function filesize;
 use function gc_disable;
+use function proc_nice;
 use function pcntl_fork;
 use function pcntl_wait;
 use function pack;
@@ -33,13 +34,12 @@ use function file_get_contents;
 use function file_put_contents;
 use function getmypid;
 use function unlink;
-use function ksort;
 use const SEEK_CUR;
 use const WNOHANG;
 
 final class Parser
 {
-    private const WORKERS = 12;
+    private const WORKERS = 10;
     private const READ_CHUNK = 163_840;
 
     public static function parse(string $inputPath, string $outputPath): void
@@ -48,30 +48,50 @@ final class Parser
 
         $fileSize = filesize($inputPath);
 
-        // Discover slugs and dates from 16MB sample
+        // Pre-enumerate all possible dates 2021-2026 (no discovery needed)
+        $dateIdChars = [];
+        $dates = [];
+        $dateCount = 0;
+        for ($y = 21; $y <= 26; $y++) {
+            for ($m = 1; $m <= 12; $m++) {
+                $maxD = match ($m) {
+                    2 => $y === 24 ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+                $mStr = ($m < 10 ? '0' : '') . $m;
+                $ymStr = "{$y}-{$mStr}-";
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $key = $ymStr . (($d < 10 ? '0' : '') . $d);
+                    $dateIdChars[$key] = chr($dateCount & 0xFF) . chr($dateCount >> 8);
+                    $dates[$dateCount] = $key;
+                    $dateCount++;
+                }
+            }
+        }
+
+        // Discover slugs from 2MB sample
         $pathIds = [];
         $paths = [];
         $pathCount = 0;
-        $discoveredDates = [];
 
         $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
-        $sample = fread($fh, 16_777_216);
+        $sample = fread($fh, 2_097_152);
         fclose($fh);
 
         $lastNl = strrpos($sample, "\n");
         $pos = 0;
         while ($pos < $lastNl) {
-            $nl = strpos($sample, "\n", $pos + 52);
-            if ($nl === false) break;
-            $slug = substr($sample, $pos + 25, $nl - $pos - 51);
+            $nlPos = strpos($sample, "\n", $pos + 52);
+            if ($nlPos === false) break;
+            $slug = substr($sample, $pos + 25, $nlPos - $pos - 51);
             if (!isset($pathIds[$slug])) {
                 $pathIds[$slug] = $pathCount;
                 $paths[$pathCount] = $slug;
                 $pathCount++;
             }
-            $discoveredDates[substr($sample, $nl - 23, 8)] = true;
-            $pos = $nl + 1;
+            $pos = $nlPos + 1;
         }
         unset($sample);
 
@@ -84,18 +104,6 @@ final class Parser
             }
         }
 
-        // Build date mappings from discovered dates only
-        ksort($discoveredDates);
-        $dateIdChars = [];
-        $dates = [];
-        $dateCount = 0;
-        foreach ($discoveredDates as $key => $_) {
-            $dateIdChars[$key] = chr($dateCount & 0xFF) . chr($dateCount >> 8);
-            $dates[$dateCount] = $key;
-            $dateCount++;
-        }
-        unset($discoveredDates);
-
         // Split file into worker chunks
         $boundaries = [0];
         $fh = fopen($inputPath, 'rb');
@@ -107,12 +115,24 @@ final class Parser
         fclose($fh);
         $boundaries[] = $fileSize;
 
-        // Fork children
+        // Pre-warm file cache at chunk boundaries
+        $fh = fopen($inputPath, 'rb');
+        for ($i = 0; $i <= self::WORKERS; $i++) {
+            fseek($fh, $boundaries[$i]);
+            fread($fh, 4096);
+        }
+        fclose($fh);
+
+        $oldHandler = set_error_handler(function() { return true; });
+        proc_nice(-20);
+        set_error_handler($oldHandler);
+
+        // Fork WORKERS-1 children for chunks 0..WORKERS-2
         $tmpDir = sys_get_temp_dir();
         $myPid = getmypid();
         $childMap = [];
 
-        for ($w = 0; $w < self::WORKERS; $w++) {
+        for ($w = 0; $w < self::WORKERS - 1; $w++) {
             $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
             $pid = pcntl_fork();
             if ($pid === 0) {
@@ -126,10 +146,13 @@ final class Parser
             $childMap[$pid] = $tmpFile;
         }
 
-        // Parent only merges — no parsing
-        $counts = array_fill(0, $pathCount * $dateCount, 0);
+        // Parent parses last chunk directly
+        $counts = self::parseRange(
+            $inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS],
+            $pathIds, $dateIdChars, $pathCount, $dateCount,
+        );
 
-        // Merge child results
+        // Merge children
         $pending = count($childMap);
         while ($pending > 0) {
             $pid = pcntl_wait($status, WNOHANG);
@@ -179,36 +202,31 @@ final class Parser
             $fence = $lastNl - 600;
 
             while ($p < $fence) {
-                $nl = strpos($chunk, "\n", $p + 27);
-                $buckets[$pathIds[substr($chunk, $p, $nl - 26 - $p)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
-                $p = $nl + 26;
+                $sep = strpos($chunk, ',', $p + 4);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $nl = strpos($chunk, "\n", $p + 27);
-                $buckets[$pathIds[substr($chunk, $p, $nl - 26 - $p)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
-                $p = $nl + 26;
+                $sep = strpos($chunk, ',', $p + 4);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $nl = strpos($chunk, "\n", $p + 27);
-                $buckets[$pathIds[substr($chunk, $p, $nl - 26 - $p)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
-                $p = $nl + 26;
+                $sep = strpos($chunk, ',', $p + 4);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $nl = strpos($chunk, "\n", $p + 27);
-                $buckets[$pathIds[substr($chunk, $p, $nl - 26 - $p)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
-                $p = $nl + 26;
+                $sep = strpos($chunk, ',', $p + 4);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
 
-                $nl = strpos($chunk, "\n", $p + 27);
-                $buckets[$pathIds[substr($chunk, $p, $nl - 26 - $p)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
-                $p = $nl + 26;
-
-                $nl = strpos($chunk, "\n", $p + 27);
-                $buckets[$pathIds[substr($chunk, $p, $nl - 26 - $p)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
-                $p = $nl + 26;
+                $sep = strpos($chunk, ',', $p + 4);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
-                $nl = strpos($chunk, "\n", $p + 27);
-                if ($nl === false || $nl > $lastNl) break;
-                $buckets[$pathIds[substr($chunk, $p, $nl - 26 - $p)]] .= $dateIdChars[substr($chunk, $nl - 23, 8)];
-                $p = $nl + 26;
+                $sep = strpos($chunk, ',', $p + 4);
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $p = $sep + 52;
             }
         }
 
@@ -220,7 +238,7 @@ final class Parser
             if ($buckets[$s] === '') continue;
             $base = $s * $dateCount;
             foreach (array_count_values(unpack('v*', $buckets[$s])) as $did => $n) {
-                $counts[$base + $did] = $n;
+                $counts[$base + $did] += $n;
             }
         }
 
