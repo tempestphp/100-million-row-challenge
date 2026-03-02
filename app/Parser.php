@@ -54,7 +54,7 @@ final class Parser
     private const int K1   = 2_097_152;
     private const int K2  = 25;
     private const int K3     = 8;
-    private const int K4       = 16;
+    private const int K4       = 32;
 
     public function parse($inputPath, $outputPath)
     {
@@ -125,7 +125,7 @@ final class Parser
 
         $dayIdTokens = [];
         foreach ($dayIdByKey as $date => $id) {
-            $dayIdTokens[$date] = pack('v', $id);
+            $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
         $markPhase('date-maps');
 
@@ -139,13 +139,12 @@ final class Parser
         $slugTotal = 0;
         $pos       = 0;
         $lastNl    = strrpos($raw, "\n") ?: 0;
-        $prefixLen = self::K2;
 
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
 
-            $slug = substr($raw, $pos + $prefixLen, $nl - $pos - 51);
+            $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
 
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
@@ -182,8 +181,6 @@ final class Parser
 
         $myPid      = getmypid();
         $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
-        $childCount  = $workerTotal - 1;
-        $shmKeyBase  = $myPid * 100;
         $useSemQueue = false;
         $semKey      = $myPid + 1;
         $queueShmKey = $myPid + 2;
@@ -192,12 +189,6 @@ final class Parser
         $queueFile   = null;
 
         set_error_handler(null);
-        $old = @shmop_open($queueShmKey, 'a', 0, 0);
-        if ($old !== false) @shmop_delete($old);
-        for ($w = 0; $w < $childCount; $w++) {
-            $old = @shmop_open($shmKeyBase + $w, 'a', 0, 0);
-            if ($old !== false) @shmop_delete($old);
-        }
         $sem      = @sem_get($semKey, 1, 0644, true);
         $queueShm = @shmop_open($queueShmKey, 'c', 0644, 4);
         set_error_handler(null);
@@ -214,8 +205,8 @@ final class Parser
         $shmHandles = [];
         $useShm     = true;
 
-        for ($w = 0; $w < $childCount; $w++) {
-            $shmKey = $shmKeyBase + $w;
+        for ($w = 0; $w < $workerTotal - 1; $w++) {
+            $shmKey = $myPid * 100 + $w;
             set_error_handler(null);
             $shm = @shmop_open($shmKey, 'c', 0644, $shmSegSize);
             set_error_handler(null);
@@ -232,7 +223,7 @@ final class Parser
 
         $childMap = [];
 
-        for ($w = 0; $w < $childCount; $w++) {
+        for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pid = pcntl_fork();
             if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
@@ -308,7 +299,8 @@ final class Parser
 
             $j = 0;
             foreach (unpack('v*', $packed) as $v) {
-                $counts[$j++] += $v;
+                $counts[$j] += $v;
+                $j++;
             }
         }
         if ($useSemQueue) {
@@ -459,19 +451,20 @@ final class Parser
 
         fwrite($out, '{');
         $firstPath = true;
-        $idx       = 0;
+        $base      = 0;
 
         for ($p = 0; $p < $slugTotal; $p++) {
             $dateEntries = [];
 
             for ($d = 0; $d < $dateCount; $d++) {
-                $count = $counts[$idx++];
+                $count = $counts[$base + $d];
                 if ($count !== 0) {
                     $dateEntries[] = $datePrefixes[$d] . $count;
                 }
             }
 
             if (empty($dateEntries)) {
+                $base += $dateCount;
                 continue;
             }
 
@@ -484,6 +477,8 @@ final class Parser
                 implode(",\n", $dateEntries) .
                 "\n    }"
             );
+
+            $base += $dateCount;
         }
 
         fwrite($out, "\n}");
