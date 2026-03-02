@@ -43,15 +43,9 @@ function parse($i, $o)
         }
     }
 
-    $trIds = [];
-    foreach ($pathIds as $slug => $id) {
-        $trIds[substr($slug, 4)] = $id;
-    }
-
     $dateIds = [];
     $dateList = [];
     $dateCount = 0;
-    $dateIdChars = [];
     for ($year = 1; $year <= 6; $year++) {
         for ($month = 1; $month <= 12; $month++) {
             $maxDay = ($month === 2) ? ((($year + 20) % 4 === 0) ? 29 : 28) : (($month === 4 || $month === 6 || $month === 9 || $month === 11) ? 30 : 31);
@@ -59,17 +53,20 @@ function parse($i, $o)
                 $date7 = $year . '-' . ($month < 10 ? '0' : '') . $month . '-' . ($day < 10 ? '0' : '') . $day;
                 $dateIds[$date7] = $dateCount;
                 $dateList[$dateCount] = '202' . $date7;
-                $dateIdChars[$date7] = chr($dateCount & 0xFF) . chr($dateCount >> 8);
                 $dateCount++;
             }
         }
     }
 
     $stride = $dateCount;
+    $totalCells = $pathCount * $stride;
+    $counts = array_fill(0, $totalCells, 0);
     $chunkSize = 262144;
 
-    $buckets = [];
-    foreach ($trIds as $t => $_) $buckets[$t] = '';
+    $trOffsets = [];
+    foreach ($pathIds as $slug => $id) {
+        $trOffsets[substr($slug, 4)] = $id * $stride;
+    }
 
     fseek($handle, 0);
     $remaining = $fileSize;
@@ -94,43 +91,32 @@ function parse($i, $o)
         $s = 29;
         while ($s < $fence) {
             $sep = strpos($chunk, ',', $s);
-            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+            $counts[$trOffsets[substr($chunk, $s, $sep - $s)] + $dateIds[substr($chunk, $sep + 4, 7)]]++;
             $s = $sep + 56;
             $sep = strpos($chunk, ',', $s);
-            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+            $counts[$trOffsets[substr($chunk, $s, $sep - $s)] + $dateIds[substr($chunk, $sep + 4, 7)]]++;
             $s = $sep + 56;
             $sep = strpos($chunk, ',', $s);
-            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+            $counts[$trOffsets[substr($chunk, $s, $sep - $s)] + $dateIds[substr($chunk, $sep + 4, 7)]]++;
             $s = $sep + 56;
             $sep = strpos($chunk, ',', $s);
-            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+            $counts[$trOffsets[substr($chunk, $s, $sep - $s)] + $dateIds[substr($chunk, $sep + 4, 7)]]++;
             $s = $sep + 56;
             $sep = strpos($chunk, ',', $s);
-            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+            $counts[$trOffsets[substr($chunk, $s, $sep - $s)] + $dateIds[substr($chunk, $sep + 4, 7)]]++;
             $s = $sep + 56;
             $sep = strpos($chunk, ',', $s);
-            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+            $counts[$trOffsets[substr($chunk, $s, $sep - $s)] + $dateIds[substr($chunk, $sep + 4, 7)]]++;
             $s = $sep + 56;
         }
         while ($s < $lastNl) {
             $sep = strpos($chunk, ',', $s);
             if ($sep === false || $sep > $lastNl) break;
-            $buckets[substr($chunk, $s, $sep - $s)] .= $dateIdChars[substr($chunk, $sep + 4, 7)];
+            $counts[$trOffsets[substr($chunk, $s, $sep - $s)] + $dateIds[substr($chunk, $sep + 4, 7)]]++;
             $s = $sep + 56;
         }
     }
     fclose($handle);
-
-    $totalCells = $pathCount * $stride;
-    $counts = array_fill(0, $totalCells, 0);
-    foreach ($buckets as $t => $data) {
-        if ($data === '') continue;
-        $offset = $trIds[$t] * $stride;
-        foreach (array_count_values(unpack('v*', $data)) as $did => $cnt) {
-            $counts[$offset + $did] += $cnt;
-        }
-    }
-    unset($buckets);
 
     $escapedPaths = [];
     $datePrefixes = [];
