@@ -24,11 +24,15 @@ use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
+use function file_get_contents;
+use function file_put_contents;
 use function shmop_delete;
 use function shmop_open;
 use function shmop_read;
 use function shmop_write;
 use function str_replace;
+use function sys_get_temp_dir;
+use function unlink;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function strlen;
@@ -169,6 +173,7 @@ final class Parser
         $markPhase('chunk-offsets');
 
         $myPid      = getmypid();
+        $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
         $shmSegSize = $slugTotal * $dateCount * 2;
         $childMap   = [];
 
@@ -188,8 +193,12 @@ final class Parser
                 $counts = self::reduceBucketsToCounts($buckets, $slugTotal, $dateCount);
                 $packed = pack('v*', ...$counts);
 
-                $shm = shmop_open($myPid * 10 + $w, 'c', 0644, $shmSegSize);
-                shmop_write($shm, $packed, 0);
+                $shm = @shmop_open($myPid * 10 + $w, 'c', 0644, $shmSegSize);
+                if ($shm !== false) {
+                    shmop_write($shm, $packed, 0);
+                } else {
+                    file_put_contents($tmpPrefix . '_' . $w, $packed);
+                }
 
                 exit(0);
             }
@@ -216,9 +225,15 @@ final class Parser
             $w = $childMap[$pid];
             unset($childMap[$pid]);
 
-            $shm    = shmop_open($myPid * 10 + $w, 'a', 0, 0);
-            $packed = shmop_read($shm, 0, $shmSegSize);
-            shmop_delete($shm);
+            $shm = @shmop_open($myPid * 10 + $w, 'a', 0, 0);
+            if ($shm !== false) {
+                $packed = shmop_read($shm, 0, $shmSegSize);
+                shmop_delete($shm);
+            } else {
+                $tmpFile = $tmpPrefix . '_' . $w;
+                $packed  = file_get_contents($tmpFile);
+                unlink($tmpFile);
+            }
 
             $childCounts = unpack('v*', $packed);
             for ($j = 0, $k = 1; $j < $n; $j++, $k++) {
