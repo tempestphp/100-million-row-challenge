@@ -46,7 +46,7 @@ use function unpack;
 
 use const SEEK_CUR;
 
-final class ParserOf
+final class Parser
 {
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
