@@ -125,7 +125,7 @@ final class Parser
 
         $dayIdTokens = [];
         foreach ($dayIdByKey as $date => $id) {
-            $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
+            $dayIdTokens[$date] = pack('v', $id);
         }
         $markPhase('date-maps');
 
@@ -181,6 +181,7 @@ final class Parser
 
         $myPid      = getmypid();
         $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
+        $childCount  = $workerTotal - 1;
         $useSemQueue = false;
         $semKey      = $myPid + 1;
         $queueShmKey = $myPid + 2;
@@ -189,6 +190,12 @@ final class Parser
         $queueFile   = null;
 
         set_error_handler(null);
+        $old = @shmop_open($queueShmKey, 'a', 0, 0);
+        if ($old !== false) @shmop_delete($old);
+        for ($w = 0; $w < $childCount; $w++) {
+            $old = @shmop_open($myPid * 100 + $w, 'a', 0, 0);
+            if ($old !== false) @shmop_delete($old);
+        }
         $sem      = @sem_get($semKey, 1, 0644, true);
         $queueShm = @shmop_open($queueShmKey, 'c', 0644, 4);
         set_error_handler(null);
@@ -205,7 +212,7 @@ final class Parser
         $shmHandles = [];
         $useShm     = true;
 
-        for ($w = 0; $w < $workerTotal - 1; $w++) {
+        for ($w = 0; $w < $childCount; $w++) {
             $shmKey = $myPid * 100 + $w;
             set_error_handler(null);
             $shm = @shmop_open($shmKey, 'c', 0644, $shmSegSize);
@@ -223,7 +230,7 @@ final class Parser
 
         $childMap = [];
 
-        for ($w = 0; $w < $workerTotal - 1; $w++) {
+        for ($w = 0; $w < $childCount; $w++) {
             $pid = pcntl_fork();
             if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
@@ -451,20 +458,19 @@ final class Parser
 
         fwrite($out, '{');
         $firstPath = true;
-        $base      = 0;
+        $idx       = 0;
 
         for ($p = 0; $p < $slugTotal; $p++) {
             $dateEntries = [];
 
             for ($d = 0; $d < $dateCount; $d++) {
-                $count = $counts[$base + $d];
+                $count = $counts[$idx++];
                 if ($count !== 0) {
                     $dateEntries[] = $datePrefixes[$d] . $count;
                 }
             }
 
             if (empty($dateEntries)) {
-                $base += $dateCount;
                 continue;
             }
 
@@ -477,8 +483,6 @@ final class Parser
                 implode(",\n", $dateEntries) .
                 "\n    }"
             );
-
-            $base += $dateCount;
         }
 
         fwrite($out, "\n}");
