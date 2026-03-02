@@ -14,7 +14,7 @@ function parse($i, $o)
     $fileSize = filesize($i);
 
     $handle = fopen($i, 'rb');
-    $sampleSize = $fileSize < 2097152 ? $fileSize : 2097152;
+    $sampleSize = $fileSize < 524288 ? $fileSize : 524288;
     $discoverChunk = fread($handle, $sampleSize);
     fclose($handle);
 
@@ -129,7 +129,7 @@ function parse($i, $o)
                             $remaining += $tail;
                         }
 
-                        $fence = $lastNl - 620;
+                        $fence = $lastNl - 600;
                         $s = 29;
                         while ($s < $fence) {
                             $sep = strpos($chunk, ',', $s);
@@ -210,7 +210,7 @@ function parse($i, $o)
                     $remaining += $tail;
                 }
 
-                $fence = $lastNl - 620;
+                $fence = $lastNl - 600;
                 $s = 29;
                 while ($s < $fence) {
                     $sep = strpos($chunk, ',', $s);
@@ -245,11 +245,27 @@ function parse($i, $o)
         @unlink($counterFile);
 
         $counts = array_fill(0, $totalCells, 0);
+        $childRemaining = count($childPids);
+
         foreach ($buckets as $t => $data) {
             if ($data === '') continue;
             $offset = $trIds[$t] * $stride;
             foreach (array_count_values(unpack('v*', $data)) as $did => $cnt) {
                 $counts[$offset + $did] += $cnt;
+            }
+            if ($childRemaining > 0) {
+                while (($pid = pcntl_waitpid(-1, $status, WNOHANG)) > 0) {
+                    $w = array_search($pid, $childPids);
+                    if ($w === false) continue;
+                    $raw = file_get_contents($tmpPrefix . $w);
+                    @unlink($tmpPrefix . $w);
+                    $j = 0;
+                    foreach (unpack('v*', $raw) as $v) {
+                        $counts[$j] += $v;
+                        $j++;
+                    }
+                    $childRemaining--;
+                }
             }
         }
         unset($buckets);
@@ -263,8 +279,7 @@ function parse($i, $o)
             $datePrefixes[$d] = "\n        \"" . $dateList[$d] . "\": ";
         }
 
-        $remaining = count($childPids);
-        while ($remaining > 0) {
+        while ($childRemaining > 0) {
             $pid = pcntl_wait($status);
             $w = array_search($pid, $childPids);
             if ($w === false) continue;
@@ -275,7 +290,7 @@ function parse($i, $o)
                 $counts[$j] += $v;
                 $j++;
             }
-            $remaining--;
+            $childRemaining--;
         }
 
         $fp = fopen($o, 'wb');
