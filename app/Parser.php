@@ -225,7 +225,7 @@ final class Parser
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pid = pcntl_fork();
-            if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
+            # if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
                 $buckets = array_fill(0, $slugTotal, '');
@@ -348,6 +348,7 @@ final class Parser
 
     private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
+        $_ = static function () use (&$buckets, $slugIdByKey, $dayIdTokens) {};
         fseek($handle, $start);
 
         $remaining = $end - $start;
