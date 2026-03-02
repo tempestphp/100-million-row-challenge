@@ -28,7 +28,7 @@ final class Parser
             // $data[$path][$date] = ($data[$path][$date] ?? 0) + 1;
         }
 
-        foreach ($data as $uri => &$dates) {
+        foreach ($data as &$dates) {
             ksort($dates);
         }
 
