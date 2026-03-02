@@ -68,10 +68,9 @@ final class Parser
             }
         }
 
-        $sampleSize = $fileSize > 524_288 ? 524_288 : $fileSize;
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $sample = fread($handle, $sampleSize);
+        $sample = fread($handle, 131_072);
         fclose($handle);
 
         $pathIds = [];
