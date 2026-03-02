@@ -18,6 +18,7 @@ use function ftell;
 use function pack;
 use function unpack;
 use function array_fill;
+use function array_values;
 use function implode;
 use function str_replace;
 use function count;
@@ -27,7 +28,6 @@ use function pcntl_fork;
 use function pcntl_wait;
 use function pcntl_signal;
 use function pcntl_async_signals;
-use function stream_get_contents;
 use function stream_select;
 use function stream_set_blocking;
 use function stream_set_read_buffer;
@@ -78,15 +78,13 @@ final class Parser
 
         $boundaries = $this->calculateSplits($input);
 
-        // Strided assignment: worker $i owns segments $i, $i+W, $i+2W ...
-        // 32 segments / 8 workers = exactly 4 segments each.
+        // Strided assignment: 32 segments / 8 workers = exactly 4 each.
         $workerSegments = [];
         for ($s = 0; $s < self::SEGMENT_COUNT; $s++) {
             $workerSegments[$s % self::WORKER_COUNT][] = $s;
         }
 
-        // Create one pipe pair per child worker before any forking.
-        // [0] = child write end, [1] = parent read end.
+        // Create pipe pairs before forking. [0] = child write, [1] = parent read.
         for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
             $this->pipes[$i] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             if ($this->pipes[$i] === false) {
@@ -108,9 +106,7 @@ final class Parser
                 pcntl_signal(SIGTERM, SIG_DFL);
                 pcntl_signal(SIGINT,  SIG_DFL);
 
-                // Child only needs its own write end — close the parent's read end
-                // of our pipe and let the OS clean up everything else on exit.
-                fclose($this->pipes[$i][1]);
+                fclose($this->pipes[$i][1]); // close parent's read end
 
                 $this->runWorker(
                     $input, $boundaries, $slugMap, $dateIds,
@@ -120,14 +116,22 @@ final class Parser
                 exit(0);
             }
 
-            // Parent closes the child's write end after forking.
-            fclose($this->pipes[$i][0]);
+            fclose($this->pipes[$i][0]); // close child's write end in parent
 
             $pids[$pid]          = $i;
             $this->childPids[$i] = $pid;
         }
 
-        // Parent processes its own segments while children work in parallel.
+        // Set all parent read ends non-blocking for concurrent draining.
+        $readPipes     = [];
+        $workerBuffers = array_fill(0, self::WORKER_COUNT - 1, '');
+        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
+            stream_set_blocking($this->pipes[$i][1], false);
+            $readPipes[$i] = $this->pipes[$i][1];
+        }
+
+        // Parent processes its own segments, draining pipes between each one
+        // so children are never blocked on fwrite while the parent is busy.
         $aggregated     = array_fill(0, $slugCount * $dateCount, 0);
         $parentSegments = $workerSegments[self::WORKER_COUNT - 1];
 
@@ -135,43 +139,14 @@ final class Parser
         stream_set_read_buffer($fh, 0);
         foreach ($parentSegments as $s) {
             $this->parseRange($fh, $boundaries[$s], $boundaries[$s + 1], $slugMap, $dateIds, $aggregated);
+            $this->drainPipes($readPipes, $workerBuffers);
         }
         fclose($fh);
 
-        // Drain pipes concurrently to avoid deadlock: children may produce more
-        // data than the pipe buffer can hold (~64KB on Linux). We must read from
-        // the pipes while also waiting for children to exit.
-        $workerBuffers = array_fill(0, self::WORKER_COUNT - 1, '');
-
-        // Set all parent read ends to non-blocking so stream_select can drain them.
-        $readPipes = [];
-        for ($i = 0; $i < self::WORKER_COUNT - 1; $i++) {
-            stream_set_blocking($this->pipes[$i][1], false);
-            $readPipes[$i] = $this->pipes[$i][1];
-        }
-
+        // Final drain + reap loop.
         while ($pids || $readPipes) {
-            // Drain whatever is available right now across all open pipes.
-            if ($readPipes) {
-                $read   = array_values($readPipes);
-                $write  = null;
-                $except = null;
-                if (stream_select($read, $write, $except, 0, 50_000)) {
-                    foreach ($read as $pipe) {
-                        $idx   = array_search($pipe, $readPipes);
-                        $chunk = fread($pipe, 65_536);
-                        if ($chunk !== false && $chunk !== '') {
-                            $workerBuffers[$idx] .= $chunk;
-                        }
-                        if (feof($pipe)) {
-                            fclose($pipe);
-                            unset($readPipes[$idx]);
-                        }
-                    }
-                }
-            }
+            $this->drainPipes($readPipes, $workerBuffers);
 
-            // Non-blocking wait: reap any child that has already exited.
             if ($pids) {
                 $pid = pcntl_wait($status, WNOHANG);
                 if ($pid > 0) {
@@ -181,7 +156,7 @@ final class Parser
             }
         }
 
-        // Aggregate all child results into $aggregated.
+        // Aggregate child results.
         $total = $slugCount * $dateCount;
         for ($w = 0; $w < self::WORKER_COUNT - 1; $w++) {
             $workerCounts = array_values(unpack('v*', $workerBuffers[$w]));
@@ -191,6 +166,29 @@ final class Parser
         }
 
         $this->generateJson($output, $aggregated, $slugs, $dateList);
+    }
+
+    private function drainPipes(array &$readPipes, array &$workerBuffers): void
+    {
+        if (!$readPipes) return;
+
+        $read   = array_values($readPipes);
+        $write  = null;
+        $except = null;
+
+        if (!stream_select($read, $write, $except, 0, 50_000)) return;
+
+        foreach ($read as $pipe) {
+            $idx   = array_search($pipe, $readPipes, true);
+            $chunk = fread($pipe, 65_536);
+            if ($chunk !== false && $chunk !== '') {
+                $workerBuffers[$idx] .= $chunk;
+            }
+            if (feof($pipe)) {
+                fclose($pipe);
+                unset($readPipes[$idx]);
+            }
+        }
     }
 
     private function registerShutdownHandlers(): void
