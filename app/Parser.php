@@ -72,7 +72,7 @@ final class Parser
 
         $binaryResource = fopen($inputPath, 'rb');
         stream_set_read_buffer($binaryResource, 0);
-        $warmUpSize = $fileSize > 131072 ? 131072 : $fileSize;
+        $warmUpSize = $fileSize > 163_840 ? 163_840 : $fileSize;
         $raw = fread($binaryResource, $warmUpSize);
 
         $boundaries = [0];
