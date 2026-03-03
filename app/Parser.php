@@ -9,7 +9,7 @@ use App\Commands\Visit;
 final class Parser
 {
     static $READ_CHUNK = 500_000;
-    static $CORES = 16;
+    static $CORES = 14;
 
     static public function partParse(string $inputPath, int $start, int $length, $dates, $paths, $fullCount) {
         $left = "";
@@ -391,6 +391,7 @@ final class Parser
             $ranges[$i] = [$start, $end];
             $start = $end;
         }
+        $ranges[$i-1][1] = \filesize($inputPath);
         \fclose($file);
 
         // Start threads
