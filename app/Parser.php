@@ -9,8 +9,6 @@ final class Parser
     private const int COMMA_TO_NEXT_SLUG = 52;
     private const int CHUNK_TARGET_SIZE = 512 * 1024;
 
-    private int $lastSlugIndex = 0;
-    private array $slugs = [];
     private array $result = [];
 
     public function parse(string $inputPath, string $outputPath): void
@@ -26,7 +24,8 @@ final class Parser
             );
             $currentChunk++;
         }
-        print_r($this->result);
+
+        $this->writeOutput($outputPath);
     }
 
     private function processChunk(string $inputPath, int $start, int $end): void
@@ -37,7 +36,8 @@ final class Parser
         do {
             $commaPosition = strpos($buffer, ',', $slugStart);
             $slug = substr($buffer, $slugStart, $commaPosition - $slugStart);
-//            $date = substr($buffer, $commaPosition + 1, self::DATE_LENGTH);
+            $date = substr($buffer, $commaPosition + 1, self::DATE_LENGTH);
+            $this->result[$slug][$date] = ($this->result[$slug][$date] ?? 0) + 1;
             $slugStart = $commaPosition + self::COMMA_TO_NEXT_SLUG;
         } while ($slugStart <= $contentLength);
     }
@@ -64,8 +64,30 @@ final class Parser
         return $boundaries;
     }
 
-    private function addResult(string $slug, string $date): void
+    private function writeOutput(string $outputPath): void
     {
-        //$this->result[$slug][$date] = ($data[$slug][$date] ?? 0) + 1;
+        $out = "{\n";
+        $firstUrl = true;
+        foreach ($this->result as $slug => $dates) {
+            ksort($dates);
+            if (!$firstUrl) {
+                $out .= ",\n";
+            }
+            $firstUrl = false;
+            $out .= "    \"\\/blog\\/{$slug}\": {\n";
+            $firstDate = true;
+            foreach ($dates as $date => $count) {
+                if (!$firstDate) {
+                    $out .= ",\n";
+                }
+                $firstDate = false;
+                $out .= "        \"{$date}\": {$count}";
+            }
+            $out .= "\n    }";
+        }
+
+        $out .= "\n}";
+
+        file_put_contents($outputPath, $out);
     }
 }
