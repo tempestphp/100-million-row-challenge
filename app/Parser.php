@@ -2,6 +2,8 @@
 
 namespace App;
 
+use App\Commands\Visit;
+
 use const SEEK_CUR;
 use const WNOHANG;
 
@@ -72,7 +74,8 @@ final class Parser
 
         $binaryResource = fopen($inputPath, 'rb');
         stream_set_read_buffer($binaryResource, 0);
-        $raw = fread($binaryResource, 163_840);
+        $warmUpSize = $fileSize > 131072 ? 131072 : $fileSize;
+        $raw = fread($binaryResource, $warmUpSize);
 
         $boundaries = [0];
         for ($w = 1; $w < self::WORKERS; $w++) {
@@ -105,6 +108,14 @@ final class Parser
         }
         unset($raw);
 
+        foreach (Visit::SLUGS as $slug) {
+            if (! isset($pathIds[$slug])) {
+                $pathIds[$slug] = $pathCount;
+                $paths[$pathCount] = $slug;
+                $pathCount++;
+            }
+        }
+
         $boundaries[] = $fileSize;
 
         $tmpDir = sys_get_temp_dir();
@@ -112,7 +123,7 @@ final class Parser
         $children = [];
 
         for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $tmpFile = "{$tmpDir}/p-{$myPid}-{$w}";
+            $tmpFile = "{$tmpDir}/p100m-{$myPid}-{$w}";
             $pid = pcntl_fork();
             if ($pid === 0) {
                 $wCounts = self::parseRange($inputPath, $boundaries[$w], $boundaries[$w + 1], $pathIds, $dateIdChars, $pathCount, $dateCount);
@@ -204,7 +215,7 @@ final class Parser
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                @$buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
+                $buckets[$pathIds[substr($chunk, $p, $sep - $p)]] .= $dateIdChars[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
@@ -237,54 +248,46 @@ final class Parser
 
     private static function writeJson($outputPath, $counts, $paths, $dates, $dateCount)
     {
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 1_048_576);
+        fwrite($out, '{');
+
         $pathCount = count($paths);
 
         $datePrefixes = [];
-        $dateFirstPrefixes = [];
         for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = ",\n" . '        "20' . $dates[$d] . '": ';
-            $dateFirstPrefixes[$d] = '        "20' . $dates[$d] . '": ';
+            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
         }
 
-        $buf = '{';
-        $firstPath = true;
+        $escapedPaths = [];
+        for ($i = 0; $i < $pathCount; $i++) {
+            $escapedPaths[$i] = "\"\\/blog\\/" . str_replace('/', '\\/', $paths[$i]) . "\"";
+        }
 
+        $firstPath = true;
         for ($i = 0; $i < $pathCount; $i++) {
             $base = $i * $dateCount;
+            $dateEntries = [];
 
-            // Find first non-zero entry
-            $firstDate = -1;
             for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$base + $d] !== 0) {
-                    $firstDate = $d;
-                    break;
+                $c = $counts[$base + $d];
+                if ($c === 0) {
+                    continue;
                 }
+                $dateEntries[] = $datePrefixes[$d] . $c;
             }
 
-            if ($firstDate === -1) {
+            if ($dateEntries === []) {
                 continue;
             }
 
-            if ($firstPath) {
-                $buf .= "\n    \"\\/blog\\/" . str_replace('/', '\\/', $paths[$i]) . "\": {\n";
-                $firstPath = false;
-            } else {
-                $buf .= ",\n    \"\\/blog\\/" . str_replace('/', '\\/', $paths[$i]) . "\": {\n";
-            }
-
-            $buf .= $dateFirstPrefixes[$firstDate] . $counts[$base + $firstDate];
-
-            for ($d = $firstDate + 1; $d < $dateCount; $d++) {
-                $c = $counts[$base + $d];
-                if ($c !== 0) {
-                    $buf .= $datePrefixes[$d] . $c;
-                }
-            }
-
-            $buf .= "\n    }";
+            $buf = $firstPath ? "\n    " : ",\n    ";
+            $firstPath = false;
+            $buf .= $escapedPaths[$i] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
+            fwrite($out, $buf);
         }
 
-        $buf .= "\n}";
-        file_put_contents($outputPath, $buf);
+        fwrite($out, "\n}");
+        fclose($out);
     }
 }
