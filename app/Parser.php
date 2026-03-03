@@ -48,15 +48,12 @@ final class Parser
 
         \ini_set('memory_limit', self::MEMORY_LIMIT);
 
-        foreach($this->dates as $date => $index) {
-            $this->dateCodes[$date] = pack('v', $index);
-            $this->datesFromIndex[$index] = '20' . $date;
-        }
+        $dateCount = count($this->dates);
 
         $start = 0;
         $end = \filesize($inputPath);
 
-        $counters = \array_fill(0, self::URI_LIMIT, '');
+        $counters = \array_fill(0, self::URI_LIMIT * $dateCount, 0);
         $uris = [];
         $uriSequence = 0;
 
@@ -91,7 +88,8 @@ final class Parser
 
                     $uri  = \substr($chunk, $chunkStart, $comma - $chunkStart);
                     if (($uriIndex = $uris[$uri] ?? null) === null) {
-                        $uriIndex = $uris[$uri] = $uriSequence++;
+                        $uriIndex = $uris[$uri] = $uriSequence;
+                        $uriSequence += $dateCount;
                         $uriHits = 0;
                     } else {
                         $uriHits++;
@@ -101,14 +99,14 @@ final class Parser
                         $checkUri = false;
                     }
 
-                    $counters[$uriIndex] .= $this->dateCodes[\substr($chunk, $comma + 3, self::DATE_LEN)];
+                    $counters[$uriIndex + $this->dates[\substr($chunk, $comma + 3, self::DATE_LEN)]]++;
 
                     $chunkStart = $comma + 52;
                 }
             } else {
                 while ($chunkStart < $chunkEnd) {
                     $comma = \strpos($chunk, ",", $chunkStart);
-                    $counters[$uris[\substr($chunk, $chunkStart, $comma - $chunkStart)]] .= $this->dateCodes[\substr($chunk, $comma + 3, self::DATE_LEN)];
+                    $counters[$uris[\substr($chunk, $chunkStart, $comma - $chunkStart)] + $this->dates[\substr($chunk, $comma + 3, self::DATE_LEN)]]++;
                     $chunkStart = $comma + 52;
                 }
             }
@@ -136,16 +134,15 @@ final class Parser
 
             $firstDate = true;
 
-            $dates = array_count_values(unpack('v*', $counters[$uriIndex]));
-            ksort($dates);
-            foreach ($dates as $dateCode => $count) {
-                $date = $this->datesFromIndex[$dateCode];
-
+            foreach ($this->dates as $date => $dateIndex) {
+                if (!$count = $counters[$uriIndex + $dateIndex]) {
+                    continue;
+                }
                 if (!$firstDate) {
                     $buffer .=  ",";
                 }
                 $firstDate = false;
-                $buffer .=  "\n        \"$date\": $count";
+                $buffer .=  "\n        \"20$date\": $count";
                 if ((++$lines & self::LINE_BUFFER_MASK) === 0) {
                     \fwrite($output, $buffer);
                     $buffer = '';
