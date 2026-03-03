@@ -20,7 +20,7 @@ final class Parser
             $paddings[$i] = $i < 10 ? "0$i" : (string)$i;
         }
 
-        for ($y = 20; $y <= 26; $y++) {
+        for ($y = 21; $y <= 26; $y++) {
             $yS = "$y-";
             $monthDays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
             if ($y % 4 === 0) $monthDays[2] = 29;
