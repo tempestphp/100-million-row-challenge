@@ -36,7 +36,7 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int K0 = 163_840;
+    private const int K0 = 524_288;
     private const int K3 = 10;
 
     public static function parse($inputPath, $outputPath)
