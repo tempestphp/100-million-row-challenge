@@ -371,37 +371,47 @@ final class Parser
             }
 
             $p     = $prefixLen;
-            $fence = $lastNl - 594;
+            $fence = $lastNl - 792;
+            $prevLen = 0;
+            $prevId = 0;
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $p = $sep + 52;
+
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $p = $sep + 52;
+
+                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                #if ($sep === false || $sep >= $lastNl) break;
+                if ($sep === false || $sep >= $lastNl) break;
                 $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
