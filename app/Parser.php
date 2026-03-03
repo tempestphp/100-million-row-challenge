@@ -41,7 +41,7 @@ final class Parser
 {
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
-    private const int K2  = 25;
+    private const int K2  = 29;
     private const int K3     = 8;
 
     public function parse($inputPath, $outputPath)
@@ -93,7 +93,8 @@ final class Parser
         $dateCount = 0;
 
         for ($y = 21; $y <= 26; $y++) {
-            $yStr = (string)$y;
+            $yShort = (string)($y % 10);
+            $yStr   = (string)$y;
             for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
                     2           => $y === 24 ? 29 : 28,
@@ -101,11 +102,12 @@ final class Parser
                     default     => 31,
                 };
                 $mStr  = ($m < 10 ? '0' : '') . $m;
-                $ymStr = $yStr . '-' . $mStr . '-';
+                $ymShort = $yShort . '-' . $mStr . '-';
+                $ymFull  = $yStr . '-' . $mStr . '-';
                 for ($d = 1; $d <= $maxD; $d++) {
-                    $key               = $ymStr . (($d < 10 ? '0' : '') . $d);
-                    $dayIdByKey[$key]     = $dateCount;
-                    $dayKeyById[$dateCount] = $key;
+                    $dd                = ($d < 10 ? '0' : '') . $d;
+                    $dayIdByKey[$ymShort . $dd] = $dateCount;
+                    $dayKeyById[$dateCount]     = $ymFull . $dd;
                     $dateCount++;
                 }
             }
@@ -132,11 +134,11 @@ final class Parser
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
 
-            $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
+            $shortSlug = substr($raw, $pos + self::K2, $nl - $pos - 55);
 
-            if (!isset($slugIdByKey[$slug])) {
-                $slugIdByKey[$slug]    = $slugTotal;
-                $slugKeyById[$slugTotal] = $slug;
+            if (!isset($slugIdByKey[$shortSlug])) {
+                $slugIdByKey[$shortSlug]    = $slugTotal;
+                $slugKeyById[$slugTotal] = substr($raw, $pos + 25, $nl - $pos - 51);
                 $slugTotal++;
             }
 
@@ -146,10 +148,11 @@ final class Parser
         $markPhase('slug-scan');
 
         foreach (Visit::all() as $visit) {
-            $slug = substr($visit->uri, self::K2);
-            if (!isset($slugIdByKey[$slug])) {
-                $slugIdByKey[$slug]    = $slugTotal;
-                $slugKeyById[$slugTotal] = $slug;
+            $fullSlug = substr($visit->uri, 25);
+            $shortSlug = substr($fullSlug, 4);
+            if (!isset($slugIdByKey[$shortSlug])) {
+                $slugIdByKey[$shortSlug]    = $slugTotal;
+                $slugKeyById[$slugTotal] = $fullSlug;
                 $slugTotal++;
             }
         }
@@ -264,56 +267,56 @@ final class Parser
             }
 
             $p     = $prefixLen;
-            $fence = $lastNl - 792;
+            $fence = $lastNl - 824;
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                @$idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                @$idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 4, 7)];
                 @$output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $p = $sep + 56;
             }
         }
     }
