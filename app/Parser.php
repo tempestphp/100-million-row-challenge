@@ -72,8 +72,7 @@ final class Parser
 
         $binaryResource = fopen($inputPath, 'rb');
         stream_set_read_buffer($binaryResource, 0);
-        $warmUpSize = 163_840;
-        $raw = fread($binaryResource, $warmUpSize);
+        $raw = fread($binaryResource, 163_840);
 
         $boundaries = [0];
         for ($w = 1; $w < self::WORKERS; $w++) {
