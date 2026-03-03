@@ -123,7 +123,7 @@ final class Parser
         $slugKeyById     = [];
         $slugTotal = 0;
         $pos       = 0;
-        $lastNl    = strrpos($raw, "\n") ?: 0;
+        $lastNl    = strrpos($raw, "\n");
 
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
@@ -162,10 +162,8 @@ final class Parser
 
         $sockets = [];
 
-        for ($w = 0; $w < $workerTotal - 1; $w++) {
+        for ($w = 0; $w < 7 - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], $outputSize);
-            stream_set_chunk_size($pair[1], $outputSize);
             $pid = pcntl_fork();
 
             if ($pid === 0) {
@@ -242,12 +240,10 @@ final class Parser
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
             $chunk  = fread($handle, $toRead);
             if (!$chunk) break;
-
             $chunkLen   = strlen($chunk);
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) continue;
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
