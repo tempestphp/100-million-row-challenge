@@ -26,14 +26,8 @@ final class Parser
             }
 
             // Parse CSV line (URL,timestamp)
-            $parts = explode(',', $line, 2);
-            
-            // Validate CSV format
-            if (count($parts) !== 2) {
-                continue;
-            }
-
-            [$url, $timestamp] = $parts;
+            $url = strtok($line, ',');
+            $timestamp = strtok('');
 
             // Extract URL path from full URL
             $urlPath = substr($url, 19);
