@@ -4,7 +4,6 @@ namespace App;
 
 use App\Commands\Visit;
 
-use function array_count_values;
 use function array_fill;
 use function chr;
 use function count;
@@ -22,10 +21,10 @@ use function gc_disable;
 use function getmypid;
 use function implode;
 use function min;
-use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
 use function str_replace;
+use function str_repeat;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function strlen;
@@ -43,7 +42,7 @@ final class Parser
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
-    private const int K3     = 10;
+    private const int K3     = 8;
 
     public function parse($inputPath, $outputPath)
     {
@@ -112,9 +111,9 @@ final class Parser
             }
         }
 
-        $dayIdTokens = [];
-        foreach ($dayIdByKey as $date => $id) {
-            $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
+        $next = [];
+        for ($i = 0; $i < 255; $i++) {
+            $next[chr($i)] = chr($i + 1);
         }
         $markPhase('date-maps');
 
@@ -156,6 +155,13 @@ final class Parser
         }
         $markPhase('visit-merge');
 
+        $slugBaseMap = [];
+        foreach ($slugIdByKey as $slug => $id) {
+            $slugBaseMap[$slug] = $id * $dateCount;
+        }
+
+        $outputSize = $slugTotal * $dateCount;
+
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
         for ($w = 1; $w < $workerTotal; $w++) {
@@ -176,16 +182,15 @@ final class Parser
             if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
-                $buckets = array_fill(0, $slugTotal, '');
-                $fh      = fopen($inputPath, 'rb');
+                $output = str_repeat(chr(0), $outputSize);
+                $fh     = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $slugIdByKey, $dayIdTokens, $buckets);
+                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $slugBaseMap, $dayIdByKey, $next, $output);
 
                 fclose($fh);
 
-                $counts = self::q3($buckets, $slugTotal, $dateCount);
-                file_put_contents($tmpPrefix . '_' . $w, pack('v*', ...$counts));
+                file_put_contents($tmpPrefix . '_' . $w, $output);
 
                 exit(0);
             }
@@ -193,15 +198,20 @@ final class Parser
             $childMap[$pid] = $w;
         }
 
-        $buckets = array_fill(0, $slugTotal, '');
-        $fh      = fopen($inputPath, 'rb');
+        $output = str_repeat(chr(0), $outputSize);
+        $fh     = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugIdByKey, $dayIdTokens, $buckets);
+        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
 
         fclose($fh);
 
-        $counts = self::q3($buckets, $slugTotal, $dateCount);
+        $counts = array_fill(0, $outputSize, 0);
+        $j = 0;
+        foreach (unpack('C*', $output) as $v) {
+            $counts[$j] = $v;
+            $j++;
+        }
 
         while ($childMap) {
             $pid = pcntl_wait($status);
@@ -215,7 +225,7 @@ final class Parser
             unlink($tmpFile);
 
             $j = 0;
-            foreach (unpack('v*', $packed) as $v) {
+            foreach (unpack('C*', $packed) as $v) {
                 $counts[$j] += $v;
                 $j++;
             }
@@ -228,7 +238,7 @@ final class Parser
         $dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
-    private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
+    private static function q2($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
     {
         fseek($handle, $start);
 
@@ -258,60 +268,54 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                @$buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                @$idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                @$output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
             }
         }
-    }
-
-    private static function q3(&$buckets, $slugTotal, $dateCount)
-    {
-        $counts = array_fill(0, $slugTotal * $dateCount, 0);
-        $base   = 0;
-        foreach ($buckets as $bucket) {
-            if ($bucket !== '') {
-                foreach (array_count_values(unpack('v*', $bucket)) as $did => $cnt) {
-                    $counts[$base + $did] += $cnt;
-                }
-            }
-            $base += $dateCount;
-        }
-        return $counts;
     }
 
     private static function q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount)
