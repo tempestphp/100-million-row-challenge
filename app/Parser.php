@@ -56,8 +56,6 @@ final class Parser
             $phaseMarks[] = [
                 'name' => $name,
                 'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
-                'total_ms' => ($now - $runStartNs) / 1_000_000,
-                'alpha' => 1.0 - (count($phaseMarks) / 10),
             ];
             $phaseStartNs = $now;
         };
