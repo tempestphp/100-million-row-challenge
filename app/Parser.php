@@ -10,6 +10,7 @@ final class Parser
     {
         $numWorkers = 14;
         $chunkSize = 262144;
+        $numCounters = 8;
 
         $slugToIdx = [];
         $slugCount = 0;
@@ -32,8 +33,8 @@ final class Parser
         unset($sample);
 
         $dateToId = [];
-        $dateJsonPrefix = [];
         $dateCount = 0;
+        $dateJsonPrefix = [];
         $daysInMonth = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
         for ($year = 2021; $year <= 2026; $year++) {
             $isLeap = ($year % 4 === 0 && ($year % 100 !== 0 || $year % 400 === 0));
@@ -60,19 +61,12 @@ final class Parser
         $boundaries[] = $fileSize;
         \fclose($fh);
 
+        $tmpPrefix = \sys_get_temp_dir() . '/parser_w';
         $pidToWorker = [];
-        $flatSize = $slugCount * $dateCount;
-        $dataSize = $flatSize << 1;
-        $workerSockets = [];
 
         for ($w = 0; $w < $numWorkers; $w++) {
-            \socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $pair);
-            \socket_set_option($pair[1], SOL_SOCKET, SO_SNDBUF, $dataSize + 4096);
-            \socket_set_option($pair[0], SOL_SOCKET, SO_RCVBUF, $dataSize + 4096);
-
             $pid = \pcntl_fork();
             if ($pid === 0) {
-                \socket_close($pair[0]);
                 $buckets = \array_fill_keys($slugOrderList, '');
                 $fh = \fopen($inputPath, 'rb');
                 \stream_set_read_buffer($fh, 0);
@@ -138,79 +132,140 @@ final class Parser
                     }
                 } while ($remaining > 0);
 
-                $counts = \array_fill(0, $flatSize, 0);
+                $out = '';
                 foreach ($buckets as $slug => $packed) {
                     if ($packed === '') continue;
-                    $base = $slugToIdx[$slug] * $dateCount;
-                    foreach (\array_count_values(\unpack('v*', $packed)) as $dId => $cnt) {
-                        $counts[$base + $dId] = $cnt;
-                    }
+                    $out .= \pack('vV', $slugToIdx[$slug], \strlen($packed)) . $packed;
                 }
 
-                $packed = \pack('v*', ...$counts);
-                \socket_write($pair[1], $packed, $dataSize);
-                \socket_close($pair[1]);
+                \file_put_contents($tmpPrefix . $w, $out);
                 \posix_kill(\posix_getpid(), 9);
             }
-            \socket_close($pair[1]);
-            $workerSockets[$pid] = $pair[0];
             $pidToWorker[$pid] = $w;
         }
 
-        $merged = null;
+        $mergedBuckets = \array_fill_keys($slugOrderList, '');
+        unset($dateToId);
         $drained = 0;
 
         do {
             $pid = \pcntl_waitpid(-1, $status);
-            if ($pid <= 0) continue;
-
-            $sock = $workerSockets[$pid];
-            $data = '';
-            $rem = $dataSize;
-            while ($rem > 0) {
-                $chunk = \socket_read($sock, $rem);
-                if ($chunk === false || $chunk === '') break;
-                $rem -= \strlen($chunk);
-                $data .= $chunk;
+            if ($pid <= 0) {
+                continue;
             }
-            \socket_close($sock);
 
-            if ($merged === null) {
-                $merged = \unpack('v*', $data);
-            } else {
-                $child = \unpack('v*', $data);
-                for ($j = 1; $j <= $flatSize; $j++) {
-                    $merged[$j] += $child[$j];
-                }
-                unset($child);
+            $w = $pidToWorker[$pid];
+            $tmpFile = $tmpPrefix . $w;
+            $data = \file_get_contents($tmpFile);
+            \unlink($tmpFile);
+
+            $offset = 0;
+            $dataLen = \strlen($data);
+            while ($offset < $dataLen) {
+                $slugIdx = \ord($data[$offset]) | (\ord($data[$offset + 1]) << 8);
+                $bucketLen = \ord($data[$offset + 2]) | (\ord($data[$offset + 3]) << 8) | (\ord($data[$offset + 4]) << 16) | (\ord($data[$offset + 5]) << 24);
+                $offset += 6;
+                $mergedBuckets[$slugOrderList[$slugIdx]] .= \substr($data, $offset, $bucketLen);
+                $offset += $bucketLen;
             }
             unset($data);
 
             $drained++;
         } while ($drained < $numWorkers);
 
+        $numSlugs = \count($slugOrderList);
+
+        $slugJsonHeaders = [];
+        foreach ($slugOrderList as $slug) {
+            $slugJsonHeaders[$slug] = '    "\/blog\/' . $slug . '": {' . "\n";
+        }
+        $slugsPerCounter = (int)\ceil($numSlugs / $numCounters);
+
+        $countSockets = [];
+        for ($c = 0; $c < $numCounters; $c++) {
+            \socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $pair);
+            \socket_set_option($pair[0], SOL_SOCKET, SO_RCVBUF, 2097152);
+            \socket_set_option($pair[1], SOL_SOCKET, SO_SNDBUF, 2097152);
+            $countSockets[$c] = $pair;
+        }
+
+        $countPids = [];
+        for ($c = 0; $c < $numCounters; $c++) {
+            $pid = \pcntl_fork();
+            if ($pid === 0) {
+                for ($i = 0; $i < $numCounters; $i++) {
+                    \socket_close($countSockets[$i][0]);
+                    if ($i !== $c) \socket_close($countSockets[$i][1]);
+                }
+
+                $myStart = $c * $slugsPerCounter;
+                $myEnd = \min(($c + 1) * $slugsPerCounter, $numSlugs);
+
+                $slugParts = [];
+
+                for ($s = $myStart; $s < $myEnd; $s++) {
+                    $slug = $slugOrderList[$s];
+                    $packed = $mergedBuckets[$slug];
+                    if ($packed === '') continue;
+
+                    $counts = \array_count_values(\unpack('v*', $packed));
+
+                    $dateParts = [];
+                    for ($d = 0; $d < $dateCount; $d++) {
+                        if (isset($counts[$d])) {
+                            $dateParts[] = $dateJsonPrefix[$d] . $counts[$d];
+                        }
+                    }
+                    $slugParts[] = $slugJsonHeaders[$slug] . \implode(",\n", $dateParts) . "\n    }";
+                }
+
+                $fragment = \implode(",\n", $slugParts);
+
+                $sock = $countSockets[$c][1];
+                $fragLen = \strlen($fragment);
+                $written = 0;
+                while ($written < $fragLen) {
+                    $n = \socket_write($sock, \substr($fragment, $written), $fragLen - $written);
+                    if ($n === false) break;
+                    $written += $n;
+                }
+                \socket_close($sock);
+                \posix_kill(\posix_getpid(), 9);
+            }
+            $countPids[] = $pid;
+        }
+
+        for ($c = 0; $c < $numCounters; $c++) {
+            \socket_close($countSockets[$c][1]);
+        }
+        unset($mergedBuckets);
+
         $fhOut = \fopen($outputPath, 'wb');
-        \stream_set_write_buffer($fhOut, 1048576);
         \fwrite($fhOut, "{\n");
         $needSep = false;
 
-        foreach ($slugOrderList as $slug) {
-            $base = $slugToIdx[$slug] * $dateCount + 1;
-            $dateParts = [];
-            for ($d = 0; $d < $dateCount; $d++) {
-                $v = $merged[$base + $d];
-                if ($v > 0) {
-                    $dateParts[] = $dateJsonPrefix[$d] . $v;
-                }
+        for ($c = 0; $c < $numCounters; $c++) {
+            $sock = $countSockets[$c][0];
+            $fragment = '';
+            while (true) {
+                $chunk = \socket_read($sock, 2097152);
+                if ($chunk === false || $chunk === '') break;
+                $fragment .= $chunk;
             }
-            if ($dateParts === []) continue;
+            \socket_close($sock);
 
-            if ($needSep) \fwrite($fhOut, ",\n");
-            \fwrite($fhOut, '    "\/blog\/' . $slug . '": {' . "\n" . \implode(",\n", $dateParts) . "\n    }");
-            $needSep = true;
+            if ($fragment !== '') {
+                if ($needSep) \fwrite($fhOut, ",\n");
+                \fwrite($fhOut, $fragment);
+                $needSep = true;
+            }
         }
 
         \fwrite($fhOut, "\n}");
         \fclose($fhOut);
+
+        foreach ($countPids as $pid) {
+            \pcntl_waitpid($pid, $status);
+        }
     }
 }
