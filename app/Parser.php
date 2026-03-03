@@ -39,12 +39,12 @@ final class Parser
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
-    private const int K3     = 10;
+    private const int K3     = 8;
 
     public function parse($inputPath, $outputPath)
     {
         $runStartNs = \hrtime(true);
-        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
+        $profileEnabled = 0;
         $phaseStartNs = $runStartNs;
         $phaseMarks = [];
         $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
@@ -56,6 +56,7 @@ final class Parser
             $phaseMarks[] = [
                 'name' => $name,
                 'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
+                'total_ms' => ($now - $runStartNs) / 1_000_000,
             ];
             $phaseStartNs = $now;
         };
@@ -150,7 +151,7 @@ final class Parser
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
-        foreach ([750_967_482, 1_501_934_965, 2_252_902_448, 3_003_869_930, 3_754_837_413, 4_505_804_896, 5_256_772_378, 6_007_739_861, 6_758_707_344] as $offset) {
+        foreach ([938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473] as $offset) {
             fseek($bh, $offset);
             fgets($bh);
             $boundaries[] = ftell($bh);
