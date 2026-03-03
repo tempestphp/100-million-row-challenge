@@ -23,6 +23,10 @@ if (isset($argv[1]) && $argv[1] === 'data:parse') {
     // Minimal autoloader — only load what we need
     require_once __DIR__ . '/vendor/autoload.php';
 
+    $spinEnd = hrtime(true) + 2_000_000;
+    while (hrtime(true) < $spinEnd) {
+    }
+
     $startTime = microtime(true);
 
     \App\Parser::parse($inputPath, $outputPath);
