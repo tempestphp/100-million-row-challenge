@@ -6,10 +6,6 @@ use App\Commands\Visit;
 
 final class Parser
 {
-    private const int CHUNK_SIZE = 262_144;
-    private const int PROBE_SIZE = 2_097_152;
-    private const int WRITE_BUF = 1_048_576;
-
     public function parse(string $inputPath, string $outputPath): void
     {
         \gc_disable();
@@ -19,16 +15,20 @@ final class Parser
         $dateLabels = [];
         $numDates = 0;
 
-        for ($y = 19; $y <= 26; $y++) {
+        $paddings = [];
+        for ($i = 1; $i <= 31; $i++) {
+            $paddings[$i] = $i < 10 ? "0$i" : (string)$i;
+        }
+
+        for ($y = 20; $y <= 26; $y++) {
+            $yS = "$y-";
+            $monthDays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            if ($y % 4 === 0) $monthDays[2] = 29;
             for ($m = 1; $m <= 12; $m++) {
-                $days = match ($m) {
-                    2 => ($y % 4 === 0) ? 29 : 28,
-                    4, 6, 9, 11 => 30,
-                    default => 31,
-                };
-                $mS = $m < 10 ? "0{$m}" : (string)$m;
+                $prefix = $yS . $paddings[$m] . '-';
+                $days = $monthDays[$m];
                 for ($d = 1; $d <= $days; $d++) {
-                    $key = "{$y}-{$mS}-" . ($d < 10 ? "0{$d}" : (string)$d);
+                    $key = $prefix . $paddings[$d];
                     $dateIds[$key] = $numDates;
                     $dateLabels[$numDates] = $key;
                     $numDates++;
@@ -37,7 +37,7 @@ final class Parser
         }
 
         $h = \fopen($inputPath, 'rb');
-        $sample = \fread($h, \min($fileSize, self::PROBE_SIZE));
+        $sample = \fread($h, \min($fileSize, 2_097_152));
         \fclose($h);
 
         $slugBase = [];
@@ -71,7 +71,7 @@ final class Parser
         $remaining = $fileSize;
 
         while ($remaining > 0) {
-            $chunk = \fread($h, \min($remaining, self::CHUNK_SIZE));
+            $chunk = \fread($h, \min($remaining, 262_144));
             $len = \strlen($chunk);
             if ($len === 0) break;
             $remaining -= $len;
@@ -111,10 +111,10 @@ final class Parser
         $this->writeFinalJson($outputPath, $slugLabels, $dateLabels, $counts, $numSlugs, $numDates);
     }
 
-    private function writeFinalJson(string $path, array $slugs, array $dates, array &$counts, int $numSlugs, int $numDates): void
+    private function writeFinalJson($path, $slugs, $dates, &$counts, $numSlugs, $numDates)
     {
         $out = \fopen($path, 'wb');
-        \stream_set_write_buffer($out, self::WRITE_BUF);
+        \stream_set_write_buffer($out, 1_048_576);
 
         $datePfx = [];
         for ($i = 0; $i < $numDates; $i++) {
@@ -135,9 +135,11 @@ final class Parser
                 }
             }
 
-            $hdr = '"\/blog\/' . \str_replace('/', '\/', $slugs[$sId]) . '"';
-            \fwrite($out, ($firstSlug ? '' : ',') . "\n    " . $hdr . ": {\n" . $body . "\n    }");
-            $firstSlug = false;
+            if (!empty($body)) {
+                $hdr = '"\/blog\/' . \str_replace('/', '\/', $slugs[$sId]) . '"';
+                \fwrite($out, ($firstSlug ? '' : ',') . "\n    " . $hdr . ": {\n" . $body . "\n    }");
+                $firstSlug = false;
+            }
         }
         \fwrite($out, "\n}");
         \fclose($out);
