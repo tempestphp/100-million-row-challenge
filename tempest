@@ -2,7 +2,6 @@
 <?php
 
 if (isset($argv[1]) && $argv[1] === 'data:parse') {
-    //$dir    = __DIR__;
     $input  = $argv[2] ?? __DIR__ . '/data/data.csv';
     $output = $argv[3] ?? __DIR__ . '/data/data.json';
     if (($p = strpos($input, '=')) !== false) $input   = substr($input, $p + 1);

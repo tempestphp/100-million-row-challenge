@@ -2,11 +2,9 @@
 
 namespace App;
 
-
 use function array_count_values;
 use function array_fill;
 use function chr;
-use function count;
 use function date;
 use function fclose;
 use function fgets;
@@ -27,6 +25,7 @@ use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
 use function posix_kill;
+use function posix_getpid;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -46,15 +45,9 @@ use const WNOHANG;
 final class Parser
 {
     private const int WORKERS    = 10;
-    private const int CHUNKS     = 10;
     private const int READ_CHUNK = 524_288;
     private const int DISC_SIZE  = 262_144;
     private const int PREFIX_LEN = 25;
-
-    public function __call(string $name, array $arguments): mixed
-    {
-        return static::$name(...$arguments);
-    }
 
     public static function parse($inputPath, $outputPath): void
     {
@@ -117,19 +110,17 @@ final class Parser
 
         $splitPoints = [0];
         $bh = fopen($inputPath, 'rb');
-        for ($i = 1; $i < self::CHUNKS; $i++) {
-            fseek($bh, intdiv($fileSize * $i, self::CHUNKS));
+        for ($i = 1; $i < self::WORKERS; $i++) {
+            fseek($bh, intdiv($fileSize * $i, self::WORKERS));
             fgets($bh);
             $splitPoints[] = ftell($bh);
         }
         fclose($bh);
         $splitPoints[] = $fileSize;
 
-        $chunksPerWorker = self::CHUNKS / self::WORKERS; // = 4
         $workerRanges    = [];
         for ($w = 0; $w < self::WORKERS; $w++) {
-            $first              = $w * $chunksPerWorker;
-            $workerRanges[$w]   = [$splitPoints[$first], $splitPoints[$first + $chunksPerWorker]];
+            $workerRanges[$w] = [$splitPoints[$w], $splitPoints[$w + 1]];
         }
 
         $myPid     = getmypid();
@@ -166,7 +157,7 @@ final class Parser
         fclose($fh);
 
         $counts  = self::bucketsToCounts($buckets, $pathCount, $dateCount);
-        $pending = count($childMap);
+        $pending = self::WORKERS - 1;
 
         while ($pending > 0) {
             $pid = pcntl_wait($status, WNOHANG);
