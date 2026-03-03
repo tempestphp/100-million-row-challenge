@@ -2,6 +2,8 @@
 
 namespace App;
 
+use SplFixedArray;
+
 final class Parser
 {
     private const int SLUG_OFFSET = 25;
@@ -14,7 +16,7 @@ final class Parser
     public function parse(string $inputPath, string $outputPath): void
     {
         $boundaries = $this->getChunkBoundaries($inputPath, filesize($inputPath));
-        $totalChunks = count($boundaries) - 1;
+        $totalChunks = $boundaries->count() - 1;
         $currentChunk = 0;
         while ($currentChunk < $totalChunks) {
             $this->processChunk(
@@ -26,6 +28,30 @@ final class Parser
         }
 
         $this->writeOutput($outputPath);
+    }
+
+    private function getChunkBoundaries(string $inputPath, int $fileSize): SplFixedArray
+    {
+        $handle = fopen($inputPath, 'r');
+        $boundaries = new SplFixedArray(ceil($fileSize / self::CHUNK_TARGET_SIZE) + 1);
+        $boundaries[0] = 0;
+        $boundaryIndex = 1;
+        $nextPos = 0;
+        do {
+            $nextPos = min($nextPos + self::CHUNK_TARGET_SIZE, $fileSize);
+            fseek($handle, $nextPos);
+            $line = fgets($handle);
+            if (false === $line) {
+                $boundaries[$boundaryIndex] = $fileSize;
+                break;
+            }
+            $nextPos += strlen($line);
+            $boundaries[$boundaryIndex++] = $nextPos;
+        } while ($fileSize > $nextPos);
+
+        fclose($handle);
+
+        return $boundaries;
     }
 
     private function processChunk(string $inputPath, int $start, int $end): void
@@ -40,28 +66,6 @@ final class Parser
             $this->result[$slug][$date] = ($this->result[$slug][$date] ?? 0) + 1;
             $slugStart = $commaPosition + self::COMMA_TO_NEXT_SLUG;
         } while ($slugStart <= $contentLength);
-    }
-
-    private function getChunkBoundaries(string $inputPath, int $fileSize): array
-    {
-        $handle = fopen($inputPath, 'r');
-        $boundaries = [0];
-        $nextPos = 0;
-        do {
-            $nextPos = min($nextPos + self::CHUNK_TARGET_SIZE, $fileSize);
-            fseek($handle, $nextPos);
-            $line = fgets($handle);
-            if (false === $line) {
-                $boundaries[] = $fileSize;
-                break;
-            }
-            $nextPos += strlen($line);
-            $boundaries[] = $nextPos;
-        } while ($fileSize > $nextPos);
-
-        fclose($handle);
-
-        return $boundaries;
     }
 
     private function writeOutput(string $outputPath): void
