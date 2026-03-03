@@ -112,7 +112,7 @@ final class Parser
         $children = [];
 
         for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $tmpFile = "{$tmpDir}/p100m-{$myPid}-{$w}";
+            $tmpFile = "{$tmpDir}/p-{$myPid}-{$w}";
             $pid = pcntl_fork();
             if ($pid === 0) {
                 $wCounts = self::parseRange($inputPath, $boundaries[$w], $boundaries[$w + 1], $pathIds, $dateIdChars, $pathCount, $dateCount);
@@ -237,46 +237,54 @@ final class Parser
 
     private static function writeJson($outputPath, $counts, $paths, $dates, $dateCount)
     {
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
-        fwrite($out, '{');
-
         $pathCount = count($paths);
 
         $datePrefixes = [];
+        $dateFirstPrefixes = [];
         for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+            $datePrefixes[$d] = ",\n" . '        "20' . $dates[$d] . '": ';
+            $dateFirstPrefixes[$d] = '        "20' . $dates[$d] . '": ';
         }
 
-        $escapedPaths = [];
-        for ($i = 0; $i < $pathCount; $i++) {
-            $escapedPaths[$i] = "\"\\/blog\\/" . str_replace('/', '\\/', $paths[$i]) . "\"";
-        }
-
+        $buf = '{';
         $firstPath = true;
+
         for ($i = 0; $i < $pathCount; $i++) {
             $base = $i * $dateCount;
-            $dateEntries = [];
 
+            // Find first non-zero entry
+            $firstDate = -1;
             for ($d = 0; $d < $dateCount; $d++) {
-                $c = $counts[$base + $d];
-                if ($c === 0) {
-                    continue;
+                if ($counts[$base + $d] !== 0) {
+                    $firstDate = $d;
+                    break;
                 }
-                $dateEntries[] = $datePrefixes[$d] . $c;
             }
 
-            if ($dateEntries === []) {
+            if ($firstDate === -1) {
                 continue;
             }
 
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= $escapedPaths[$i] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
-            fwrite($out, $buf);
+            if ($firstPath) {
+                $buf .= "\n    \"\\/blog\\/" . str_replace('/', '\\/', $paths[$i]) . "\": {\n";
+                $firstPath = false;
+            } else {
+                $buf .= ",\n    \"\\/blog\\/" . str_replace('/', '\\/', $paths[$i]) . "\": {\n";
+            }
+
+            $buf .= $dateFirstPrefixes[$firstDate] . $counts[$base + $firstDate];
+
+            for ($d = $firstDate + 1; $d < $dateCount; $d++) {
+                $c = $counts[$base + $d];
+                if ($c !== 0) {
+                    $buf .= $datePrefixes[$d] . $c;
+                }
+            }
+
+            $buf .= "\n    }";
         }
 
-        fwrite($out, "\n}");
-        fclose($out);
+        $buf .= "\n}";
+        file_put_contents($outputPath, $buf);
     }
 }
