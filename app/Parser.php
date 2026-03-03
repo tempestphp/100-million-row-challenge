@@ -11,7 +11,7 @@ final class Parser
     private const int DATE_MASK = 2 ** self::DATE_BITS - 1;
 
     private const int MAX_LINE_LENGTH = 101;
-    private const int BUFFER_SIZE = 1024 * 1024;
+    private const int BUFFER_SIZE = 1024 * 128;
     private const int PATH_OFFSET = 25;
     private const int MAX_OFFSET = self::BUFFER_SIZE - self::MAX_LINE_LENGTH + self::PATH_OFFSET;
 
