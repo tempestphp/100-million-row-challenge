@@ -157,7 +157,8 @@ final class Parser
         unset($raw);
         $markPhase('slug-scan');
 
-        foreach (Visit::SLUGS as $slug) {
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, self::K2);
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
                 $slugKeyById[$slugTotal] = $slug;
@@ -224,7 +225,7 @@ final class Parser
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pid = pcntl_fork();
-            #if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
+            if ($pid === -1) throw new \RuntimeException('pcntl_fork failed');
 
             if ($pid === 0) {
                 $buckets = array_fill(0, $slugTotal, '');
@@ -282,7 +283,7 @@ final class Parser
 
         while ($childMap) {
             $pid = pcntl_wait($status);
-            #if (!isset($childMap[$pid])) continue;
+            if (!isset($childMap[$pid])) continue;
 
             $w = $childMap[$pid];
             unset($childMap[$pid]);
@@ -356,7 +357,7 @@ final class Parser
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
             $chunk  = fread($handle, $toRead);
-            #if (!$chunk) break;
+            if (!$chunk) break;
 
             $chunkLen   = strlen($chunk);
             $remaining -= $chunkLen;
@@ -372,48 +373,52 @@ final class Parser
 
             $p     = $prefixLen;
             $fence = $lastNl - 792;
-            $prevLen = 0;
-            $prevId = 0;
+            $local = [];
 
             while ($p < $fence) {
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
 
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
 
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
 
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
 
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
 
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
 
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
 
-                if ($prevLen && $chunk[$p + $prevLen] === ',' && substr($chunk, $p, $prevLen) === $prevSlug) { $sep = $p + $prevLen; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
-                else { $sep = strpos($chunk, ',', $p); $prevLen = $sep - $p; $prevSlug = substr($chunk, $p, $prevLen); $prevId = $slugIdByKey[$prevSlug]; $buckets[$prevId] .= $dayIdTokens[substr($chunk, $sep + 3, 8)]; }
+                $sep = strpos($chunk, ',', $p); $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $id = $slugIdByKey[substr($chunk, $p, $sep - $p)]; $tk = $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                if (isset($local[$id])) $local[$id] .= $tk; else $local[$id] = $tk;
                 $p = $sep + 52;
+            }
+
+            foreach ($local as $id => $s) {
+                $buckets[$id] .= $s;
             }
         }
     }
@@ -423,11 +428,11 @@ final class Parser
         $counts = array_fill(0, $slugTotal * $dateCount, 0);
         $base   = 0;
         foreach ($buckets as $bucket) {
-            //if ($bucket !== '') {
+            if ($bucket !== '') {
                 foreach (array_count_values(unpack('v*', $bucket)) as $did => $cnt) {
                     $counts[$base + $did] += $cnt;
                 }
-            //}
+            }
             $base += $dateCount;
         }
         return $counts;
