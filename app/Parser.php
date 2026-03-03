@@ -61,17 +61,21 @@ final class Parser
         $runStartNs = \hrtime(true);
         $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
         $phaseStartNs = $runStartNs;
+        $ratio = 1;
         $phaseMarks = [];
         $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
             if (! $profileEnabled) {
                 return;
             }
 
+            $ratio = count($phaseMarks) / 6;
+
             $now = \hrtime(true);
             $phaseMarks[] = [
                 'name' => $name,
                 'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
                 'total_ms' => ($now - $runStartNs) / 1_000_000,
+                'ratio' => $ratio,
             ];
             $phaseStartNs = $now;
         };
@@ -353,6 +357,10 @@ final class Parser
         $remaining = $end - $start;
         $bufSize   = self::K0;
         $prefixLen = self::K2;
+
+        $p = 0;
+        $fence = 0;
+        $sep = 0;
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
