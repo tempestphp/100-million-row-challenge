@@ -19,12 +19,14 @@ final class Parser
         $totalChunks = $boundaries->count() - 1;
         $currentChunk = 0;
         while ($currentChunk < $totalChunks) {
+            if (null === $boundaries[$currentChunk + 1]) {
+                break;
+            }
             $this->processChunk(
                 $inputPath,
                 $boundaries[$currentChunk],
-                $boundaries[$currentChunk + 1]
+                $boundaries[++$currentChunk]
             );
-            $currentChunk++;
         }
 
         $this->writeOutput($outputPath);
@@ -63,6 +65,7 @@ final class Parser
             $commaPosition = strpos($buffer, ',', $slugStart);
             $slug = substr($buffer, $slugStart, $commaPosition - $slugStart);
             $date = substr($buffer, $commaPosition + 1, self::DATE_LENGTH);
+
             $this->result[$slug][$date] = ($this->result[$slug][$date] ?? 0) + 1;
             $slugStart = $commaPosition + self::COMMA_TO_NEXT_SLUG;
         } while ($slugStart <= $contentLength);
