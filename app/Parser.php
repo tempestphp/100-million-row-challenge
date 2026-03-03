@@ -162,7 +162,7 @@ final class Parser
 
         $sockets = [];
 
-        for ($w = 0; $w < 7 - 1; $w++) {
+        for ($w = 0; $w < 7; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             $pid = pcntl_fork();
 
@@ -188,7 +188,7 @@ final class Parser
         $fh     = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
+        self::q2($fh, $boundaries[7], $boundaries[8], $slugBaseMap, $dayIdByKey, $next, $output);
 
         fclose($fh);
 
