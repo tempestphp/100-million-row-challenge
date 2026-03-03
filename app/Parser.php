@@ -10,6 +10,8 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
+use function file_get_contents;
+use function file_put_contents;
 use function filesize;
 use function fopen;
 use function fread;
@@ -19,31 +21,19 @@ use function fwrite;
 use function gc_disable;
 use function getmypid;
 use function implode;
-use function intdiv;
 use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
-use function sem_acquire;
-use function sem_get;
-use function sem_release;
-use function sem_remove;
-use function set_error_handler;
-use function shmop_delete;
-use function shmop_open;
-use function shmop_read;
-use function shmop_write;
-use function file_get_contents;
-use function file_put_contents;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
-use function sys_get_temp_dir;
-use function unlink;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function sys_get_temp_dir;
+use function unlink;
 use function unpack;
 
 use const SEEK_CUR;
@@ -54,28 +44,23 @@ final class Parser
     private const int K1   = 2_097_152;
     private const int K2  = 25;
     private const int K3     = 8;
-    private const int K4       = 16;
 
     public function parse($inputPath, $outputPath)
     {
         $runStartNs = \hrtime(true);
         $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
         $phaseStartNs = $runStartNs;
-        $ratio = 1;
         $phaseMarks = [];
         $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
             if (! $profileEnabled) {
                 return;
             }
 
-            $ratio = count($phaseMarks) / 6;
-
             $now = \hrtime(true);
             $phaseMarks[] = [
                 'name' => $name,
                 'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
                 'total_ms' => ($now - $runStartNs) / 1_000_000,
-                'ratio' => $ratio,
             ];
             $phaseStartNs = $now;
         };
@@ -171,61 +156,20 @@ final class Parser
         }
         $markPhase('visit-merge');
 
-        $numChunks    = self::K4;
-        $chunkOffsets = [0];
+        $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
-        for ($i = 1; $i < $numChunks; $i++) {
-            fseek($bh, intdiv($inputBytes * $i, $numChunks));
+        for ($w = 1; $w < $workerTotal; $w++) {
+            fseek($bh, (int)($inputBytes * $w / $workerTotal));
             fgets($bh);
-            $chunkOffsets[] = ftell($bh);
+            $boundaries[] = ftell($bh);
         }
         fclose($bh);
-        $chunkOffsets[] = $inputBytes;
+        $boundaries[] = $inputBytes;
         $markPhase('chunk-offsets');
 
-        $myPid      = getmypid();
-        $tmpPrefix  = sys_get_temp_dir() . '/p100m_' . $myPid;
-        $useSemQueue = false;
-        $semKey      = $myPid + 1;
-        $queueShmKey = $myPid + 2;
-        $queueShm    = null;
-        $sem         = null;
-        $queueFile   = null;
-
-        set_error_handler(null);
-        $sem      = @sem_get($semKey, 1, 0644, true);
-        $queueShm = @shmop_open($queueShmKey, 'c', 0644, 4);
-        set_error_handler(null);
-
-        if ($sem !== false && $queueShm !== false) {
-            shmop_write($queueShm, pack('V', 0), 0);
-            $useSemQueue = true;
-        } else {
-            $queueFile = $tmpPrefix . '_queue';
-            \file_put_contents($queueFile, pack('V', 0));
-        }
-
-        $shmSegSize = $slugTotal * $dateCount * 2;
-        $shmHandles = [];
-        $useShm     = true;
-
-        for ($w = 0; $w < $workerTotal - 1; $w++) {
-            $shmKey = $myPid * 100 + $w;
-            set_error_handler(null);
-            $shm = @shmop_open($shmKey, 'c', 0644, $shmSegSize);
-            set_error_handler(null);
-            if ($shm === false) {
-                foreach ($shmHandles as [$k, $s]) {
-                    shmop_delete($s);
-                }
-                $shmHandles = [];
-                $useShm     = false;
-                break;
-            }
-            $shmHandles[$w] = [$shmKey, $shm];
-        }
-
-        $childMap = [];
+        $myPid     = getmypid();
+        $tmpPrefix = sys_get_temp_dir() . '/p100m_' . $myPid;
+        $childMap  = [];
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pid = pcntl_fork();
@@ -236,28 +180,12 @@ final class Parser
                 $fh      = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                if ($useSemQueue) {
-                    while (($ci = self::q0($queueShm, $sem, $numChunks)) !== -1) {
-                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
-                    }
-                } else {
-                    $qf = fopen($queueFile, 'c+b');
-                    while (($ci = self::q1($qf, $numChunks)) !== -1) {
-                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
-                    }
-                    fclose($qf);
-                }
+                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $slugIdByKey, $dayIdTokens, $buckets);
 
                 fclose($fh);
 
                 $counts = self::q3($buckets, $slugTotal, $dateCount);
-                $packed = pack('v*', ...$counts);
-
-                if ($useShm) {
-                    shmop_write($shmHandles[$w][1], $packed, 0);
-                } else {
-                    file_put_contents($tmpPrefix . '_' . $w, $packed);
-                }
+                file_put_contents($tmpPrefix . '_' . $w, pack('v*', ...$counts));
 
                 exit(0);
             }
@@ -269,17 +197,7 @@ final class Parser
         $fh      = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        if ($useSemQueue) {
-            while (($ci = self::q0($queueShm, $sem, $numChunks)) !== -1) {
-                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
-            }
-        } else {
-            $qf = fopen($queueFile, 'c+b');
-            while (($ci = self::q1($qf, $numChunks)) !== -1) {
-                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
-            }
-            fclose($qf);
-        }
+        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugIdByKey, $dayIdTokens, $buckets);
 
         fclose($fh);
 
@@ -292,26 +210,15 @@ final class Parser
             $w = $childMap[$pid];
             unset($childMap[$pid]);
 
-            if ($useShm) {
-                $packed = shmop_read($shmHandles[$w][1], 0, $shmSegSize);
-                shmop_delete($shmHandles[$w][1]);
-            } else {
-                $tmpFile = $tmpPrefix . '_' . $w;
-                $packed  = file_get_contents($tmpFile);
-                unlink($tmpFile);
-            }
+            $tmpFile = $tmpPrefix . '_' . $w;
+            $packed  = file_get_contents($tmpFile);
+            unlink($tmpFile);
 
             $j = 0;
             foreach (unpack('v*', $packed) as $v) {
                 $counts[$j] += $v;
                 $j++;
             }
-        }
-        if ($useSemQueue) {
-            shmop_delete($queueShm);
-            sem_remove($sem);
-        } else {
-            \unlink($queueFile);
         }
         $markPhase('parse-and-reduce');
 
@@ -321,35 +228,6 @@ final class Parser
         $dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
-    private static function q0($queueShm, $sem, $numChunks)
-    {
-        sem_acquire($sem);
-        $idx = unpack('V', shmop_read($queueShm, 0, 4))[1];
-        if ($idx >= $numChunks) {
-            sem_release($sem);
-            return -1;
-        }
-        shmop_write($queueShm, pack('V', $idx + 1), 0);
-        sem_release($sem);
-        return $idx;
-    }
-
-    private static function q1($qf, $numChunks)
-    {
-        \flock($qf, LOCK_EX);
-        fseek($qf, 0);
-        $idx = unpack('V', fread($qf, 4))[1];
-        if ($idx >= $numChunks) {
-            \flock($qf, LOCK_UN);
-            return -1;
-        }
-        fseek($qf, 0);
-        fwrite($qf, pack('V', $idx + 1));
-        \fflush($qf);
-        \flock($qf, LOCK_UN);
-        return $idx;
-    }
-
     private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
         fseek($handle, $start);
@@ -357,10 +235,6 @@ final class Parser
         $remaining = $end - $start;
         $bufSize   = self::K0;
         $prefixLen = self::K2;
-
-        $p = 0;
-        $fence = 0;
-        $sep = 0;
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
@@ -419,7 +293,7 @@ final class Parser
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                @$buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
         }
