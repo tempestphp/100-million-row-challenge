@@ -2,6 +2,7 @@
 
 final class Parser
 {
+    static $FIRST_READ_CHUNK = 165_000;
     static $READ_CHUNK = 500_000;
     static $CORES = 8;
 
@@ -24,7 +25,7 @@ final class Parser
         if($start == 0) {
             $order = [];
 
-            $lenAsked = Parser::$READ_CHUNK;
+            $lenAsked = Parser::$FIRST_READ_CHUNK;
             $buffer = \fread($file, $lenAsked);
 
             if(\substr($buffer, -1) != \PHP_EOL) {
