@@ -235,8 +235,8 @@ final class Parser
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                @$idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                @$output[$idx] = $next[$output[$idx]];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
             }
         }
