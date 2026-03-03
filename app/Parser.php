@@ -22,7 +22,6 @@ use function ftell;
 use function fwrite;
 use function getmypid;
 use function intdiv;
-use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
@@ -69,7 +68,7 @@ final class Parser
             }
         }
 
-        [$pathIds, $pathMap, $pathCount] = self::discover($inputPath, $fileSize);
+        [$pathIds, $pathMap, $pathCount] = self::discover();
         $pathPrefixes = [];
         for ($p = 0; $p < $pathCount; $p++) {
             $pathPrefixes[$p] = "\n    \"\\/blog\\/" . str_replace('/', '\\/', $pathMap[$p]) . "\": {";
@@ -248,40 +247,15 @@ final class Parser
         return $counts;
     }
 
-    private static function discover($inputPath, $fileSize)
+    private static function discover()
     {
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
-        $chunk = fread($handle, min($fileSize, 204800));
-        fclose($handle);
-
-        $lastNl = strrpos($chunk, "\n");
         $pathIds = [];
         $pathCount = 0;
-        $pos = 0;
-
-        while ($pos < $lastNl) {
-            $nlPos = strpos($chunk, "\n", $pos + 54);
-            if ($nlPos === false) break;
-
-            $pathStr = substr($chunk, $pos + 25, $nlPos - $pos - 51);
-            if (!isset($pathIds[$pathStr])) {
-                $pathIds[$pathStr] = $pathCount++;
-            }
-
-            $pos = $nlPos + 1;
-        }
-
         foreach (Visit::all() as $visit) {
-            $pathStr = substr($visit->uri, 25);
-            if (!isset($pathIds[$pathStr])) {
-                $pathIds[$pathStr] = $pathCount++;
-            }
+            $pathIds[substr($visit->uri, 25)] = $pathCount++;
         }
 
-        $pathMap = array_keys($pathIds);
-
-        return [$pathIds, $pathMap, $pathCount];
+        return [$pathIds, array_keys($pathIds), $pathCount];
     }
 
     private static function grabChunk($f, $numChunks)
