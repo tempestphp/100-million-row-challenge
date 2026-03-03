@@ -127,20 +127,6 @@ final class Parser
         foreach ($dayIdByKey as $date => $id) {
             $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
-
-        $ymBase = [];
-        foreach ($dayIdByKey as $date => $id) {
-            $ym = substr($date, 0, 5);
-            if (!isset($ymBase[$ym])) {
-                $dd = (int)substr($date, 6, 2);
-                $ymBase[$ym] = $id - ($dd - 1);
-            }
-        }
-
-        $dToken = [];
-        for ($i = 0; $i < 2192; $i++) {
-            $dToken[$i] = chr($i & 0xFF) . chr($i >> 8);
-        }
         $markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
@@ -248,12 +234,12 @@ final class Parser
 
                 if ($useSemQueue) {
                     while (($ci = self::q0($queueShm, $sem, $numChunks)) !== -1) {
-                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $ymBase, $dToken, $buckets);
+                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
                     }
                 } else {
                     $qf = fopen($queueFile, 'c+b');
                     while (($ci = self::q1($qf, $numChunks)) !== -1) {
-                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $ymBase, $dToken, $buckets);
+                        self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
                     }
                     fclose($qf);
                 }
@@ -281,12 +267,12 @@ final class Parser
 
         if ($useSemQueue) {
             while (($ci = self::q0($queueShm, $sem, $numChunks)) !== -1) {
-                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $ymBase, $dToken, $buckets);
+                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
             }
         } else {
             $qf = fopen($queueFile, 'c+b');
             while (($ci = self::q1($qf, $numChunks)) !== -1) {
-                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $ymBase, $dToken, $buckets);
+                self::q2($fh, $chunkOffsets[$ci], $chunkOffsets[$ci + 1], $slugIdByKey, $dayIdTokens, $buckets);
             }
             fclose($qf);
         }
@@ -360,7 +346,7 @@ final class Parser
         return $idx;
     }
 
-    private static function q2($handle, $start, $end, $slugIdByKey, $ymBase, $dToken, &$buckets)
+    private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
         fseek($handle, $start);
 
@@ -390,42 +376,42 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dToken[$ymBase[substr($chunk, $sep + 3, 5)] + (ord($chunk[$sep + 9]) - 48) * 10 + ord($chunk[$sep + 10]) - 49];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
         }
