@@ -43,10 +43,48 @@ final class Parser
 
     public function parse($inputPath, $outputPath)
     {
+        $runStartNs = \hrtime(true);
+        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
+        $phaseStartNs = $runStartNs;
+        $phaseMarks = [];
+        $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            $now = \hrtime(true);
+            $phaseMarks[] = [
+                'name' => $name,
+                'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
+                'total_ms' => ($now - $runStartNs) / 1_000_000,
+                'alpha' => 1.0 - (count($phaseMarks) / 10),
+            ];
+            $phaseStartNs = $now;
+        };
+        $dumpPhases = static function (string $planId, int $workerTotal, int $chunkTotal) use (&$phaseMarks, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            \fwrite(STDERR, "[parser-profile] plan={$planId} workers={$workerTotal} chunks={$chunkTotal}\n");
+            foreach ($phaseMarks as $mark) {
+                \fwrite(
+                    STDERR,
+                    \sprintf(
+                        "  %-24s delta=%8.3f ms total=%8.3f ms\n",
+                        $mark['name'],
+                        $mark['delta_ms'],
+                        $mark['total_ms'],
+                    ),
+                );
+            }
+        };
+
         gc_disable();
 
         $inputBytes   = 7_509_674_827;
         $workerTotal = self::K3;
+        $planId      = 'default';
 
         $dayIdByKey   = [];
         $dayKeyById     = [];
