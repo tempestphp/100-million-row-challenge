@@ -2,6 +2,7 @@
 
 namespace App;
 
+
 use function strpos;
 use function strrpos;
 use function substr;
@@ -27,7 +28,7 @@ final class Parser
     private const int READ_BUFFER   = 1_048_576;
     private const int URI_OFFSET    = 25;
     private const int FILE_SIZE     = 7_509_674_827;
-    private const int LOOP_FENCE    = 800;
+    private const int LOOP_FENCE    = 800; // 16 * (48 + 52)
     private const int MIN_SLUG_LEN  = 4;
 
     public static function parse(string $source, string $destination): void
@@ -95,6 +96,7 @@ final class Parser
             $slugs[substr($raw, $pos + self::URI_OFFSET, $eol - $pos - 51)] = true;
             $pos = $eol + 1;
         }
+
         return array_keys($slugs);
     }
 

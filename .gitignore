@@ -14,3 +14,11 @@ test-data-actual.json
 debug.php
 test.php
 benchmark.sh
+gere-Parser.php
+gere-tempest
+mine_Parser.php
+mine_tempest
+mine_tempest:Zone.Identifier
+parse.php
+slug.sh
+tempest:Zone.Identifier
