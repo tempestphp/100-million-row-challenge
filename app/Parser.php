@@ -53,7 +53,8 @@ final class Parser
                 $pathOffset = $commaOffset + 52;
             }
 
-            $buffer = \substr($buffer, $maxOffset + 1) . \fread($inputStream, self::BUFFER_SIZE);
+            \fseek($inputStream, $maxOffset - \strlen($buffer) + 1, \SEEK_CUR);
+            $buffer = \fread($inputStream, self::BUFFER_SIZE);
         }
 
         \fclose($inputStream);
