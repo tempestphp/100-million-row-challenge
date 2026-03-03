@@ -4,7 +4,6 @@ $argv = $_SERVER["argv"];
 
 if (($argv[1] ?? null) === "data:parse") {
     require __DIR__ . "/app/Parser.php";
-    require __DIR__ . "/app/Commands/Visit.php";
 
     $inputPath = \substr($argv[2] ?? "", 13);
     $outputPath = \substr($argv[3] ?? "", 14);
@@ -19,4 +18,3 @@ require_once getcwd() . "/vendor/autoload.php";
 ConsoleApplication::boot(loadBuiltInCommands: false)->run();
 
 exit();
-
