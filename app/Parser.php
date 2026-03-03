@@ -36,7 +36,7 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int K0 = 524_288;
+    private const int K0 = 163_840;
     private const int K3 = 10;
 
     public static function parse($inputPath, $outputPath)
@@ -240,19 +240,11 @@ final class Parser
             $toRead = $remaining > self::K0 ? self::K0 : $remaining;
             $chunk  = fread($handle, $toRead);
             $chunkLen   = strlen($chunk);
+            if (!$chunkLen) break;
             $remaining -= $chunkLen;
 
-            $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) break;
-
-            $tail = $chunkLen - $lastNl - 1;
-            if ($tail > 0) {
-                fseek($handle, -$tail, SEEK_CUR);
-                $remaining += $tail;
-            }
-
             $p     = 25;
-            $fence = $lastNl - 1010;
+            $fence = $chunkLen - 1110;
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
@@ -306,12 +298,18 @@ final class Parser
                 $p = $sep + 52;
             }
 
-            while ($p < $lastNl) {
+            while ($p < $chunkLen) {
                 $sep = strpos($chunk, ',', $p);
-                if ($sep === false || $sep >= $lastNl) break;
+                if ($sep === false || $sep + 27 > $chunkLen) break;
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
+            }
+
+            $tail = $chunkLen - $p + 25;
+            if ($tail > 0 && $tail < $chunkLen) {
+                fseek($handle, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
         }
     }
