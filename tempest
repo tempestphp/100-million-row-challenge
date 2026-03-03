@@ -7,7 +7,7 @@ if (isset($argv[1]) && $argv[1] == 'data:parse') {
     $outputPath = isset($argv[3]) ? str_replace('--output-path=', '', $argv[3]) : __DIR__ . '/data/data.json';
     
     require __DIR__ . '/app/Parser.php';
-    App\Parser::parse($inputPath, $outputPath);
+    Parser::parse($inputPath, $outputPath);
 
     return;      
 }
