@@ -142,7 +142,7 @@ final class Parser
 
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
-            #if ($nl === false) break;
+            if ($nl === false) break;
 
             $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
 
@@ -157,8 +157,7 @@ final class Parser
         unset($raw);
         $markPhase('slug-scan');
 
-        foreach (Visit::all() as $visit) {
-            $slug = substr($visit->uri, self::K2);
+        foreach (Visit::SLUGS as $slug) {
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
                 $slugKeyById[$slugTotal] = $slug;
@@ -348,7 +347,6 @@ final class Parser
 
     private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
-        compact('slugIdByKey', 'dayIdTokens', 'buckets');
         fseek($handle, $start);
 
         $remaining = $end - $start;
@@ -364,7 +362,7 @@ final class Parser
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
-            #if ($lastNl === false) continue;
+            if ($lastNl === false) continue;
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
@@ -373,17 +371,9 @@ final class Parser
             }
 
             $p     = $prefixLen;
-            $fence = $lastNl - 792;
+            $fence = $lastNl - 594;
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
                 $sep = strpos($chunk, ',', $p);
                 $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
