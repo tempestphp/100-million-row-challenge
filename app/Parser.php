@@ -105,7 +105,7 @@ final class Parser
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
-        foreach ([750_967_482, 1_501_934_965, 2_252_902_448, 3_003_869_930, 3_754_837_413, 4_505_804_896, 5_256_772_378, 6_007_739_861, 6_758_707_344] as $offset) {
+        foreach ([938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473] as $offset) {
             fseek($bh, $offset);
             fgets($bh);
             $boundaries[] = ftell($bh);
@@ -116,7 +116,7 @@ final class Parser
         $dataSize = $outputSize;
         $sockets = [];
 
-        for ($w = 0; $w < 9; $w++) {
+        for ($w = 0; $w < 7; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $dataSize);
             stream_set_chunk_size($pair[1], $dataSize);
@@ -136,7 +136,7 @@ final class Parser
         }
 
         $output = self::parseRange(
-            $inputPath, $boundaries[9], $boundaries[10],
+            $inputPath, $boundaries[7], $boundaries[8],
             $slugBaseMap, $dateIds, $next, $outputSize,
         );
 
@@ -198,9 +198,29 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 505;
+            $fence = $lastNl - 1010;
 
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
