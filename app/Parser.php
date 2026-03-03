@@ -2,8 +2,6 @@
 
 namespace App;
 
-use App\Commands\Visit;
-
 use function strpos;
 use function strrpos;
 use function substr;
@@ -25,11 +23,11 @@ use const SEEK_CUR;
 
 final class Parser
 {
-    private const int CHUNK_SIZE    = 2_097_152;
+    private const int CHUNK_SIZE    = 262_144;
     private const int READ_BUFFER   = 1_048_576;
     private const int URI_OFFSET    = 25;
     private const int FILE_SIZE     = 7_509_674_827;
-    private const int LOOP_FENCE    = 800; // 16 * (48 + 52)
+    private const int LOOP_FENCE    = 800;
     private const int MIN_SLUG_LEN  = 4;
 
     public static function parse(string $source, string $destination): void
@@ -96,10 +94,6 @@ final class Parser
             if ($eol === false) break;
             $slugs[substr($raw, $pos + self::URI_OFFSET, $eol - $pos - 51)] = true;
             $pos = $eol + 1;
-        }
-
-        foreach (Visit::all() as $v) {
-            $slugs[substr($v->uri, self::URI_OFFSET)] = true;
         }
         return array_keys($slugs);
     }
