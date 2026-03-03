@@ -9,31 +9,31 @@ use function chr;
 use function count;
 use function fclose;
 use function fgets;
-use function file_get_contents;
-use function file_put_contents;
+use function feof;
 use function fopen;
 use function fread;
 use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
-use function getmypid;
 use function implode;
 use function pack;
 use function pcntl_fork;
-use function pcntl_wait;
 use function str_replace;
+use function stream_select;
+use function stream_set_chunk_size;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
+use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function sys_get_temp_dir;
-use function unlink;
 use function unpack;
 use const SEEK_CUR;
-use const WNOHANG;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
@@ -118,22 +118,26 @@ final class Parser
         fclose($bh);
         $boundaries[] = $fileSize;
 
-        $tmpDir = sys_get_temp_dir();
-        $myPid = getmypid();
-        $childMap = [];
+        $dataSize = $pathCount * $dateCount * 2;
+        $sockets = [];
 
         for ($w = 0; $w < 9; $w++) {
-            $tmpFile = "{$tmpDir}/p100m_{$myPid}_{$w}";
+            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            stream_set_chunk_size($pair[0], $dataSize);
+            stream_set_chunk_size($pair[1], $dataSize);
             $pid = pcntl_fork();
             if ($pid === 0) {
+                fclose($pair[0]);
                 $wCounts = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $pathIds, $dateIdChars, $pathCount, $dateCount,
                 );
-                file_put_contents($tmpFile, pack('v*', ...$wCounts));
+                fwrite($pair[1], pack('v*', ...$wCounts));
+                fclose($pair[1]);
                 exit(0);
             }
-            $childMap[$pid] = $tmpFile;
+            fclose($pair[1]);
+            $sockets[$w] = $pair[0];
         }
 
         $counts = self::parseRange(
@@ -141,21 +145,26 @@ final class Parser
             $pathIds, $dateIdChars, $pathCount, $dateCount,
         );
 
-        $pending = count($childMap);
-        while ($pending > 0) {
-            $pid = pcntl_wait($status, WNOHANG);
-            if ($pid <= 0) {
-                $pid = pcntl_wait($status);
+        while ($sockets !== []) {
+            $read = $sockets;
+            $write = [];
+            $except = [];
+            stream_select($read, $write, $except, 5);
+            foreach ($read as $socket) {
+                $key = array_search($socket, $sockets, true);
+                $data = '';
+                while (!feof($socket)) {
+                    $data .= fread($socket, $dataSize);
+                }
+                fclose($socket);
+                unset($sockets[$key]);
+                $wCounts = unpack('v*', $data);
+                $j = 0;
+                foreach ($wCounts as $v) {
+                    $counts[$j] += $v;
+                    $j++;
+                }
             }
-            $tmpFile = $childMap[$pid];
-            $wCounts = unpack('v*', file_get_contents($tmpFile));
-            unlink($tmpFile);
-            $j = 0;
-            foreach ($wCounts as $v) {
-                $counts[$j] += $v;
-                $j++;
-            }
-            $pending--;
         }
 
         self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
