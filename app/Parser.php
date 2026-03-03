@@ -23,16 +23,6 @@ final class Parser
     // Visit.php contains just under 300 URIs, so let us assume it won't be much more than that.
     const URI_LIMIT = 300;
 
-    // Strip this prefix from every URI (length = 19).
-    // https://stitcher.io/blog/
-    const URI_PREFIX_LEN = 25;
-
-    // The timestamp is always the same length...
-    const TIMESTAMP_LEN = 26;
-
-    // ...as is the date
-    const DATE_LEN = 8;
-
     private float $startTime;
     private ?float $previousTime = null;
     private array $dateCodes;
@@ -72,8 +62,9 @@ final class Parser
         $checkUri = true;
         while ($current < $end) {
             $chunkSize = \min(self::READ_CHUNK_SIZE, $end - $current);
-            $chunk = \substr($chunk, $chunkStart - self::URI_PREFIX_LEN) . \fread($input, $chunkSize);
-            $chunkStart = self::URI_PREFIX_LEN;
+            // Strip the URI prefix. eg. https://stitcher.io/blog/
+            $chunk = \substr($chunk, $chunkStart - 25) . \fread($input, $chunkSize);
+            $chunkStart = 25;
             $current += $chunkSize;
             if ($current >= $end) {
                 $chunkEnd = $chunkSize;
@@ -99,14 +90,13 @@ final class Parser
                         $checkUri = false;
                     }
 
-                    $counters[$uriIndex + $this->dates[\substr($chunk, $comma + 3, self::DATE_LEN)]]++;
-
+                    $counters[$uriIndex + $this->dates[\substr($chunk, $comma + 3, 8)]]++;
                     $chunkStart = $comma + 52;
                 }
             } else {
                 while ($chunkStart < $chunkEnd) {
                     $comma = \strpos($chunk, ",", $chunkStart);
-                    $counters[$uris[\substr($chunk, $chunkStart, $comma - $chunkStart)] + $this->dates[\substr($chunk, $comma + 3, self::DATE_LEN)]]++;
+                    $counters[$uris[\substr($chunk, $chunkStart, $comma - $chunkStart)] + $this->dates[\substr($chunk, $comma + 3, 8)]]++;
                     $chunkStart = $comma + 52;
                 }
             }
