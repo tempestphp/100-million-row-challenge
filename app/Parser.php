@@ -36,10 +36,7 @@ final class Parser
             [$url, $timestamp] = $parts;
 
             // Extract URL path from full URL
-            $urlPath = parse_url($url, PHP_URL_PATH);
-            if ($urlPath === false || empty($urlPath)) {
-                continue;
-            }
+            $urlPath = substr($url, 19);
 
             // Extract date (YYYY-MM-DD) from timestamp
             $date = substr($timestamp, 0, 10);
