@@ -4,6 +4,69 @@ namespace App;
 
 final class Parser
 {
+    private function processBuffer(string &$buffer, array &$results, array &$urlOrder): void
+    {
+        $offset = 0;
+        $bufferLength = strlen($buffer);
+        
+        while ($offset < $bufferLength) {
+            // Find next delimiter efficiently
+            $commaPos = strpos($buffer, ',', $offset);
+            if ($commaPos === false) {
+                // No comma found, skip to next line
+                $newlinePos = strpos($buffer, "\n", $offset);
+                if ($newlinePos === false) {
+                    // Partial line at end
+                    $buffer = substr($buffer, $offset);
+                    return;
+                }
+                $offset = $newlinePos + 1;
+                continue;
+            }
+            
+            $newlinePos = strpos($buffer, "\n", $commaPos);
+            if ($newlinePos === false) {
+                // Incomplete line at end
+                $buffer = substr($buffer, $offset);
+                return;
+            }
+            
+            // Extract URL and timestamp efficiently
+            $url = substr($buffer, $offset, $commaPos - $offset);
+            $timestamp = substr($buffer, $commaPos + 1, $newlinePos - $commaPos - 1);
+            
+            // Process the data
+            $this->processUrlTimestamp($url, $timestamp, $results, $urlOrder);
+            
+            $offset = $newlinePos + 1;
+        }
+        
+        $buffer = '';
+    }
+
+    private function processUrlTimestamp(string $url, string $timestamp, array &$results, array &$urlOrder): void
+    {
+        // Process each line of the CSV file
+
+        // Extract URL path from full URL
+        $urlPath = substr($url, 19);
+
+        // Extract date (YYYY-MM-DD) from timestamp
+        $date = substr($timestamp, 0, 10);
+
+        // Track order of first appearance
+        if (!isset($results[$urlPath])) {
+            $results[$urlPath] = [];
+            $urlOrder[] = $urlPath;
+        }
+        
+        if (!isset($results[$urlPath][$date])) {
+            $results[$urlPath][$date] = 0;
+        }
+        
+        $results[$urlPath][$date]++;
+    }
+
     public function parse(string $inputPath, string $outputPath): void
     {
         // Open input file for reading
@@ -12,44 +75,27 @@ final class Parser
             exit();
         }
 
+        $bufferSize = 131072; // Use 128KB buffer 
+        $buffer = '';
+
         // Initialize results array to store URL path -> date -> count mappings
         // Use an associative array to maintain insertion order
         $results = [];
         $urlOrder = []; // Track order of first appearance
 
-        // Process each line of the CSV file
-        while (($line = fgets($inputFile)) !== false) {
-            // Trim whitespace and skip empty lines
-            $line = trim($line);
-            if (empty($line)) {
-                continue;
-            }
-
-            // Parse CSV line (URL,timestamp)
-            $url = strtok($line, ',');
-            $timestamp = strtok('');
-
-            // Extract URL path from full URL
-            $urlPath = substr($url, 19);
-
-            // Extract date (YYYY-MM-DD) from timestamp
-            $date = substr($timestamp, 0, 10);
-
-            // Track order of first appearance
-            if (!isset($results[$urlPath])) {
-                $results[$urlPath] = [];
-                $urlOrder[] = $urlPath;
-            }
-            
-            if (!isset($results[$urlPath][$date])) {
-                $results[$urlPath][$date] = 0;
-            }
-            
-            $results[$urlPath][$date]++;
+        // Read file in chunks
+        while (!feof($inputFile)) {
+            $chunk = fread($inputFile, $bufferSize);
+            if ($chunk === false) break;
+          
+            $buffer .= $chunk;
+          
+            // Process complete lines from buffer
+            $this->processBuffer($buffer, $results, $urlOrder);
         }
 
         fclose($inputFile);
-
+        
         // Sort dates within each URL path for consistent output
         foreach ($results as &$urlPath) {
             ksort($urlPath);
