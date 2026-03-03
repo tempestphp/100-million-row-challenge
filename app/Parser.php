@@ -2,7 +2,9 @@
 
 namespace App;
 
+use const AF_UNIX;
 use const SEEK_CUR;
+use const SOCK_STREAM;
 use const WNOHANG;
 
 use function array_count_values;
@@ -16,7 +18,6 @@ use function fopen;
 use function fread;
 use function fseek;
 use function ftell;
-use function ftok;
 use function fwrite;
 use function gc_disable;
 use function implode;
@@ -24,10 +25,10 @@ use function ord;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
-use function shmop_delete;
-use function shmop_open;
-use function shmop_read;
-use function shmop_write;
+use function socket_close;
+use function socket_create_pair;
+use function socket_read;
+use function socket_write;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -113,15 +114,25 @@ final class Parser
         $children = [];
 
         for ($w = 0; $w < self::WORKERS - 1; $w++) {
-            $shmKey = ftok(__FILE__, chr($w + 1));
-            $shmId = shmop_open($shmKey, 'c', 0644, $segmentSize);
+            $pair = [];
+            socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $pair);
             $pid = pcntl_fork();
             if ($pid === 0) {
+                socket_close($pair[0]);
                 $wCounts = self::parseRange($inputPath, $boundaries[$w], $boundaries[$w + 1], $pathIds, $dateIdChars, $pathCount, $dateCount);
-                shmop_write($shmId, pack('v*', ...$wCounts), 0);
+                $data = pack('v*', ...$wCounts);
+                $dataLength = strlen($data);
+                $sent = 0;
+                while ($sent < $dataLength) {
+                    $wrote = socket_write($pair[1], substr($data, $sent, 65536));
+                    if ($wrote === false) break;
+                    $sent += $wrote;
+                }
+                socket_close($pair[1]);
                 exit(0);
             }
-            $children[$pid] = $shmId;
+            socket_close($pair[1]);
+            $children[$pid] = $pair[0];
         }
 
         $counts = self::parseRange($inputPath, $boundaries[self::WORKERS - 1], $boundaries[self::WORKERS], $pathIds, $dateIdChars, $pathCount, $dateCount);
@@ -137,9 +148,14 @@ final class Parser
                 continue;
             }
 
-            $shmId = $children[$pid];
-            $raw = shmop_read($shmId, 0, $segmentSize);
-            shmop_delete($shmId);
+            $socket = $children[$pid];
+            $raw = '';
+            while (strlen($raw) < $segmentSize) {
+                $chunk = socket_read($socket, $segmentSize - strlen($raw));
+                if ($chunk === false || $chunk === '') break;
+                $raw .= $chunk;
+            }
+            socket_close($socket);
             $rawLength = strlen($raw);
             for ($j = 0; $j < $rawLength; $j += 2) {
                 $counts[$j >> 1] += ord($raw[$j]) | (ord($raw[$j + 1]) << 8);
