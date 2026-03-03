@@ -31,12 +31,12 @@ final class Parser
                 return;
             }
             
-            // Extract URL and timestamp efficiently
-            $url = substr($buffer, $offset, $commaPos - $offset);
-            $timestamp = substr($buffer, $commaPos + 1, $newlinePos - $commaPos - 1);
+            // Extract URL path and date efficiently
+            $urlPath = substr($buffer, $offset + 19, $commaPos - $offset - 19);
+            $date = substr($buffer, $commaPos + 1, $newlinePos - $commaPos - 16);
             
             // Process the data
-            $this->processUrlTimestamp($url, $timestamp, $results, $urlOrder);
+            $this->processUrlPathTimestamp($urlPath, $date, $results, $urlOrder);
             
             $offset = $newlinePos + 1;
         }
@@ -44,15 +44,9 @@ final class Parser
         $buffer = '';
     }
 
-    private function processUrlTimestamp(string $url, string $timestamp, array &$results, array &$urlOrder): void
+    private function processUrlPathTimestamp(string $urlPath, string $date, array &$results, array &$urlOrder): void
     {
         // Process each line of the CSV file
-
-        // Extract URL path from full URL
-        $urlPath = substr($url, 19);
-
-        // Extract date (YYYY-MM-DD) from timestamp
-        $date = substr($timestamp, 0, 10);
 
         // Track order of first appearance
         if (!isset($results[$urlPath])) {
