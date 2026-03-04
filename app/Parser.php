@@ -48,7 +48,7 @@ final class Parser
         $uriSequence = 0;
 
         $input = \fopen($inputPath, 'rb');
-        \stream_set_read_buffer($input,  self::STREAM_BUFFER_SIZE);
+        \stream_set_read_buffer($input,  0);
 
         // Move the file pointer to the start of the section.
         \fseek($input, $start);
