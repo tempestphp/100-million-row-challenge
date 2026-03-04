@@ -2,8 +2,8 @@
 <?php
 
 if ($argv[1] === 'data:parse') {
-    $a = isset($argv[2]) ? "'{$argv[2]}'" : 'data/data.csv';
-    $b = isset($argv[3]) ? "'{$argv[3]}'" : 'data/data.json';
+    $a = isset($argv[2]) ? explode('=', $argv[2])[1] : '--input-path=data/data.csv';
+    $b = isset($argv[3]) ? explode('=', $argv[3])[1] : '--output-path=data/data.json';
     require_once __DIR__ . '/app/Parser.php';
     \App\Parser::parse($a, $b);
     
