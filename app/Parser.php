@@ -38,9 +38,6 @@ final class Parser
 
     public static function parse($inputPath, $outputPath)
     {
-        set_error_handler(function (int $severity, string $message, string $file, int $line): never {
-            throw new \ErrorException($message, 0, $severity, $file, $line);
-        });
         gc_disable();
 
         $fileSize = 7_509_674_827;
