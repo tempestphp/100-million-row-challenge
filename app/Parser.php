@@ -35,7 +35,7 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int K0 = 32_768;
+    private const int K0 = 49_152;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
     private const int K3     = 10;
@@ -237,9 +237,9 @@ final class Parser
         fseek($handle, $start);
 
         $remaining = $end - $start;
-        $bufSize   = self::K0; // Asegúrate de que K0 sea <= 49152 (48KB) para que quepa en la L1d del M1
+        $bufSize   = self::K0; 
         $prefixLen = self::K2;
-        $carry     = ''; // Buffer en RAM para evitar retroceder el disco
+        $carry     = ''; 
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
