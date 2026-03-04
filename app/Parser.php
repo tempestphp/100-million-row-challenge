@@ -66,12 +66,11 @@ final class Parser
             $chunk = \fread($input, $chunkSize);
             $chunkStart = 25;
             $current += $chunkSize;
-            if ($current >= $end) {
+            if ($current > $end) {
                 $chunkEnd = $chunkSize;
             } else {
                 $chunkEnd = \strrpos($chunk, "\n");
-                $extra = $chunkSize - $chunkEnd - 1;
-                if ($extra !== 0) {
+                if (($extra = $chunkSize - $chunkEnd - 1) !== 0) {
                     $current -= $extra;
                     \fseek($input, $current);
                 }
