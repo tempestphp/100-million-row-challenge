@@ -19,6 +19,7 @@ use function str_replace;
 use function str_repeat;
 use function stream_select;
 use function stream_set_chunk_size;
+use function stream_get_contents;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function stream_socket_pair;
@@ -26,6 +27,7 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function unpack;
 
 use const SEEK_CUR;
 use const STREAM_IPPROTO_IP;
@@ -34,7 +36,7 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int K0 = 131_072;
+    private const int K0 = 163_840;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
     private const int K3     = 8;
@@ -156,6 +158,7 @@ final class Parser
         $boundaries[] = $inputBytes;
 
         $sockets = [];
+        $socketKeys = [];
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -169,7 +172,7 @@ final class Parser
                 $fh     = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $slugBaseMap, $dayIdByKey, $next, $output);
+                self::q2c($fh, $boundaries[$w], $boundaries[$w + 1], $slugBaseMap, $dayIdByKey, $next, $output);
 
                 fclose($fh);
                 fwrite($pair[1], $output);
@@ -179,20 +182,18 @@ final class Parser
 
             fclose($pair[1]);
             $sockets[$w] = $pair[0];
+            $socketKeys[(int)$pair[0]] = $w;
         }
 
         $output = str_repeat(chr(0), $outputSize);
         $fh     = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
+        self::q2c($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
 
         fclose($fh);
 
-        $counts = \array_fill(0, $outputSize, 0);
-        for ($i = 0; $i < $outputSize; $i++) {
-            $counts[$i] = \ord($output[$i]);
-        }
+        $counts = unpack('C*', $output);
         unset($output);
 
         while ($sockets !== []) {
@@ -201,22 +202,19 @@ final class Parser
             $except = [];
             stream_select($read, $write, $except, 5);
             foreach ($read as $socket) {
-                $key = \array_search($socket, $sockets, true);
-                $data = '';
-                while (!feof($socket) && \strlen($data) < $outputSize) {
-                    $buf = fread($socket, $outputSize - \strlen($data));
-                    if ($buf === '' || $buf === false) {
-                        break;
-                    }
-                    $data .= $buf;
+                $sid = (int)$socket;
+                $key = $socketKeys[$sid] ?? null;
+                if ($key === null) {
+                    fclose($socket);
+                    continue;
                 }
+
+                $data = stream_get_contents($socket) ?: '';
                 fclose($socket);
                 unset($sockets[$key]);
-
-                $dataLen = \strlen($data);
-                $limit = $dataLen < $outputSize ? $dataLen : $outputSize;
-                for ($i = 0; $i < $limit; $i++) {
-                    $counts[$i] += \ord($data[$i]);
+                unset($socketKeys[$sid]);
+                foreach (unpack('C*', $data) as $k => $v) {
+                    $counts[$k] += $v;
                 }
             }
         }
@@ -224,7 +222,7 @@ final class Parser
         self::q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
     }
 
-    private static function q2($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
+    private static function q2c($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
     {
         fseek($handle, $start);
 
@@ -249,30 +247,10 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $p     = $prefixLen;
-            $fence = $lastNl - 792;
+            $p = $prefixLen;
+            $fence = $lastNl - 396;
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
@@ -323,7 +301,7 @@ final class Parser
 
         fwrite($out, '{');
         $firstPath = true;
-        $base      = 0;
+        $base      = 1;
 
         for ($p = 0; $p < $slugTotal; $p++) {
             $dateEntries = [];
