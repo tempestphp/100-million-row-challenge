@@ -35,6 +35,7 @@ use const STREAM_SOCK_STREAM;
 final class Parser
 {
     private const int READ_CHUNK = 163_840;
+    private const int COUNTS_SIZE = 587_188;
 
     public static function parse($inputPath, $outputPath)
     {
@@ -109,8 +110,8 @@ final class Parser
 
         for ($w = 0; $w < 10; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], 587_188);
-            stream_set_chunk_size($pair[1], 587_188);
+            stream_set_chunk_size($pair[0], self::COUNTS_SIZE);
+            stream_set_chunk_size($pair[1], self::COUNTS_SIZE);
             $pid = pcntl_fork();
             if ($pid === 0) {
                 fclose($pair[0]);
@@ -126,28 +127,24 @@ final class Parser
             $sockets[$w] = $pair[0];
         }
 
-        $counts = array_fill(0, 587_188, 0);
+        $counts = array_fill(0, self::COUNTS_SIZE, 0);
+        $pending = [];
 
         while ($sockets !== []) {
             $read = $sockets;
             $write = [];
             $except = [];
             stream_select($read, $write, $except, 5);
-            foreach ($read as $socket) {
-                $key = array_search($socket, $sockets, true);
-                $data = fread($socket, 587_188);
+            foreach ($read as $key => $socket) {
+                $data = fread($socket, self::COUNTS_SIZE);
                 if ($data !== '' && $data !== false) {
-                    if (!isset($pending[$key])) {
-                        $pending[$key] = $data;
-                    } else {
-                        $pending[$key] .= $data;
-                    }
+                    $pending[$key] = ($pending[$key] ?? '') . $data;
                 }
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
                     $j = 0;
-                    foreach (unpack('C*', $pending[$key]) as $v) {
+                    foreach (unpack('C*', $pending[$key] ?? '') as $v) {
                         $counts[$j] += $v;
                         $j++;
                     }
@@ -163,7 +160,7 @@ final class Parser
         $inputPath, $start, $end,
         $slugBaseMap, $dateIds, $next,
     ) {
-        $output = str_repeat(chr(0), 587_188);
+        $output = str_repeat(chr(0), self::COUNTS_SIZE);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
