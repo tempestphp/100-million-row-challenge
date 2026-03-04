@@ -39,8 +39,8 @@ final class Parser
 
                 $from += $baseUrlLen;
                 $url = \substr($raw, $from, $comma - $from);
-                // first two year digits are always 20, so we can skip them
-                $date = \substr($raw, $comma + 3, 8);
+                // first three year digits are always 202, so we can skip them
+                $date = \substr($raw, $comma + 4, 7);
                 if (!isset($visitStats[$url])) {
                     $visitStats[$url] = [$date => 1];
                 } else {
@@ -76,7 +76,7 @@ final class Parser
                     $bufferLen += 2;
                 }
                 $hasFirstDateWritten = true;
-                $buffer .= "        \"20$date\": $count";
+                $buffer .= "        \"202$date\": $count";
                 $bufferLen += 23; // rough estimate of the length of the date and count
                 if ($bufferLen > $writeLimit) {
                     \fwrite($outputRes, $buffer);
