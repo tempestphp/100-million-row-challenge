@@ -38,7 +38,7 @@ final class Parser
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
-    private const int K3     = 10;
+    private const int K3     = 8;
 
     public function parse($inputPath, $outputPath)
     {
@@ -111,8 +111,8 @@ final class Parser
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
-        for ($i = 1; $i < $workerTotal; $i++) {
-            fseek($bh, (int)($inputBytes * $i / $workerTotal));
+        foreach ([938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473] as $offset) {
+            fseek($bh, $offset);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -121,7 +121,7 @@ final class Parser
 
         $sockets = [];
 
-        for ($w = 0; $w < $workerTotal - 1; $w++) {
+        for ($w = 0; $w < $workerTotal; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
@@ -145,15 +145,7 @@ final class Parser
             $sockets[(int)$pair[0]] = $pair[0];
         }
 
-        $output = str_repeat(chr(0), $outputSize);
-        $fh     = fopen($inputPath, 'rb');
-        stream_set_read_buffer($fh, 0);
-        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
-
-        fclose($fh);
-
-        $counts = unpack('C*', $output);
-        unset($output);
+        $counts = null;
 
         while ($sockets !== []) {
             $read = $sockets;
@@ -164,7 +156,12 @@ final class Parser
                 $data = stream_get_contents($socket);
                 fclose($socket);
                 unset($sockets[(int)$socket]);
-                foreach (unpack('C*', $data) as $k => $v) {
+                $unpacked = unpack('C*', $data);
+                if ($counts === null) {
+                    $counts = $unpacked;
+                    continue;
+                }
+                foreach ($unpacked as $k => $v) {
                     $counts[$k] += $v;
                 }
             }
@@ -241,7 +238,6 @@ final class Parser
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
-
             }
 
             while ($p < $lastNl) {
