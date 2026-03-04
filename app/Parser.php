@@ -51,15 +51,6 @@ final class Parser
 
         unset($urlPath);
 
-        // Reorder results to match the order URLs first appeared in the file
-        $orderedResults = [];
-        foreach ($urlOrder as $urlPath) {
-            if (isset($results[$urlPath])) {
-                $orderedResults[$urlPath] = $results[$urlPath];
-            }
-        }
-        $results = $orderedResults;
-
         // Write to output file
         file_put_contents($outputPath, json_encode($results, JSON_PRETTY_PRINT));
         
