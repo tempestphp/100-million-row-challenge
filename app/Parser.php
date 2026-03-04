@@ -9,19 +9,17 @@ use function array_fill;
 use function array_keys;
 use function array_search;
 use function fclose;
-use function fflush;
 use function fgets;
 use function file_get_contents;
 use function file_put_contents;
 use function filesize;
-use function flock;
 use function fopen;
 use function fread;
 use function fseek;
 use function ftell;
 use function fwrite;
 use function getmypid;
-use function intdiv;
+use function min;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
@@ -36,8 +34,6 @@ use function sys_get_temp_dir;
 use function unlink;
 use function unpack;
 
-use const LOCK_EX;
-use const LOCK_UN;
 use const SEEK_CUR;
 
 final class Parser
@@ -46,7 +42,6 @@ final class Parser
     {
         \gc_disable();
         $fileSize = filesize($inputPath);
-        $numChunks = 16;
 
         // Build all dates 2021-2026
         $dateChars = [];
@@ -68,44 +63,36 @@ final class Parser
             }
         }
 
-        [$pathIds, $pathMap, $pathCount] = self::discover();
+        [$pathIds, $pathMap, $pathCount] = self::discover($inputPath, $fileSize);
         $pathPrefixes = [];
         for ($p = 0; $p < $pathCount; $p++) {
             $pathPrefixes[$p] = "\n    \"\\/blog\\/" . str_replace('/', '\\/', $pathMap[$p]) . "\": {";
         }
 
-        // Find chunk boundaries aligned to newlines (many small chunks for work-stealing)
+        // Fixed ranges: one per worker
+        $numWorkers = 8;
         $boundaries = [0];
         $handle = fopen($inputPath, 'rb');
-        for ($i = 1; $i < $numChunks; $i++) {
-            fseek($handle, intdiv($fileSize * $i, $numChunks));
+        for ($w = 1; $w < $numWorkers; $w++) {
+            fseek($handle, (int) ($fileSize * $w / $numWorkers));
             fgets($handle);
             $boundaries[] = ftell($handle);
         }
         $boundaries[] = $fileSize;
         fclose($handle);
 
-        // Work-stealing queue: shared file with atomic counter
         $tmpPrefix = sys_get_temp_dir() . '/parse_' . getmypid();
-        $queueFile = $tmpPrefix . '_queue';
-        file_put_contents($queueFile, pack('V', 0));
 
-        // Fork child workers
+        // Fork children (each gets one fixed range)
         $pids = [];
-        for ($i = 0; $i < 7; $i++) {
+        for ($i = 0; $i < $numWorkers - 1; $i++) {
             $pid = pcntl_fork();
             if ($pid === -1) continue;
             if ($pid === 0) {
                 $buckets = array_fill(0, $pathCount, '');
                 $fh = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
-                $qf = fopen($queueFile, 'c+b');
-                while (true) {
-                    $ci = self::grabChunk($qf, $numChunks);
-                    if ($ci === -1) break;
-                    self::processRange($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
-                }
-                fclose($qf);
+                self::processRange($fh, $boundaries[$i], $boundaries[$i + 1], $pathIds, $dateChars, $buckets);
                 fclose($fh);
                 $counts = self::mergeBuckets($buckets, $pathCount, $dateCount);
                 file_put_contents($tmpPrefix . "_{$i}", pack('v*', ...$counts));
@@ -114,22 +101,17 @@ final class Parser
             $pids[$i] = $pid;
         }
 
-        // Parent also steals work
+        // Parent processes last range
         $buckets = array_fill(0, $pathCount, '');
         $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
-        $qf = fopen($queueFile, 'c+b');
-        while (true) {
-            $ci = self::grabChunk($qf, $numChunks);
-            if ($ci === -1) break;
-            self::processRange($fh, $boundaries[$ci], $boundaries[$ci + 1], $pathIds, $dateChars, $buckets);
-        }
-        fclose($qf);
+        self::processRange($fh, $boundaries[$numWorkers - 1], $boundaries[$numWorkers], $pathIds, $dateChars, $buckets);
         fclose($fh);
         $counts = self::mergeBuckets($buckets, $pathCount, $dateCount);
 
         // Wait for children and merge
-        while ($pids) {
+        $pending = $numWorkers - 1;
+        while ($pending > 0) {
             $pid = pcntl_wait($status);
             $i = array_search($pid, $pids, true);
             if ($i === false) continue;
@@ -142,8 +124,8 @@ final class Parser
             foreach ($childCounts as $val) {
                 $counts[$j++] += $val;
             }
+            $pending--;
         }
-        unlink($queueFile);
 
         // Write JSON
         $out = fopen($outputPath, 'wb');
@@ -247,30 +229,39 @@ final class Parser
         return $counts;
     }
 
-    private static function discover()
+    private static function discover($inputPath, $fileSize)
     {
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $chunk = fread($handle, min($fileSize, 204800));
+        fclose($handle);
+
+        $lastNl = strrpos($chunk, "\n");
         $pathIds = [];
         $pathCount = 0;
+        $pos = 0;
+
+        while ($pos < $lastNl) {
+            $nlPos = strpos($chunk, "\n", $pos + 54);
+            if ($nlPos === false) break;
+
+            $pathStr = substr($chunk, $pos + 25, $nlPos - $pos - 51);
+            if (!isset($pathIds[$pathStr])) {
+                $pathIds[$pathStr] = $pathCount++;
+            }
+
+            $pos = $nlPos + 1;
+        }
+
         foreach (Visit::all() as $visit) {
-            $pathIds[substr($visit->uri, 25)] = $pathCount++;
+            $pathStr = substr($visit->uri, 25);
+            if (!isset($pathIds[$pathStr])) {
+                $pathIds[$pathStr] = $pathCount++;
+            }
         }
 
-        return [$pathIds, array_keys($pathIds), $pathCount];
-    }
+        $pathMap = array_keys($pathIds);
 
-    private static function grabChunk($f, $numChunks)
-    {
-        flock($f, LOCK_EX);
-        fseek($f, 0);
-        $idx = unpack('V', fread($f, 4))[1];
-        if ($idx >= $numChunks) {
-            flock($f, LOCK_UN);
-            return -1;
-        }
-        fseek($f, 0);
-        fwrite($f, pack('V', $idx + 1));
-        fflush($f);
-        flock($f, LOCK_UN);
-        return $idx;
+        return [$pathIds, $pathMap, $pathCount];
     }
 }
