@@ -107,7 +107,7 @@ final class Parser
 
         $sockets = [];
 
-        for ($w = 0; $w < 9; $w++) {
+        for ($w = 0; $w < 10; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], 587_188);
             stream_set_chunk_size($pair[1], 587_188);
@@ -126,18 +126,7 @@ final class Parser
             $sockets[$w] = $pair[0];
         }
 
-        $output = self::parseRange(
-            $inputPath, $boundaries[9], $boundaries[10],
-            $slugBaseMap, $dateIds, $next,
-        );
-
         $counts = array_fill(0, 587_188, 0);
-        $j = 0;
-        foreach (unpack('C*', $output) as $v) {
-            $counts[$j] = $v;
-            $j++;
-        }
-        unset($output);
 
         while ($sockets !== []) {
             $read = $sockets;
@@ -146,16 +135,23 @@ final class Parser
             stream_select($read, $write, $except, 5);
             foreach ($read as $socket) {
                 $key = array_search($socket, $sockets, true);
-                $data = '';
-                while (!feof($socket)) {
-                    $data .= fread($socket, 587_188);
+                $data = fread($socket, 587_188);
+                if ($data !== '' && $data !== false) {
+                    if (!isset($pending[$key])) {
+                        $pending[$key] = $data;
+                    } else {
+                        $pending[$key] .= $data;
+                    }
                 }
-                fclose($socket);
-                unset($sockets[$key]);
-                $j = 0;
-                foreach (unpack('C*', $data) as $v) {
-                    $counts[$j] += $v;
-                    $j++;
+                if (feof($socket)) {
+                    fclose($socket);
+                    unset($sockets[$key]);
+                    $j = 0;
+                    foreach (unpack('C*', $pending[$key]) as $v) {
+                        $counts[$j] += $v;
+                        $j++;
+                    }
+                    unset($pending[$key]);
                 }
             }
         }
