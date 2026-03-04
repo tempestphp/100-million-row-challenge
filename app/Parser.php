@@ -2,9 +2,13 @@
 
 namespace App;
 
+use function array_count_values;
+use function array_fill;
+use function array_fill_keys;
 use function chr;
 use function count;
 use function fclose;
+use function feof;
 use function fgets;
 use function fopen;
 use function fread;
@@ -15,10 +19,7 @@ use function gc_disable;
 use function implode;
 use function pcntl_fork;
 use function str_replace;
-use function str_repeat;
 use function stream_select;
-use function stream_set_chunk_size;
-use function stream_get_contents;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function stream_socket_pair;
@@ -38,14 +39,51 @@ final class Parser
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
-    private const int K3     = 8;
+    private const int K3     = 10;
 
     public function parse($inputPath, $outputPath)
     {
+        $runStartNs = \hrtime(true);
+        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
+        $phaseStartNs = $runStartNs;
+        $phaseMarks = [];
+        $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            $now = \hrtime(true);
+            $phaseMarks[] = [
+                'name' => $name,
+                'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
+                'total_ms' => ($now - $runStartNs) / 1_000_000,
+            ];
+            $phaseStartNs = $now;
+        };
+        $dumpPhases = static function (string $planId, int $workerTotal, int $chunkTotal) use (&$phaseMarks, $profileEnabled): void {
+            if (! $profileEnabled) {
+                return;
+            }
+
+            \fwrite(STDERR, "[parser-profile] plan={$planId} workers={$workerTotal} chunks={$chunkTotal}\n");
+            foreach ($phaseMarks as $mark) {
+                \fwrite(
+                    STDERR,
+                    \sprintf(
+                        "  %-24s delta=%8.3f ms total=%8.3f ms\n",
+                        $mark['name'],
+                        $mark['delta_ms'],
+                        $mark['total_ms'],
+                    ),
+                );
+            }
+        };
+
         gc_disable();
 
         $inputBytes   = 7_509_674_827;
         $workerTotal = self::K3;
+        $planId      = 'default';
 
         $dayIdByKey   = [];
         $dayKeyById     = [];
@@ -70,10 +108,11 @@ final class Parser
             }
         }
 
-        $next = [];
-        for ($i = 0; $i < 255; $i++) {
-            $next[chr($i)] = chr($i + 1);
+        $dayIdTokens = [];
+        foreach ($dayIdByKey as $date => $id) {
+            $dayIdTokens[$date] = chr($id & 0xFF) . chr($id >> 8);
         }
+        //$markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -101,13 +140,10 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
+        //$markPhase('slug-scan');
 
-        $slugBaseMap = [];
-        foreach ($slugIdByKey as $slug => $id) {
-            $slugBaseMap[$slug] = $id * $dateCount;
-        }
-
-        $outputSize = $slugTotal * $dateCount;
+        $cellTotal  = $slugTotal * $dateCount;
+        $packedSize = $cellTotal * 2;
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
@@ -118,34 +154,42 @@ final class Parser
         }
         fclose($bh);
         $boundaries[] = $inputBytes;
+        //$markPhase('chunk-offsets');
 
         $sockets = [];
 
-        for ($w = 0; $w < $workerTotal; $w++) {
+        for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], $outputSize);
-            stream_set_chunk_size($pair[1], $outputSize);
             $pid = pcntl_fork();
 
             if ($pid === 0) {
                 fclose($pair[0]);
-                $output = str_repeat(chr(0), $outputSize);
+                $buckets = array_fill_keys($slugKeyById, '');
                 $fh     = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $slugBaseMap, $dayIdByKey, $next, $output);
+                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $dayIdTokens, $buckets);
 
                 fclose($fh);
-                fwrite($pair[1], $output);
+                $counts = self::q3($buckets, $slugTotal, $dateCount);
+                fwrite($pair[1], \pack('v*', ...$counts));
                 fclose($pair[1]);
                 exit(0);
             }
 
             fclose($pair[1]);
-            $sockets[(int)$pair[0]] = $pair[0];
+            $sockets[$w] = $pair[0];
         }
 
-        $counts = null;
+        $buckets = array_fill_keys($slugKeyById, '');
+        $fh     = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fh, 0);
+
+        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $dayIdTokens, $buckets);
+
+        fclose($fh);
+
+        $counts = self::q3($buckets, $slugTotal, $dateCount);
 
         while ($sockets !== []) {
             $read = $sockets;
@@ -153,24 +197,39 @@ final class Parser
             $except = [];
             stream_select($read, $write, $except, 5);
             foreach ($read as $socket) {
-                $data = stream_get_contents($socket);
+                $key = \array_search($socket, $sockets, true);
+                $data = '';
+                while (!feof($socket)) {
+                    $chunk = fread($socket, $packedSize);
+                    if ($chunk === '' || $chunk === false) {
+                        break;
+                    }
+                    $data .= $chunk;
+                }
                 fclose($socket);
-                unset($sockets[(int)$socket]);
-                $unpacked = unpack('C*', $data);
-                if ($counts === null) {
-                    $counts = $unpacked;
+                unset($sockets[$key]);
+
+                if ($data === '') {
                     continue;
                 }
-                foreach ($unpacked as $k => $v) {
-                    $counts[$k] += $v;
+
+                $childCounts = unpack('v*', $data);
+                for ($j = 0, $k = 1; $j < $cellTotal; $j++, $k++) {
+                    if (isset($childCounts[$k]) && ($v = $childCounts[$k])) {
+                        $counts[$j] += $v;
+                    }
                 }
             }
         }
+        //$markPhase('parse-and-reduce');
 
         self::q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
+        //$markPhase('json-output');
+
+        //$dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
-    private static function q2($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
+    private static function q2($handle, $start, $end, $dayIdTokens, &$buckets)
     {
         fseek($handle, $start);
 
@@ -200,54 +259,63 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
+                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
         }
+    }
+
+    private static function q3(&$buckets, $slugTotal, $dateCount)
+    {
+        $counts = array_fill(0, $slugTotal * $dateCount, 0);
+        $base   = 0;
+
+        foreach ($buckets as $bucket) {
+            if ($bucket !== '') {
+                $hist = array_count_values(unpack('v*', $bucket));
+                foreach ($hist as $d => $c) {
+                    $counts[$base + $d - 1] = $c;
+                }
+            }
+            $base += $dateCount;
+        }
+
+        return $counts;
     }
 
     private static function q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount)
@@ -269,7 +337,7 @@ final class Parser
 
         fwrite($out, '{');
         $firstPath = true;
-        $base      = 1;
+        $base      = 0;
 
         for ($p = 0; $p < $slugTotal; $p++) {
             $dateEntries = [];
