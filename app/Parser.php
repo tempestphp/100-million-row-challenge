@@ -5,7 +5,6 @@ namespace App;
 use function chr;
 use function count;
 use function fclose;
-use function feof;
 use function fgets;
 use function fopen;
 use function fread;
@@ -39,12 +38,12 @@ final class Parser
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
-    private const int K3     = 8;
+    private const int K3     = 10;
 
     public function parse($inputPath, $outputPath)
     {
         $runStartNs = \hrtime(true);
-        $profileEnabled = (0);
+        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
         $phaseStartNs = $runStartNs;
         $phaseMarks = [];
         $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
@@ -112,6 +111,7 @@ final class Parser
         for ($i = 0; $i < 255; $i++) {
             $next[chr($i)] = chr($i + 1);
         }
+        #if ($profileEnabled) $markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -139,6 +139,7 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
+        #if ($profileEnabled) $markPhase('slug-scan');
 
         $slugBaseMap = [];
         foreach ($slugIdByKey as $slug => $id) {
@@ -156,9 +157,9 @@ final class Parser
         }
         fclose($bh);
         $boundaries[] = $inputBytes;
+        #if ($profileEnabled) $markPhase('chunk-offsets');
 
         $sockets = [];
-        $socketKeys = [];
 
         for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -172,7 +173,7 @@ final class Parser
                 $fh     = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                self::q2c($fh, $boundaries[$w], $boundaries[$w + 1], $slugBaseMap, $dayIdByKey, $next, $output);
+                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $slugBaseMap, $dayIdByKey, $next, $output);
 
                 fclose($fh);
                 fwrite($pair[1], $output);
@@ -181,15 +182,14 @@ final class Parser
             }
 
             fclose($pair[1]);
-            $sockets[$w] = $pair[0];
-            $socketKeys[(int)$pair[0]] = $w;
+            $sockets[(int)$pair[0]] = $pair[0];
         }
 
         $output = str_repeat(chr(0), $outputSize);
         $fh     = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        self::q2c($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
+        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
 
         fclose($fh);
 
@@ -202,27 +202,23 @@ final class Parser
             $except = [];
             stream_select($read, $write, $except, 5);
             foreach ($read as $socket) {
-                $sid = (int)$socket;
-                $key = $socketKeys[$sid] ?? null;
-                if ($key === null) {
-                    fclose($socket);
-                    continue;
-                }
-
-                $data = stream_get_contents($socket) ?: '';
+                $data = stream_get_contents($socket);
                 fclose($socket);
-                unset($sockets[$key]);
-                unset($socketKeys[$sid]);
+                unset($sockets[(int)$socket]);
                 foreach (unpack('C*', $data) as $k => $v) {
                     $counts[$k] += $v;
                 }
             }
         }
+        #if ($profileEnabled) $markPhase('parse-and-reduce');
 
         self::q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
+        #if ($profileEnabled) $markPhase('json-output');
+
+        #if ($profileEnabled) $dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
-    private static function q2c($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
+    private static function q2($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
     {
         fseek($handle, $start);
 
@@ -247,10 +243,30 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $p = $prefixLen;
-            $fence = $lastNl - 396;
+            $p     = $prefixLen;
+            $fence = $lastNl - 792;
 
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
