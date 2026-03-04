@@ -1,6 +1,14 @@
 #!/usr/bin/env php
 <?php
 
+if ($argv[1] === 'data:parse') {
+    $a = isset($argv[2]) ? "'{$argv[2]}'" : '';
+    $b = isset($argv[3]) ? "'{$argv[3]}'" : '';
+    passthru("php -d opcache.jit=1 -d opcache.enable_cli=1 app/Parser.php $a $b");
+    
+    exit;
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
