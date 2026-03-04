@@ -33,10 +33,3 @@ final class Parser
         file_put_contents($outputPath, json_encode($r, JSON_PRETTY_PRINT));
     }
 }
-
-if ($_SERVER['SCRIPT_FILENAME'] === 'app/Parser.php') {
-    \App\Parser::parse(
-        $argv[2] ?? (__DIR__ . '/../data/data.csv'),
-        $argv[3] ?? (__DIR__ . '/../data/data.json')
-    );
-}
