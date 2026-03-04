@@ -60,15 +60,8 @@ final class Parser
         }
         $results = $orderedResults;
 
-        // Convert to JSON with pretty formatting
-        $jsonOutput = json_encode($results, JSON_PRETTY_PRINT);
-        
-        if ($jsonOutput === false) {
-            exit();
-        }
-
         // Write to output file
-        $bytesWritten = file_put_contents($outputPath, $jsonOutput);
+        file_put_contents($outputPath, json_encode($results, JSON_PRETTY_PRINT));
         
         $this->logTime('Written');
     }
