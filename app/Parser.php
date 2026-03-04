@@ -153,6 +153,10 @@ final class Parser
             $boundaries[] = ftell($bh);
         }
         fclose($bh);
+
+        while (\count($boundaries) < $workerTotal) {
+            $boundaries[] = $inputBytes;
+        }
         $boundaries[] = $inputBytes;
         //$markPhase('chunk-offsets');
 
@@ -309,7 +313,7 @@ final class Parser
             if ($bucket !== '') {
                 $hist = array_count_values(unpack('v*', $bucket));
                 foreach ($hist as $d => $c) {
-                    $counts[$base + $d - 1] = $c;
+                    $counts[$base + $d] = $c;
                 }
             }
             $base += $dateCount;
