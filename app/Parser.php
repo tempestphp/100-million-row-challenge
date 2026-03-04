@@ -40,7 +40,7 @@ final class Parser
         \stream_set_read_buffer($inputStream, 0);
         $buffer = \fread($inputStream, self::BUFFER_SIZE);
 
-        while (\strlen($buffer) > 0) {
+        while (\strlen($buffer)) {
             $pathOffset = self::PATH_OFFSET;
             $maxOffset = \strrpos($buffer, "\n");
 
