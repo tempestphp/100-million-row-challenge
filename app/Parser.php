@@ -47,8 +47,10 @@ final class Parser
         stream_set_chunk_size($f, 1<<24);
 
         if ($start != 0) {
-            fseek($f, $start);
-            fgets($f); // skip first line: job N-1 ends with the first line of job N
+            fseek($f, $start - 1);
+            if (fgetc($f) !== PHP_EOL) {
+                $start += strlen(fgets($f)); // skip first line: job N-1 ends with the first line of job N
+            }
         }
 
         $chunkSize = min(1<<24, $limit - $start);
