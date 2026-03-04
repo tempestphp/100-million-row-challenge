@@ -2,95 +2,109 @@
 
 namespace App;
 
+use App\Commands\Visit;
 use Exception;
 
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        $visitStats = [];
-        $readLimit = 1024 * 1024; // 1MB
-        $writeLimit = 1024 * 1024; // 1MB
+        $firstUrl = Visit::all()[0]->uri;
+        $baseUrlLen = strpos($firstUrl, '/', 8) + 1; // 8 is the length of 'https://'
+        $timestampLen = 25; // e.g. 2024-09-13T06:26:07+00:00
+
+        // With 1,000,000 visits, it is likely each URL will receive some visits on each date.
+        // So we can precompute the date indices to save the sorting later.
+        $dd = [];
+        for ($i = 1; $i <= 31; ++$i) {
+            $dd[$i] = \str_pad((string)$i, 2, '0', \STR_PAD_LEFT);
+        }
+        $i = 0;
+        $dateToIndices = [];
+        $initialDateCounts = [];
+        for ($year = 1; $year <= 6; $year++) {
+            $y = (string)$year;
+            for ($month = 1; $month <= 12; $month++) {
+                $mm = $y . '-' . $dd[$month];
+                for ($day = 1; $day <= 31; $day++) {
+                    $date = $mm . '-' . $dd[$day];
+                    $dateToIndices[$date] = $i;
+                    $initialDateCounts[$i] = 0;
+                    ++$i;
+                }
+            }
+        }
+
+        $visitStats = []; // this will hold all the visit counts in the format [url => [dateIndex => count]]
 
         // open the input file and read line by line
+        $readLimit = 512 * 1024; // 512KB
+        $writeLimit = 512 * 1024; // 512KB
         $inputRes = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($inputRes, 0);
-        $baseUrlLen = 0;
-        $previousRaw = '';
-        $timestampLen = 25; // e.g. 2024-09-13T06:26:07+00:00
+        $raw = '';
         while (true) {
-            $raw = \fread($inputRes, $readLimit);
+            $raw .= \fread($inputRes, $readLimit);
             if ($raw === '' || $raw === false) {
                 break;
             }
-            $raw = $previousRaw . $raw;
             $from = 0;
             while (true) {
                 $newlinePos = \strpos($raw, "\n", $from);
                 if ($newlinePos === false) {
-                    $previousRaw = \substr($raw, $from);
+                    $raw = \substr($raw, $from);
                     break;
                 }
                 $comma = $newlinePos - $timestampLen - 1;
-                if ($baseUrlLen === 0) {
-                    $baseUrlLen = \strpos($raw, ':', $from) + 3;
-                    $baseUrlLen = \strpos($raw, '/', $baseUrlLen) + 1;
-                }
-
                 $from += $baseUrlLen;
                 $url = \substr($raw, $from, $comma - $from);
                 // first three year digits are always 202, so we can skip them
                 $date = \substr($raw, $comma + 4, 7);
+                $dateIndex = $dateToIndices[$date];
                 if (!isset($visitStats[$url])) {
-                    $visitStats[$url] = [$date => 1];
-                } else {
-                    $visitStats[$url][$date] = ($visitStats[$url][$date] ?? 0) + 1;
+                    $visitStats[$url] = $initialDateCounts;
                 }
-
+                ++$visitStats[$url][$dateIndex];
                 $from = $newlinePos + 1;
             }
         }
-        assert($previousRaw === '', 'The input file does not end with a newline character');
         \fclose($inputRes);
+
+        // speed up printing dates by precomputing the date strings
+        $indexToDates = [];
+        foreach ($dateToIndices as $date => $i) {
+            $indexToDates[$i] = ",\n        \"202" . $date . '": ';
+        }
 
         // write the result to the output file
         $outputRes = \fopen($outputPath, 'wb');
-        \stream_set_write_buffer($outputRes, 0);
-        $buffer = "{\n";
-        $bufferLen = 2;
-        $hasFirstUrlWritten = false;
+        \stream_set_write_buffer($outputRes, $writeLimit);
+        $firstUrlWrittern = false;
         foreach ($visitStats as $url => $data) {
-            if ($hasFirstUrlWritten) {
-                $buffer .= ",\n";
-                $bufferLen += 2;
+            if ($firstUrlWrittern) {
+                \fwrite($outputRes, "\n    },\n    \"\\/");
+            } else {
+                \fwrite($outputRes, "{\n    \"\\/");
+                $firstUrlWrittern = true;
             }
-            $hasFirstUrlWritten = true;
-            $url = \str_replace('/', '\/', $url);
-            $buffer .= "    \"\\/$url\": {\n";
-            $bufferLen += 40; // rough estimate of the length of the URL
-            \ksort($data, \SORT_STRING);
-            $hasFirstDateWritten = false;
-            foreach ($data as $date => $count) {
-                if ($hasFirstDateWritten) {
-                    $buffer .= ",\n";
-                    $bufferLen += 2;
-                }
-                $hasFirstDateWritten = true;
-                $buffer .= "        \"202$date\": $count";
-                $bufferLen += 23; // rough estimate of the length of the date and count
-                if ($bufferLen > $writeLimit) {
-                    \fwrite($outputRes, $buffer);
-                    $buffer = '';
-                    $bufferLen = 0;
-                }
-            }
-            $buffer .= "\n    }";
-            $bufferLen += 6;
-        }
+            \fwrite($outputRes, str_replace('/', '\\/', $url));
 
-        $buffer .= "\n}";
-        \fwrite($outputRes, $buffer);
+            $firstCountWritten = false;
+            foreach ($data as $i => $count) {
+                if ($count === 0) {
+                    continue;
+                }
+                if ($firstCountWritten) {
+                    \fwrite($outputRes, $indexToDates[$i]);
+                } else {
+                    \fwrite($outputRes, "\": {\n");
+                    \fwrite($outputRes, substr($indexToDates[$i], 2));
+                    $firstCountWritten = true;
+                }
+                \fwrite($outputRes, (string)$count);
+            }
+        }
+        \fwrite($outputRes, "\n    }\n}");
         \fclose($outputRes);
-        unset($visitStats);
     }
 }
