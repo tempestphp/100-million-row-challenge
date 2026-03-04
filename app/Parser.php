@@ -115,7 +115,7 @@ final class Parser
         //$markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
+        stream_set_read_buffer($handle, 181072);
         $raw = fread($handle, self::K1);
         fclose($handle);
 
@@ -162,7 +162,7 @@ final class Parser
 
         $sockets = [];
 
-        for ($w = 0; $w < $workerTotal - 1; $w++) {
+        for ($w = 0; $w < 8 - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
@@ -208,17 +208,24 @@ final class Parser
             $except = [];
             stream_select($read, $write, $except, 5);
             foreach ($read as $socket) {
-                $key = \array_search($socket, $sockets, true);
-                $data = '';
-                while (!feof($socket)) {
-                    $data .= fread($socket, $outputSize);
+                $key = array_search($socket, $sockets, true);
+                $data = fread($socket, 587_188);
+                if ($data !== '' && $data !== false) {
+                    if (!isset($pending[$key])) {
+                        $pending[$key] = $data;
+                    } else {
+                        $pending[$key] .= $data;
+                    }
                 }
-                fclose($socket);
-                unset($sockets[$key]);
-                $j = 0;
-                foreach (unpack('C*', $data) as $v) {
-                    $counts[$j] += $v;
-                    $j++;
+                if (feof($socket)) {
+                    fclose($socket);
+                    unset($sockets[$key]);
+                    $j = 0;
+                    foreach (unpack('C*', $pending[$key]) as $v) {
+                        $counts[$j] += $v;
+                        $j++;
+                    }
+                    unset($pending[$key]);
                 }
             }
         }
