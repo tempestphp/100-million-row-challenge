@@ -53,7 +53,7 @@ final class Parser
         // the split point, and positioning the split after it. This ensures that workers are
         // always processing whole lines.
         $input = \fopen($inputPath, 'rb');
-        \stream_set_read_buffer($input,  self::NEWLINE_SEARCH_SIZE);
+        \stream_set_read_buffer($input,  0);
         for ($i = 1; $i < self::WORKER_COUNT; $i++) {
             \fseek($input, $i * $splitSize);
             $data = \fread($input, self::NEWLINE_SEARCH_SIZE);
@@ -162,7 +162,7 @@ final class Parser
     private function parseSection($inputPath, $start, $end): array
     {
         $input = \fopen($inputPath, 'rb');
-        \stream_set_read_buffer($input,  self::STREAM_BUFFER_SIZE);
+        \stream_set_read_buffer($input,  0);
 
         $dateCount = count($this->dates);
 
