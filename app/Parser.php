@@ -73,6 +73,7 @@ final class Parser
         $urlOrder = []; // Track order of first appearance
 
         // Read file in chunks
+        printf("Reading input file in chunks...\n");
         while (!feof($inputFile)) {
             $chunk = fread($inputFile, $bufferSize);
             if ($chunk === false) break;
@@ -82,6 +83,7 @@ final class Parser
             // Process complete lines from buffer
             $this->processBuffer($buffer, $results, $urlOrder);
         }
+        printf("Finished reading input file.\n");
 
         fclose($inputFile);
         
