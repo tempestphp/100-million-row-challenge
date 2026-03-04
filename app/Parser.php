@@ -233,7 +233,7 @@ final class Parser
         fseek($handle, $start);
 
         $remaining = $end - $start;
-        $bufSize   = 163_840;
+        $bufSize   = 2_097_152;
         $prefixLen = 25;
 
         while ($remaining > 0) {
@@ -257,39 +257,12 @@ final class Parser
             $fence = $lastNl - 792;
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
-                $p = $sep + 52;
+                for ($i = 7; $i >= 0; $i--) {
+                    $sep = strpos($chunk, ',', $p);
+                    $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                    $p = $sep + 52;
+                }
             }
-
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
