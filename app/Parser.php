@@ -4,7 +4,6 @@ namespace App;
 
 use function array_count_values;
 use function array_fill;
-use function array_fill_keys;
 use function chr;
 use function count;
 use function fclose;
@@ -168,11 +167,11 @@ final class Parser
 
             if ($pid === 0) {
                 fclose($pair[0]);
-                $buckets = array_fill_keys($slugKeyById, '');
+                $buckets = array_fill(0, $slugTotal, '');
                 $fh     = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $dayIdTokens, $buckets);
+                self::q2($fh, $boundaries[$w], $boundaries[$w + 1], $slugIdByKey, $dayIdTokens, $buckets);
 
                 fclose($fh);
                 $counts = self::q3($buckets, $slugTotal, $dateCount);
@@ -185,11 +184,11 @@ final class Parser
             $sockets[$w] = $pair[0];
         }
 
-        $buckets = array_fill_keys($slugKeyById, '');
+        $buckets = array_fill(0, $slugTotal, '');
         $fh     = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $dayIdTokens, $buckets);
+        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugIdByKey, $dayIdTokens, $buckets);
 
         fclose($fh);
 
@@ -233,29 +232,36 @@ final class Parser
         //$dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
-    private static function q2($handle, $start, $end, $dayIdTokens, &$buckets)
+    private static function q2($handle, $start, $end, $slugIdByKey, $dayIdTokens, &$buckets)
     {
         fseek($handle, $start);
 
         $remaining = $end - $start;
-        $bufSize   = self::K0;
+        $bufSize   = self::K0; // Asegúrate de que K0 sea <= 49152 (48KB) para que quepa en la L1d del M1
         $prefixLen = self::K2;
+        $carry     = ''; // Buffer en RAM para evitar retroceder el disco
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
-            $chunk  = fread($handle, $toRead);
-            if (!$chunk) break;
+            $readData = fread($handle, $toRead);
+            if (!$readData) break;
 
-            $chunkLen   = strlen($chunk);
-            $remaining -= $chunkLen;
+            $remaining -= strlen($readData);
+            
+            $chunk = $carry . $readData;
+            $chunkLen = strlen($chunk);
 
             $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) continue;
+            if ($lastNl === false) {
+                $carry = $chunk; 
+                continue;
+            }
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
-                fseek($handle, -$tail, SEEK_CUR);
-                $remaining += $tail;
+                $carry = substr($chunk, $lastNl + 1);
+            } else {
+                $carry = '';
             }
 
             $p     = $prefixLen;
@@ -263,42 +269,42 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $buckets[substr($chunk, $p, $sep - $p)] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
+                $buckets[$slugIdByKey[substr($chunk, $p, $sep - $p)]] .= $dayIdTokens[substr($chunk, $sep + 3, 8)];
                 $p = $sep + 52;
             }
         }
