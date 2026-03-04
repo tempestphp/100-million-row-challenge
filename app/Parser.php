@@ -63,13 +63,15 @@ final class Parser
 
     public function parse(string $inputPath, string $outputPath): void
     {
+        ini_set('memory_limit', -1);
+        gc_disable();
+
+        $bufferSize = 64 * 1024; // Use 64KB buffer 
+
         // Open input file for reading
         $inputFile = fopen($inputPath, 'r');
-        if ($inputFile === false) {
-            exit();
-        }
+        stream_set_read_buffer($inputFile, $bufferSize);
 
-        $bufferSize = 131072; // Use 128KB buffer 
         $buffer = '';
 
         // Initialize results array to store URL path -> date -> count mappings
