@@ -73,7 +73,7 @@ final class Parser
         $raw = fread($handle, 151072);
         fclose($handle);
 
-        $pathIds = [];
+        $slugBaseMap = [];
         $paths = [];
         $pi = 0;
         $pos = 0;
@@ -83,22 +83,17 @@ final class Parser
             $sep = strpos($raw, ',', $pos + 25);
 
             $slug = substr($raw, $pos + 25, $sep - $pos - 25);
-            if (isset($pathIds[$slug])) {
+            if (isset($slugBaseMap[$slug])) {
                 $pos = $sep + 27;
                 continue;
             }
-            $pathIds[$slug] = $pi;
+            $slugBaseMap[$slug] = $pi * 2191;
             $paths[$pi] = $slug;
             $pi++;
 
             $pos = $sep + 27;
         }
         unset($raw);
-
-        $slugBaseMap = [];
-        foreach ($pathIds as $slug => $id) {
-            $slugBaseMap[$slug] = $id * 2191;
-        }
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
