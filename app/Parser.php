@@ -35,10 +35,6 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int K0 = 49_152;
-    private const int K1   = 2_097_152;
-    private const int K2  = 25;
-    private const int K3     = 10;
 
     public function parse($inputPath, $outputPath)
     {
@@ -81,7 +77,7 @@ final class Parser
         gc_disable();
 
         $inputBytes   = 7_509_674_827;
-        $workerTotal = self::K3;
+        $workerTotal = 10;
         $planId      = 'default';
 
         $dayIdByKey   = [];
@@ -115,7 +111,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, self::K1);
+        $raw = fread($handle, 2_097_152);
         fclose($handle);
 
         $slugIdByKey   = [];
@@ -128,7 +124,7 @@ final class Parser
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
 
-            $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
+            $slug = substr($raw, $pos + 25, $nl - $pos - 51);
 
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
@@ -237,31 +233,24 @@ final class Parser
         fseek($handle, $start);
 
         $remaining = $end - $start;
-        $bufSize   = self::K0; 
-        $prefixLen = self::K2;
-        $carry     = ''; 
+        $bufSize   = 163_840;
+        $prefixLen = 25;
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
-            $readData = fread($handle, $toRead);
-            if (!$readData) break;
+            $chunk  = fread($handle, $toRead);
+            if (!$chunk) break;
 
-            $remaining -= strlen($readData);
-            
-            $chunk = $carry . $readData;
-            $chunkLen = strlen($chunk);
+            $chunkLen   = strlen($chunk);
+            $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) {
-                $carry = $chunk; 
-                continue;
-            }
+            if ($lastNl === false) continue;
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
-                $carry = substr($chunk, $lastNl + 1);
-            } else {
-                $carry = '';
+                fseek($handle, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
 
             $p     = $prefixLen;
