@@ -4,7 +4,6 @@ namespace App;
 
 use function array_fill;
 use function chr;
-use function count;
 use function fclose;
 use function fgets;
 use function feof;
@@ -39,13 +38,16 @@ final class Parser
 
     public static function parse($inputPath, $outputPath)
     {
+        set_error_handler(function (int $severity, string $message, string $file, int $line): never {
+            throw new \ErrorException($message, 0, $severity, $file, $line);
+        });
         gc_disable();
 
         $fileSize = 7_509_674_827;
 
         $dateIds = [];
         $dates = [];
-        $dateCount = 0;
+        $di = 0;
         for ($y = 21; $y <= 26; $y++) {
             for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
@@ -57,9 +59,9 @@ final class Parser
                 $ymStr = "{$y}-{$mStr}-";
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
-                    $dateIds[$key] = $dateCount;
-                    $dates[$dateCount] = $key;
-                    $dateCount++;
+                    $dateIds[$key] = $di;
+                    $dates[$di] = $key;
+                    $di++;
                 }
             }
         }
@@ -76,7 +78,7 @@ final class Parser
 
         $pathIds = [];
         $paths = [];
-        $pathCount = 0;
+        $pi = 0;
         $pos = 0;
         $lastNl = strrpos($raw, "\n");
 
@@ -88,9 +90,9 @@ final class Parser
                 $pos = $sep + 27;
                 continue;
             }
-            $pathIds[$slug] = $pathCount;
-            $paths[$pathCount] = $slug;
-            $pathCount++;
+            $pathIds[$slug] = $pi;
+            $paths[$pi] = $slug;
+            $pi++;
 
             $pos = $sep + 27;
         }
@@ -98,10 +100,8 @@ final class Parser
 
         $slugBaseMap = [];
         foreach ($pathIds as $slug => $id) {
-            $slugBaseMap[$slug] = $id * $dateCount;
+            $slugBaseMap[$slug] = $id * 2191;
         }
-
-        $outputSize = $pathCount * $dateCount;
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
@@ -113,19 +113,18 @@ final class Parser
         fclose($bh);
         $boundaries[] = $fileSize;
 
-        $dataSize = $outputSize;
         $sockets = [];
 
         for ($w = 0; $w < 9; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], $dataSize);
-            stream_set_chunk_size($pair[1], $dataSize);
+            stream_set_chunk_size($pair[0], 587_188);
+            stream_set_chunk_size($pair[1], 587_188);
             $pid = pcntl_fork();
             if ($pid === 0) {
                 fclose($pair[0]);
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $slugBaseMap, $dateIds, $next, $outputSize,
+                    $slugBaseMap, $dateIds, $next,
                 );
                 fwrite($pair[1], $output);
                 fclose($pair[1]);
@@ -137,10 +136,10 @@ final class Parser
 
         $output = self::parseRange(
             $inputPath, $boundaries[9], $boundaries[10],
-            $slugBaseMap, $dateIds, $next, $outputSize,
+            $slugBaseMap, $dateIds, $next,
         );
 
-        $counts = array_fill(0, $outputSize, 0);
+        $counts = array_fill(0, 587_188, 0);
         $j = 0;
         foreach (unpack('C*', $output) as $v) {
             $counts[$j] = $v;
@@ -157,7 +156,7 @@ final class Parser
                 $key = array_search($socket, $sockets, true);
                 $data = '';
                 while (!feof($socket)) {
-                    $data .= fread($socket, $dataSize);
+                    $data .= fread($socket, 587_188);
                 }
                 fclose($socket);
                 unset($sockets[$key]);
@@ -169,14 +168,14 @@ final class Parser
             }
         }
 
-        self::writeJson($outputPath, $counts, $paths, $dates, $dateCount);
+        self::writeJson($outputPath, $counts, $paths, $dates);
     }
 
     private static function parseRange(
         $inputPath, $start, $end,
-        $slugBaseMap, $dateIds, $next, $outputSize,
+        $slugBaseMap, $dateIds, $next,
     ) {
-        $output = str_repeat(chr(0), $outputSize);
+        $output = str_repeat(chr(0), 587_188);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
@@ -267,31 +266,29 @@ final class Parser
     }
 
     private static function writeJson(
-        $outputPath, $counts, $paths,
-        $dates, $dateCount,
+        $outputPath, $counts, $paths, $dates,
     ) {
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, 1_048_576);
         fwrite($out, '{');
 
         $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
+        for ($d = 0; $d < 2191; $d++) {
             $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
         }
 
-        $pathCount = count($paths);
         $escapedPaths = [];
-        for ($p = 0; $p < $pathCount; $p++) {
+        for ($p = 0; $p < 268; $p++) {
             $escapedPaths[$p] = "\"\\/blog\\/" . str_replace('/', '\\/', $paths[$p]) . "\"";
         }
 
         $firstPath = true;
 
-        for ($p = 0; $p < $pathCount; $p++) {
-            $base = $p * $dateCount;
+        for ($p = 0; $p < 268; $p++) {
+            $base = $p * 2191;
             $dateEntries = [];
 
-            for ($d = 0; $d < $dateCount; $d++) {
+            for ($d = 0; $d < 2191; $d++) {
                 $count = $counts[$base + $d];
                 if ($count === 0) continue;
                 $dateEntries[] = $datePrefixes[$d] . $count;
