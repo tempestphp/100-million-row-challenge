@@ -38,7 +38,7 @@ final class Parser
     private const int K0 = 163_840;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
-    private const int K3     = 10;
+    private const int K3     = 8;
 
     public function parse($inputPath, $outputPath)
     {
