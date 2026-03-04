@@ -3,42 +3,42 @@
 namespace App;
 
 use App\Commands\Visit;
-use function strlen;
-use function fseek;
-use function pack;
-use function substr;
-use function fwrite;
-use function array_fill;
-use function pcntl_wait;
-use function fread;
-use function gc_disable;
-use function strpos;
-use function unpack;
-use function chr;
-use function stream_set_read_buffer;
-use function fopen;
-use function pcntl_fork;
-use function str_replace;
-use function file_get_contents;
-use function file_put_contents;
-use function strrpos;
-use function ini_set;
-use function fclose;
-use function ftell;
-use function getmypid;
-use function stream_set_write_buffer;
 use function array_count_values;
-use function filesize;
+use function array_fill;
+use function chr;
+use function fclose;
 use function fgets;
-use function sys_get_temp_dir;
-use function unlink;
+use function filesize;
+use function fopen;
+use function fread;
+use function fseek;
+use function ftell;
+use function fwrite;
+use function gc_disable;
+use function ini_set;
+use function pack;
+use function pcntl_fork;
+use function pcntl_wait;
+use function stream_get_contents;
+use function stream_set_chunk_size;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function stream_socket_pair;
+use function strlen;
+use function strpos;
+use function strrpos;
+use function str_replace;
+use function substr;
+use function unpack;
 use const SEEK_CUR;
-use const WNOHANG;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const W = 12;
-    private const C = 131_072;
+    private const W = 10;
+    private const C = 524_288;
 
     public function parse(string $in, string $out): void
     {
@@ -63,7 +63,7 @@ final class Parser
 
         $fh = fopen($in, 'rb');
         stream_set_read_buffer($fh, 0);
-        $raw = fread($fh, min(2_097_152, $sz));
+        $raw = fread($fh, min(10_485_760, $sz));
         $ln = strrpos($raw, "\n") ?: 0;
         $pi = [];
         $pl = [];
@@ -98,35 +98,43 @@ final class Parser
         fclose($fh);
         $bnd[] = $sz;
 
-        $pfx = sys_get_temp_dir() . "/p_" . getmypid() . "_";
-        $cmap = [];
+        $cells = $pc * $dc;
+        $socks = [];
+        for ($w = 0; $w < self::W - 1; $w++) {
+            $socks[$w] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        }
+
         for ($w = 0; $w < self::W - 1; $w++) {
             $pid = pcntl_fork();
             if ($pid === 0) {
                 gc_disable();
+                for ($j = 0; $j < self::W - 1; $j++)
+                    fclose($socks[$j][0]);
+                for ($j = 0; $j < self::W - 1; $j++)
+                    if ($j !== $w)
+                        fclose($socks[$j][1]);
                 $wc = static::crunch($in, $bnd[$w], $bnd[$w + 1], $pi, $db, $pc, $dc);
-                file_put_contents($pfx . $w, pack('v*', ...$wc));
+                fwrite($socks[$w][1], pack('v*', ...$wc));
+                fclose($socks[$w][1]);
                 exit(0);
             }
-            $cmap[$pid] = $w;
         }
 
+        for ($w = 0; $w < self::W - 1; $w++)
+            fclose($socks[$w][1]);
+
         $counts = static::crunch($in, $bnd[self::W - 1], $bnd[self::W], $pi, $db, $pc, $dc);
-        $pend = self::W - 1;
-        while ($pend > 0) {
-            $pid = pcntl_wait($st, WNOHANG);
-            if ($pid <= 0)
-                $pid = pcntl_wait($st);
-            if (!isset($cmap[$pid]))
-                continue;
-            $w = $cmap[$pid];
-            $wc = unpack('v*', file_get_contents($pfx . $w));
-            unlink($pfx . $w);
+
+        for ($w = 0; $w < self::W - 1; $w++) {
+            $data = stream_get_contents($socks[$w][0]);
+            fclose($socks[$w][0]);
+            $wc = unpack('v*', $data);
             $j = 0;
             foreach ($wc as $v)
                 $counts[$j++] += $v;
-            $pend--;
         }
+        for ($w = 0; $w < self::W - 1; $w++)
+            pcntl_wait($st);
 
         $dp = [];
         for ($d = 0; $d < $dc; $d++)
@@ -155,7 +163,7 @@ final class Parser
                 continue;
             $buf .= ($first ? '' : ',') . "\n    " . $pp[$p] . ": {" . $body . "\n    }";
             $first = false;
-            if (strlen($buf) > 65_536) {
+            if (strlen($buf) > 131_072) {
                 fwrite($o, $buf);
                 $buf = '';
             }
@@ -187,8 +195,32 @@ final class Parser
                 $rem += $t;
             }
             $p = 25;
-            $f = $ln - 800;
+            $f = $ln - 1600;
             while ($p < $f) {
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
+                $c = strpos($ch, ',', $p);
+                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
+                $p = $c + 52;
                 $c = strpos($ch, ',', $p);
                 $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
                 $p = $c + 52;
