@@ -4,56 +4,6 @@ namespace App;
 
 final class Parser
 {
-    private function processBuffer(string &$buffer, array &$results, array &$urlOrder): void
-    {
-        $offset = 0;
-        $bufferLength = strlen($buffer);
-        
-        while ($offset < $bufferLength) {
-            // Find next delimiter efficiently
-            $commaPos = strpos($buffer, ',', $offset);
-            if ($commaPos === false) {
-                // No comma found, skip to next line
-                $newlinePos = strpos($buffer, "\n", $offset);
-                if ($newlinePos === false) {
-                    // Partial line at end
-                    $buffer = substr($buffer, $offset);
-                    return;
-                }
-                $offset = $newlinePos + 1;
-                continue;
-            }
-            
-            $newlinePos = strpos($buffer, "\n", $commaPos);
-            if ($newlinePos === false) {
-                // Incomplete line at end
-                $buffer = substr($buffer, $offset);
-                return;
-            }
-            
-            // Extract URL path and date efficiently
-            $urlPath = substr($buffer, $offset + 19, $commaPos - $offset - 19);
-            $date = substr($buffer, $commaPos + 1, $newlinePos - $commaPos - 16);
-            
-            // Process the data
-            // Track order of first appearance
-            if (!isset($results[$urlPath])) {
-                $results[$urlPath] = [];
-                $urlOrder[] = $urlPath;
-            }
-            
-            if (!isset($results[$urlPath][$date])) {
-                $results[$urlPath][$date] = 0;
-            }
-            
-            $results[$urlPath][$date]++;
-
-            $offset = $newlinePos + 1;
-        }
-        
-        $buffer = '';
-    }
-
     public function parse(string $inputPath, string $outputPath): void
     {
         ini_set('memory_limit', -1);
