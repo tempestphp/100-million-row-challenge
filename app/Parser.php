@@ -70,7 +70,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, 151072);
+        $raw = fread($handle, 181072);
         fclose($handle);
 
         $slugBaseMap = [];
