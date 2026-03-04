@@ -181,13 +181,18 @@ final class Parser
         while ($current < $end) {
             $chunkSize = \min(self::READ_CHUNK_SIZE, $end - $current);
             // Strip the URI prefix. eg. https://stitcher.io/blog/
-            $chunk = \substr($chunk, $chunkStart - 25) . \fread($input, $chunkSize);
+            $chunk = \fread($input, $chunkSize);
             $chunkStart = 25;
             $current += $chunkSize;
             if ($current > $end) {
                 $chunkEnd = $chunkSize;
             } else {
                 $chunkEnd = \strrpos($chunk, "\n");
+                $extra = $chunkSize - $chunkEnd - 1;
+                if ($extra !== 0) {
+                    $current -= $extra;
+                    \fseek($input, $current);
+                }
             }
 
             if ($checkUri) {
