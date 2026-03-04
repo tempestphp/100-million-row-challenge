@@ -26,7 +26,6 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function unpack;
 
 use const SEEK_CUR;
 use const STREAM_IPPROTO_IP;
@@ -35,7 +34,7 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int K0 = 163_840;
+    private const int K0 = 131_072;
     private const int K1   = 2_097_152;
     private const int K2  = 25;
     private const int K3     = 8;
@@ -190,7 +189,10 @@ final class Parser
 
         fclose($fh);
 
-        $counts = unpack('C*', $output);
+        $counts = \array_fill(0, $outputSize, 0);
+        for ($i = 0; $i < $outputSize; $i++) {
+            $counts[$i] = \ord($output[$i]);
+        }
         unset($output);
 
         while ($sockets !== []) {
@@ -201,13 +203,20 @@ final class Parser
             foreach ($read as $socket) {
                 $key = \array_search($socket, $sockets, true);
                 $data = '';
-                while (!feof($socket)) {
-                    $data .= fread($socket, $outputSize);
+                while (!feof($socket) && \strlen($data) < $outputSize) {
+                    $buf = fread($socket, $outputSize - \strlen($data));
+                    if ($buf === '' || $buf === false) {
+                        break;
+                    }
+                    $data .= $buf;
                 }
                 fclose($socket);
                 unset($sockets[$key]);
-                foreach (unpack('C*', $data) as $k => $v) {
-                    $counts[$k] += $v;
+
+                $dataLen = \strlen($data);
+                $limit = $dataLen < $outputSize ? $dataLen : $outputSize;
+                for ($i = 0; $i < $limit; $i++) {
+                    $counts[$i] += \ord($data[$i]);
                 }
             }
         }
@@ -314,7 +323,7 @@ final class Parser
 
         fwrite($out, '{');
         $firstPath = true;
-        $base      = 1;
+        $base      = 0;
 
         for ($p = 0; $p < $slugTotal; $p++) {
             $dateEntries = [];
