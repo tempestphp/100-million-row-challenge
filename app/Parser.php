@@ -8,43 +8,45 @@ use function array_fill;
 use function chr;
 use function fclose;
 use function fgets;
-use function file_get_contents;
-use function file_put_contents;
-use function filesize;
 use function fopen;
 use function fread;
 use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
-use function getmypid;
 use function ini_set;
 use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
+use function stream_get_contents;
+use function stream_select;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
+use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function str_replace;
 use function substr;
-use function sys_get_temp_dir;
-use function unlink;
 use function unpack;
 use const SEEK_CUR;
-use const WNOHANG;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
     private const W = 10;
-    private const C = 524_288;
+    private const C = 163_840;
 
     public function parse(string $in, string $out): void
     {
         gc_disable();
         ini_set('memory_limit', '-1');
-        $sz = filesize($in);
+        ini_set('realpath_cache_size', '4096K');
+        ini_set('realpath_cache_ttl', '600');
+        error_reporting(0);
+        $sz = 7_509_674_827;
 
         $dc = 0;
         $db = [];
@@ -98,35 +100,60 @@ final class Parser
         fclose($fh);
         $bnd[] = $sz;
 
-        $pfx = sys_get_temp_dir() . "/p_" . getmypid() . "_";
-        $cmap = [];
+        $socks = [];
+        for ($w = 0; $w < self::W - 1; $w++) {
+            $socks[$w] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        }
+
         for ($w = 0; $w < self::W - 1; $w++) {
             $pid = pcntl_fork();
             if ($pid === 0) {
                 gc_disable();
+                for ($j = 0; $j < self::W - 1; $j++)
+                    fclose($socks[$j][0]);
+                for ($j = 0; $j < self::W - 1; $j++)
+                    if ($j !== $w)
+                        fclose($socks[$j][1]);
                 $wc = static::crunch($in, $bnd[$w], $bnd[$w + 1], $pi, $db, $pc, $dc);
-                file_put_contents($pfx . $w, pack('v*', ...$wc));
+                $packed = pack('v*', ...$wc);
+                $len = strlen($packed);
+                $written = 0;
+                while ($written < $len) {
+                    $n = fwrite($socks[$w][1], substr($packed, $written));
+                    if ($n === false || $n === 0)
+                        break;
+                    $written += $n;
+                }
+                fclose($socks[$w][1]);
                 exit(0);
             }
-            $cmap[$pid] = $w;
         }
 
+        for ($w = 0; $w < self::W - 1; $w++)
+            fclose($socks[$w][1]);
+
         $counts = static::crunch($in, $bnd[self::W - 1], $bnd[self::W], $pi, $db, $pc, $dc);
-        $pend = self::W - 1;
-        while ($pend > 0) {
-            $pid = pcntl_wait($st, WNOHANG);
-            if ($pid <= 0)
-                $pid = pcntl_wait($st);
-            if (!isset($cmap[$pid]))
-                continue;
-            $w = $cmap[$pid];
-            $wc = unpack('v*', file_get_contents($pfx . $w));
-            unlink($pfx . $w);
-            $j = 0;
-            foreach ($wc as $v)
-                $counts[$j++] += $v;
-            $pend--;
+
+        $readers = [];
+        for ($w = 0; $w < self::W - 1; $w++)
+            $readers[(int) $socks[$w][0]] = $socks[$w][0];
+        while ($readers) {
+            $read = array_values($readers);
+            $w2 = [];
+            $ex = [];
+            stream_select($read, $w2, $ex, 30);
+            foreach ($read as $sock) {
+                $data = stream_get_contents($sock);
+                fclose($sock);
+                unset($readers[(int) $sock]);
+                $wc = unpack('v*', $data);
+                $j = 0;
+                foreach ($wc as $v)
+                    $counts[$j++] += $v;
+            }
         }
+        for ($w = 0; $w < self::W - 1; $w++)
+            pcntl_wait($st);
 
         $dp = [];
         for ($d = 0; $d < $dc; $d++)
