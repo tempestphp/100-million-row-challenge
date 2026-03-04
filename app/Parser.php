@@ -2,29 +2,66 @@
 
 namespace App;
 
+use App\Commands\Visit;
+
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
 
-        $fileSize = filesize($inputPath);
-        $data = [];
-        $handle = fopen($inputPath, 'r');
+        // Pre-compute date IDs using 8-char key "YY-MM-DD" for faster hashing
+        $dateIds = [];
+        $dateStrings = [];
+        $di = 0;
+        $monthDays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        for ($y = 2019; $y <= 2027; $y++) {
+            $leap = ($y % 4 === 0 && ($y % 100 !== 0 || $y % 400 === 0));
+            $yy = sprintf('%02d', $y % 100);
+            for ($m = 1; $m <= 12; $m++) {
+                $days = $monthDays[$m - 1];
+                if ($m === 2 && $leap) $days = 29;
+                $mm = sprintf('%02d', $m);
+                for ($d = 1; $d <= $days; $d++) {
+                    $dateIds[$yy . '-' . $mm . '-' . sprintf('%02d', $d)] = $di;
+                    $dateStrings[$di] = sprintf('%04d-%02d-%02d', $y, $m, $d);
+                    $di++;
+                }
+            }
+        }
+        $numDates = $di;
 
+        // Pre-compute slug IDs from Visit::all()
+        $slugBase = [];
+        $si = 0;
+        foreach (Visit::all() as $visit) {
+            $slug = substr($visit->uri, 25);
+            if (!isset($slugBase[$slug])) {
+                $slugBase[$slug] = $si * $numDates;
+                $si++;
+            }
+        }
+
+        // Flat counts array: counts[slugId * numDates + dateId]
+        $counts = array_fill(0, $si * $numDates, 0);
+
+        // Track slug insertion order for output
+        $slugOrder = [];
+        $slugSeen = [];
+
+        // Parse file
+        $fileSize = filesize($inputPath);
+        $handle = fopen($inputPath, 'r');
         $remaining = $fileSize;
         $leftover = '';
 
         while ($remaining > 0) {
-            $chunk = fread($handle, min(8_388_608, $remaining));
-            if ($chunk === false || $chunk === '') {
-                break;
-            }
+            $chunk = fread($handle, min(4_194_304, $remaining));
+            if ($chunk === false || $chunk === '') break;
             $remaining -= strlen($chunk);
 
             $startPos = 0;
 
-            // Complete leftover line without copying the entire buffer
             if ($leftover !== '') {
                 $firstNl = strpos($chunk, "\n");
                 if ($firstNl === false) {
@@ -33,16 +70,14 @@ final class Parser
                 }
                 $line = $leftover . substr($chunk, 0, $firstNl);
                 $len = strlen($line);
-                if ($len > 45) {
-                    $path = substr($line, 19, $len - 45);
-                    $ds = substr($line, $len - 25, 10);
-                    $dateInt = (int)($ds[0] . $ds[1] . $ds[2] . $ds[3] . $ds[5] . $ds[6] . $ds[8] . $ds[9]);
-                    if (isset($data[$path][$dateInt])) {
-                        $data[$path][$dateInt]++;
-                    } elseif (isset($data[$path])) {
-                        $data[$path][$dateInt] = 1;
-                    } else {
-                        $data[$path] = [$dateInt => 1];
+                if ($len > 51) {
+                    $sep = strpos($line, ',', 25);
+                    if ($sep !== false) {
+                        $slug = substr($line, 25, $sep - 25);
+                        if (isset($slugBase[$slug])) {
+                            $counts[$slugBase[$slug] + $dateIds[substr($line, $sep + 3, 8)]]++;
+                            if (!isset($slugSeen[$slug])) { $slugSeen[$slug] = true; $slugOrder[] = $slug; }
+                        }
                     }
                 }
                 $startPos = $firstNl + 1;
@@ -60,76 +95,49 @@ final class Parser
                 $leftover = '';
             }
 
-            // Hot parsing loop — 2x unrolled, integer date keys
-            $pos = $startPos;
+            // Hot loop — comma search, fixed 52-char jump, flat array, 8-char date key
+            $pos = $startPos + 25;
             while ($pos < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $pos);
-                if ($nlPos === false) {
-                    break;
-                }
-                $path = substr($chunk, $pos + 19, $nlPos - $pos - 45);
-                $ds = substr($chunk, $nlPos - 25, 10);
-                $dateInt = (int)($ds[0] . $ds[1] . $ds[2] . $ds[3] . $ds[5] . $ds[6] . $ds[8] . $ds[9]);
-                if (isset($data[$path][$dateInt])) {
-                    $data[$path][$dateInt]++;
-                } elseif (isset($data[$path])) {
-                    $data[$path][$dateInt] = 1;
-                } else {
-                    $data[$path] = [$dateInt => 1];
-                }
-                $pos = $nlPos + 1;
-                if ($pos >= $lastNl) {
-                    break;
-                }
-
-                $nlPos = strpos($chunk, "\n", $pos);
-                if ($nlPos === false) {
-                    break;
-                }
-                $path = substr($chunk, $pos + 19, $nlPos - $pos - 45);
-                $ds = substr($chunk, $nlPos - 25, 10);
-                $dateInt = (int)($ds[0] . $ds[1] . $ds[2] . $ds[3] . $ds[5] . $ds[6] . $ds[8] . $ds[9]);
-                if (isset($data[$path][$dateInt])) {
-                    $data[$path][$dateInt]++;
-                } elseif (isset($data[$path])) {
-                    $data[$path][$dateInt] = 1;
-                } else {
-                    $data[$path] = [$dateInt => 1];
-                }
-                $pos = $nlPos + 1;
+                $sep = strpos($chunk, ',', $pos);
+                if ($sep === false || $sep >= $lastNl) break;
+                $slug = substr($chunk, $pos, $sep - $pos);
+                $counts[$slugBase[$slug] + $dateIds[substr($chunk, $sep + 3, 8)]]++;
+                if (!isset($slugSeen[$slug])) { $slugSeen[$slug] = true; $slugOrder[] = $slug; }
+                $pos = $sep + 52;
             }
         }
 
-        // Handle final leftover (last line without trailing newline)
         if ($leftover !== '') {
             $len = strlen($leftover);
-            if ($len > 45) {
-                $path = substr($leftover, 19, $len - 45);
-                $ds = substr($leftover, $len - 25, 10);
-                $dateInt = (int)($ds[0] . $ds[1] . $ds[2] . $ds[3] . $ds[5] . $ds[6] . $ds[8] . $ds[9]);
-                if (isset($data[$path][$dateInt])) {
-                    $data[$path][$dateInt]++;
-                } elseif (isset($data[$path])) {
-                    $data[$path][$dateInt] = 1;
-                } else {
-                    $data[$path] = [$dateInt => 1];
+            if ($len > 51) {
+                $sep = strpos($leftover, ',', 25);
+                if ($sep !== false) {
+                    $slug = substr($leftover, 25, $sep - 25);
+                    if (isset($slugBase[$slug])) {
+                        $counts[$slugBase[$slug] + $dateIds[substr($leftover, $sep + 3, 8)]]++;
+                        if (!isset($slugSeen[$slug])) { $slugSeen[$slug] = true; $slugOrder[] = $slug; }
+                    }
                 }
             }
         }
 
         fclose($handle);
 
-        // Sort dates and convert integer keys back to YYYY-MM-DD strings
-        foreach ($data as &$dates) {
-            ksort($dates);
-            $stringDates = [];
-            foreach ($dates as $dateInt => $cnt) {
-                $d = (string)$dateInt;
-                $stringDates[$d[0] . $d[1] . $d[2] . $d[3] . '-' . $d[4] . $d[5] . '-' . $d[6] . $d[7]] = $cnt;
+        // Build output in insertion order, dates chronological from pre-computation
+        $data = [];
+        foreach ($slugOrder as $slug) {
+            $base = $slugBase[$slug];
+            $dates = [];
+            for ($di = 0; $di < $numDates; $di++) {
+                $c = $counts[$base + $di];
+                if ($c > 0) {
+                    $dates[$dateStrings[$di]] = $c;
+                }
             }
-            $dates = $stringDates;
+            if (!empty($dates)) {
+                $data['/blog/' . $slug] = $dates;
+            }
         }
-        unset($dates);
 
         file_put_contents($outputPath, json_encode($data, JSON_PRETTY_PRINT));
     }
