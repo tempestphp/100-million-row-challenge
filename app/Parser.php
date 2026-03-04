@@ -36,29 +36,22 @@ final class Parser
             $date = substr($buffer, $commaPos + 1, $newlinePos - $commaPos - 16);
             
             // Process the data
-            $this->processUrlPathTimestamp($urlPath, $date, $results, $urlOrder);
+            // Track order of first appearance
+            if (!isset($results[$urlPath])) {
+                $results[$urlPath] = [];
+                $urlOrder[] = $urlPath;
+            }
             
+            if (!isset($results[$urlPath][$date])) {
+                $results[$urlPath][$date] = 0;
+            }
+            
+            $results[$urlPath][$date]++;
+
             $offset = $newlinePos + 1;
         }
         
         $buffer = '';
-    }
-
-    private function processUrlPathTimestamp(string $urlPath, string $date, array &$results, array &$urlOrder): void
-    {
-        // Process each line of the CSV file
-
-        // Track order of first appearance
-        if (!isset($results[$urlPath])) {
-            $results[$urlPath] = [];
-            $urlOrder[] = $urlPath;
-        }
-        
-        if (!isset($results[$urlPath][$date])) {
-            $results[$urlPath][$date] = 0;
-        }
-        
-        $results[$urlPath][$date]++;
     }
 
     public function parse(string $inputPath, string $outputPath): void
