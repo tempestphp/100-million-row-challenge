@@ -4,17 +4,16 @@ namespace App;
 
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    public static function parse(string $inputPath, string $outputPath): void
     {
-        $ncpu = 8;
-        $chunk = floor(filesize($inputPath) / $ncpu);
+        $ncpu = 4;
+        $chunkSize = floor(filesize($inputPath) / $ncpu);
         $children = [];
         for ($i=0; $i < $ncpu; $i++) {
             $tmp = tmpfile();
             $pid = pcntl_fork();
-            if ($pid === 0) {
-                $f = fopen($inputPath, 'rb');
-                $job = $this->parseChunk($f, $i, $chunk);
+            if ($pid === 0) {  
+                $job = self::parseInterval($inputPath, $i * $chunkSize, $i * $chunkSize + $chunkSize);
                 fwrite($tmp, serialize($job));
                 die; // children work is done, parachute
             }
@@ -36,30 +35,49 @@ final class Parser
             };
         }
 
-        $r = [];
         foreach ($h as $k => &$v) {
             ksort($v);
-            $r[strstr($k, '/')] = $v;
         };
-        
 
-        file_put_contents($outputPath, json_encode($r, JSON_PRETTY_PRINT));
+        file_put_contents($outputPath, json_encode($h, JSON_PRETTY_PRINT));
     }
 
-    public function parseChunk($f, $i, $chunk) {
+    public static function parseInterval($inputPath, $start, $limit) {
+        $f = fopen($inputPath, 'rb');
+        stream_set_chunk_size($f, 1<<24);
 
-        if ($i > 0) {
-            fseek($f, $i * $chunk);
-            $chunk -= strlen(fgets($f)); // go to next line (skip incomplete lines)
+        if ($start != 0) {
+            fseek($f, $start);
+            fgets($f); // skip first line: job N-1 ends with the first line of job N
+        }
+
+        $chunkSize = min(1<<24, $limit - $start);
+
+        $h = [];
+        $chunk = '';
+        while (true) {
+            $chunk .= fread($f, $chunkSize);
+            $p = 0;
+            while ($e = strpos($chunk, PHP_EOL, $p)) {
+                $h[substr($chunk, $p, $e - $p - 26)][] = substr($chunk, $e - 25, 10);
+                $p = $e + 1;
+            }
+            $chunk = substr($chunk, strrpos($chunk, PHP_EOL, -1));
+            if (ftell($f) >= $limit) {
+                // complete last line
+                if (strlen($chunk) > 1) {
+                    $chunk .= fgets($f);
+                    $e = strpos($chunk, PHP_EOL);
+                    $h[substr($chunk, 1, -27)][] = substr($chunk, -26, 10);
+                }
+                break;
+            }
         }
 
         $hits = [];
-        while ($chunk > 0 && $line = fgets($f)) {
-            $k = substr($line, 12, -27);
-            $d = substr($line, -26, 10);
-            $hits[$k][$d] ??= 0;
-            $hits[$k][$d]++;
-            $chunk -= strlen($line);
+        foreach ($h as $url => $dates) {
+            $dates = array_count_values($dates);
+            $hits[parse_url($url, PHP_URL_PATH)] = $dates;
         }
 
         return $hits;
