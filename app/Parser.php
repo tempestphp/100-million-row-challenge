@@ -10,7 +10,7 @@ final class Parser
     private const int ARRAY_SIZE = (2 ** self::DATE_BITS) * self::URL_COUNT;
     private const int DATE_MASK = 2 ** self::DATE_BITS - 1;
 
-    private const int BUFFER_SIZE = 1024 * 256;
+    private const int BUFFER_SIZE = 1024 * 64;
     private const int PATH_OFFSET = 25;
 
     public function parse(string $inputPath, string $outputPath): void
