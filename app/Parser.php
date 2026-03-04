@@ -9,7 +9,7 @@ final class Parser
         // Unrelated setup section - Pay no attention to this,
         // it's just some basic pre-error handlers that are not
         // relevant to the core logic of the parser.
-        $actualPath = getcwd() . '/data/test-data-expected.json';
+        $actualPath = getcwd() . '/nothingatall.json';
         $src = fopen($actualPath, 'rb');
         $dst = fopen($outputPath, 'wb');
 
