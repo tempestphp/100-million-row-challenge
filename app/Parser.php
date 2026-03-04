@@ -2,7 +2,6 @@
 
 namespace App;
 
-use function array_fill;
 use function chr;
 use function count;
 use function fclose;
@@ -44,7 +43,7 @@ final class Parser
     public function parse($inputPath, $outputPath)
     {
         $runStartNs = \hrtime(true);
-        $profileEnabled = 0;
+        $profileEnabled = (0);
         $phaseStartNs = $runStartNs;
         $phaseMarks = [];
         $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
@@ -112,7 +111,6 @@ final class Parser
         for ($i = 0; $i < 255; $i++) {
             $next[chr($i)] = chr($i + 1);
         }
-        //$markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -123,7 +121,7 @@ final class Parser
         $slugKeyById     = [];
         $slugTotal = 0;
         $pos       = 0;
-        $lastNl    = strrpos($raw, "\n");
+        $lastNl    = strrpos($raw, "\n") ?: 0;
 
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
@@ -140,7 +138,6 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
-        //$markPhase('slug-scan');
 
         $slugBaseMap = [];
         foreach ($slugIdByKey as $slug => $id) {
@@ -151,19 +148,20 @@ final class Parser
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
-        foreach ([938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473] as $offset) {
-            fseek($bh, $offset);
+        for ($i = 1; $i < $workerTotal; $i++) {
+            fseek($bh, (int)($inputBytes * $i / $workerTotal));
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
         fclose($bh);
         $boundaries[] = $inputBytes;
-        //$markPhase('chunk-offsets');
 
         $sockets = [];
 
-        for ($w = 0; $w < 7; $w++) {
+        for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            stream_set_chunk_size($pair[0], $outputSize);
+            stream_set_chunk_size($pair[1], $outputSize);
             $pid = pcntl_fork();
 
             if ($pid === 0) {
@@ -188,16 +186,11 @@ final class Parser
         $fh     = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
 
-        self::q2($fh, $boundaries[7], $boundaries[8], $slugBaseMap, $dayIdByKey, $next, $output);
+        self::q2($fh, $boundaries[$workerTotal - 1], $boundaries[$workerTotal], $slugBaseMap, $dayIdByKey, $next, $output);
 
         fclose($fh);
 
-        $counts = array_fill(0, $outputSize, 0);
-        $j = 0;
-        foreach (unpack('C*', $output) as $v) {
-            $counts[$j] = $v;
-            $j++;
-        }
+        $counts = unpack('C*', $output);
         unset($output);
 
         while ($sockets !== []) {
@@ -213,19 +206,13 @@ final class Parser
                 }
                 fclose($socket);
                 unset($sockets[$key]);
-                $j = 0;
-                foreach (unpack('C*', $data) as $v) {
-                    $counts[$j] += $v;
-                    $j++;
+                foreach (unpack('C*', $data) as $k => $v) {
+                    $counts[$k] += $v;
                 }
             }
         }
-        //$markPhase('parse-and-reduce');
 
         self::q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
-        //$markPhase('json-output');
-
-        //$dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
     private static function q2($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
@@ -240,10 +227,12 @@ final class Parser
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
             $chunk  = fread($handle, $toRead);
             if (!$chunk) break;
+
             $chunkLen   = strlen($chunk);
             $remaining -= $chunkLen;
 
             $lastNl = strrpos($chunk, "\n");
+            if ($lastNl === false) continue;
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
@@ -325,7 +314,7 @@ final class Parser
 
         fwrite($out, '{');
         $firstPath = true;
-        $base      = 0;
+        $base      = 1;
 
         for ($p = 0; $p < $slugTotal; $p++) {
             $dateEntries = [];
