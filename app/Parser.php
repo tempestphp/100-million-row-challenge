@@ -45,51 +45,11 @@ final class Parser
 
     public function parse($inputPath, $outputPath)
     {
-        $runStartNs = \hrtime(true);
-        $profileEnabled = (\getenv('PARSER_PROFILE') === '1');
-        $phaseStartNs = $runStartNs;
-        $phaseMarks = [];
-        $markPhase = static function (string $name) use (&$phaseMarks, &$phaseStartNs, $runStartNs, $profileEnabled): void {
-            if (! $profileEnabled) {
-                return;
-            }
-
-            $now = \hrtime(true);
-            $phaseMarks[] = [
-                'name' => $name,
-                'delta_ms' => ($now - $phaseStartNs) / 1_000_000,
-                'total_ms' => ($now - $runStartNs) / 1_000_000,
-            ];
-            $phaseStartNs = $now;
-        };
-        $dumpPhases = static function (string $planId, int $workerTotal, int $chunkTotal) use (&$phaseMarks, $profileEnabled): void {
-            if (! $profileEnabled) {
-                return;
-            }
-
-            \fwrite(STDERR, "[parser-profile] plan={$planId} workers={$workerTotal} chunks={$chunkTotal}\n");
-            foreach ($phaseMarks as $mark) {
-                \fwrite(
-                    STDERR,
-                    \sprintf(
-                        "  %-24s delta=%8.3f ms total=%8.3f ms\n",
-                        $mark['name'],
-                        $mark['delta_ms'],
-                        $mark['total_ms'],
-                    ),
-                );
-            }
-        };
-
         gc_disable();
 
         $inputBytes   = 7_509_674_827;
         $workerTotal = self::K3;
-        $chunkTotal = (int)(\getenv('PARSER_CHUNKS') ?: self::K4);
-        if ($chunkTotal < $workerTotal) {
-            $chunkTotal = $workerTotal;
-        }
-        $planId      = 'default';
+        $chunkTotal  = self::K4;
 
         $dayIdByKey   = [];
         $dayKeyById     = [];
@@ -118,7 +78,6 @@ final class Parser
         for ($i = 0; $i < 255; $i++) {
             $next[chr($i)] = chr($i + 1);
         }
-        #if ($profileEnabled) $markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -146,7 +105,6 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
-        #if ($profileEnabled) $markPhase('slug-scan');
 
         $slugBaseMap = [];
         foreach ($slugIdByKey as $slug => $id) {
@@ -164,23 +122,10 @@ final class Parser
         }
         fclose($bh);
         $splitPoints[] = $inputBytes;
-        #if ($profileEnabled) $markPhase('chunk-offsets');
 
         $myPid = getmypid();
         $queueFile = '/tmp/p100m_' . $myPid . '_queue';
-
-        $useSemQueue = false;
-        $semKey = $myPid + 1;
-        $queueShmKey = $myPid + 2;
-        $sem = @\sem_get($semKey, 1, 0644, true);
-        $queueShm = @\shmop_open($queueShmKey, 'c', 0644, 4);
-
-        if ($sem !== false && $queueShm !== false) {
-            \shmop_write($queueShm, \pack('V', 0), 0);
-            $useSemQueue = true;
-        } else {
-            \file_put_contents($queueFile, \pack('V', 0));
-        }
+        \file_put_contents($queueFile, \pack('V', 0));
 
         $sockets = [];
         $childTotal = 0;
@@ -197,25 +142,15 @@ final class Parser
                 $fh     = fopen($inputPath, 'rb');
                 stream_set_read_buffer($fh, 0);
 
-                if ($useSemQueue) {
-                    while (true) {
-                        $ci = self::grabChunkSem($queueShm, $sem, $chunkTotal);
-                        if ($ci === -1) {
-                            break;
-                        }
-                        self::q2($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $slugBaseMap, $dayIdByKey, $next, $output);
+                $qf = fopen($queueFile, 'c+b');
+                while (true) {
+                    $ci = self::grabChunkFlock($qf, $chunkTotal);
+                    if ($ci === -1) {
+                        break;
                     }
-                } else {
-                    $qf = fopen($queueFile, 'c+b');
-                    while (true) {
-                        $ci = self::grabChunkFlock($qf, $chunkTotal);
-                        if ($ci === -1) {
-                            break;
-                        }
-                        self::q2($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $slugBaseMap, $dayIdByKey, $next, $output);
-                    }
-                    fclose($qf);
+                    self::q2($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $slugBaseMap, $dayIdByKey, $next, $output);
                 }
+                fclose($qf);
 
                 fclose($fh);
                 fwrite($pair[1], $output);
@@ -231,25 +166,16 @@ final class Parser
         $output = str_repeat(chr(0), $outputSize);
         $fh     = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
-        if ($useSemQueue) {
-            while (true) {
-                $ci = self::grabChunkSem($queueShm, $sem, $chunkTotal);
-                if ($ci === -1) {
-                    break;
-                }
-                self::q2($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $slugBaseMap, $dayIdByKey, $next, $output);
+
+        $qf = fopen($queueFile, 'c+b');
+        while (true) {
+            $ci = self::grabChunkFlock($qf, $chunkTotal);
+            if ($ci === -1) {
+                break;
             }
-        } else {
-            $qf = fopen($queueFile, 'c+b');
-            while (true) {
-                $ci = self::grabChunkFlock($qf, $chunkTotal);
-                if ($ci === -1) {
-                    break;
-                }
-                self::q2($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $slugBaseMap, $dayIdByKey, $next, $output);
-            }
-            fclose($qf);
+            self::q2($fh, $splitPoints[$ci], $splitPoints[$ci + 1], $slugBaseMap, $dayIdByKey, $next, $output);
         }
+        fclose($qf);
 
         fclose($fh);
 
@@ -276,32 +202,9 @@ final class Parser
             $childTotal--;
         }
 
-        if ($useSemQueue) {
-            \shmop_delete($queueShm);
-            \sem_remove($sem);
-        } else {
-            @\unlink($queueFile);
-        }
-        #if ($profileEnabled) $markPhase('parse-and-reduce');
+        @\unlink($queueFile);
 
         self::q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
-        #if ($profileEnabled) $markPhase('json-output');
-
-        #if ($profileEnabled) $dumpPhases($planId, $workerTotal, $chunkTotal);
-    }
-
-    private static function grabChunkSem($queueShm, $sem, $chunkTotal)
-    {
-        \sem_acquire($sem);
-        $idx = unpack('V', \shmop_read($queueShm, 0, 4))[1];
-        if ($idx >= $chunkTotal) {
-            \sem_release($sem);
-            return -1;
-        }
-
-        \shmop_write($queueShm, \pack('V', $idx + 1), 0);
-        \sem_release($sem);
-        return $idx;
     }
 
     private static function grabChunkFlock($qf, $chunkTotal)
@@ -347,9 +250,19 @@ final class Parser
             }
 
             $p     = $prefixLen;
-            $fence = $lastNl - 792;
+            $fence = $lastNl - 1010;
 
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dayIdByKey[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
