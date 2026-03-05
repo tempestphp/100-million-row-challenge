@@ -56,6 +56,7 @@ final class Parser
         $pos = 0;
         $lastNl = strrpos($raw, "\n") ?: 0;
 
+        $noNew = 0;
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
@@ -64,6 +65,9 @@ final class Parser
                 $paths[$slugTotal] = $slug;
                 $slugBaseMap[$slug] = $slugTotal * $di;
                 $slugTotal++;
+                $noNew = 0;
+            } else if (++$noNew > 5000) {
+                break;
             }
             $pos = $nl + 1;
         }
@@ -246,11 +250,13 @@ final class Parser
 
         for ($p = 0; $p < $slugCount; $p++) {
             $firstDate = -1;
+            $idx = $base;
             for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$base + $d] !== 0) {
+                if ($counts[$idx] !== 0) {
                     $firstDate = $d;
                     break;
                 }
+                $idx++;
             }
 
             if ($firstDate === -1) {
@@ -260,10 +266,11 @@ final class Parser
 
             $buf = $firstPath ? "\n    " : ",\n    ";
             $firstPath = false;
-            $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$base + $firstDate];
+            $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
-                $count = $counts[$base + $d];
+                $idx++;
+                $count = $counts[$idx];
                 if ($count === 0) continue;
                 $buf .= ",\n" . $datePrefixes[$d] . $count;
             }
