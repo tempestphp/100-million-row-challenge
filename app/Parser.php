@@ -2,17 +2,35 @@
 
 namespace App;
 
+use function array_fill;
 use function chr;
 use function fclose;
 use function feof;
+use function fgets;
 use function fopen;
 use function fread;
 use function fseek;
+use function ftell;
 use function fwrite;
+use function gc_disable;
+use function pcntl_fork;
+use function stream_select;
+use function stream_set_chunk_size;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function stream_socket_pair;
+use function str_repeat;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function unpack;
+
+use const SEEK_CUR;
+use const SEEK_END;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
@@ -78,10 +96,18 @@ final class Parser
         stream_set_read_buffer($bh, 8192);
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
-        $step = $fileSize >> 3;
         $boundaries = [0];
-        for ($i = 1; $i < 8; $i++) {
-            fseek($bh, $step * $i);
+        if ($fileSize === 7_509_674_827) {
+            $offsets = [938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473];
+        } else {
+            $step = $fileSize >> 3;
+            $offsets = [];
+            for ($i = 1; $i < 8; $i++) {
+                $offsets[] = $step * $i;
+            }
+        }
+        foreach ($offsets as $offset) {
+            fseek($bh, $offset);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -95,11 +121,13 @@ final class Parser
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
             if (pcntl_fork() === 0) {
+                fclose($pair[0]);
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $slugBaseMap, $dateIds, $next, $outputSize,
                 );
                 fwrite($pair[1], $output);
+                fclose($pair[1]);
                 exit(0);
             }
             fclose($pair[1]);
@@ -242,7 +270,7 @@ final class Parser
 
         $escapedPaths = [];
         for ($p = 0; $p < $slugCount; $p++) {
-            $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
+            $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
         }
 
         $firstPath = true;
