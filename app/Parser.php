@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App;
 
 use Exception;
+use function Tempest\Support\Str\length;
 
 final class Parser
 {
