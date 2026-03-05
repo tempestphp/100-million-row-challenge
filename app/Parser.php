@@ -13,30 +13,30 @@ final class Parser
 
 	public function parse(string $inputPath, string $outputPath): void
 	{
-	    $fp = fopen($inputPath, 'r');
+	    $fp = \fopen($inputPath, 'r');
 
-	    $domainLength = strlen(self::DOMAIN);
+	    $domainLength = \strlen(self::DOMAIN);
 	    $pathVisits = [];
 	    $pathHash = [];
 
 	    $t = microtime(true);
 
-	    stream_set_read_buffer($fp, self::READ_BUFFER_SIZE);
+	    \stream_set_read_buffer($fp, 0);
 
 	    $remainder = '';
 	    $chunkNo = 0;
 	    $hashPath = [];
-	    while (($chunk = fread($fp, self::READ_BUFFER_SIZE)) !== '') {
+	    while (($chunk = \fread($fp, self::READ_BUFFER_SIZE)) !== '') {
 		    if ($remainder !== '') {
 			    $chunk = $remainder . $chunk;
 		    }
 
 		    $prevNewLine = -1;
-		    $newLine = strpos($chunk, "\n", 0);
+		    $newLine = \strpos($chunk, "\n", 0);
 		    try {
 			    do {
-				    $path = substr($chunk, $prevNewLine + 1 + $domainLength, ($newLine - 27) - $prevNewLine - $domainLength);
-				    $hash = $hashPath[$path] ?? hash('xxh32', $path, true);
+				    $path = \substr($chunk, $prevNewLine + 1 + $domainLength, ($newLine - 27) - $prevNewLine - $domainLength);
+				    $hash = $hashPath[$path] ?? \hash('xxh32', $path, true);
 
 				    $y = ((int) $chunk[$newLine - 23]) * 10 + (int) $chunk[$newLine - 22];
 				    $m = ((int) $chunk[$newLine - 20]) * 10 + (int) $chunk[$newLine - 19];
@@ -57,19 +57,19 @@ final class Parser
 				    }
 
 				    $prevNewLine = $newLine;
-				    $newLine = strpos($chunk, "\n", $newLine + 1);
+				    $newLine = \strpos($chunk, "\n", $newLine + 1);
 			    } while ($newLine !== false);
 		    } catch (\ValueError) {
 			    $newLine = false;
 		    }
 
-		    $remainder = substr($chunk, $prevNewLine + 1);
+		    $remainder = \substr($chunk, $prevNewLine + 1);
 		    $chunkNo++;
 	    }
 
-	    $fp = fopen($outputPath, 'w');
-	    stream_set_write_buffer($fp, self::WRITE_BUFFER_SIZE);
-	    fwrite($fp, "{\n");
+	    $fp = \fopen($outputPath, 'w');
+	    \stream_set_write_buffer($fp, self::WRITE_BUFFER_SIZE);
+	    \fwrite($fp, "{\n");
 	    foreach ($pathVisits as $hash => $dates) {
 		    $line = "    \"\\/blog\\/" . str_replace('/', '\\/', $pathHash[$hash]) . "\": {\n";
 		    ksort($dates);
@@ -87,11 +87,11 @@ final class Parser
 		    $line[-1] = " ";
 		    $line .= "   },\n";
 
-		    fwrite($fp, $line);
+		    \fwrite($fp, $line);
 	    }
 
-	    fseek($fp, -2, SEEK_CUR);
-	    fwrite($fp, "\n}");
+	    \fseek($fp, -2, SEEK_CUR);
+	    \fwrite($fp, "\n}");
 
 
     }
