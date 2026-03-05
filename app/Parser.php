@@ -16,18 +16,34 @@ final class Parser
         // With 1,000,000 visits, it is likely each URL will receive some visits on each date.
         // So we can precompute the date indices to save the sorting later.
         $dd = [];
-        for ($i = 1; $i <= 31; ++$i) {
-            $dd[$i] = \str_pad((string)$i, 2, '0', \STR_PAD_LEFT);
+        for ($i = 1; $i < 10; ++$i) {
+            $dd[$i] = '-0' . $i;
+        }
+        for ($i = 10; $i <= 31; ++$i) {
+            $dd[$i] = '-' . $i;
         }
         $i = 0;
         $dateToIndices = [];
         $initialDateCounts = [];
         for ($year = 1; $year <= 6; $year++) {
             $y = (string)$year;
-            for ($month = 1; $month <= 12; $month++) {
-                $mm = $y . '-' . $dd[$month];
-                for ($day = 1; $day <= 31; $day++) {
-                    $date = $mm . '-' . $dd[$day];
+            $minMonth = match ($year) {
+                1 => 2,
+                default => 1,
+            };
+            $maxMonth = match ($year) {
+                6 => 3,
+                default => 12,
+            };
+            for ($month = $minMonth; $month <= $maxMonth; $month++) {
+                $mm = $y . $dd[$month];
+                $maxDay = match ($month) {
+                    2 => 29, // not bother to check 28 or 29
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
+                for ($day = 1; $day <= $maxDay; $day++) {
+                    $date = $mm . $dd[$day];
                     $dateToIndices[$date] = $i;
                     $initialDateCounts[$i] = 0;
                     ++$i;
