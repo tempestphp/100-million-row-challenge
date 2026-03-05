@@ -5,7 +5,7 @@ namespace App\Commands;
 use Tempest\Console\ConsoleCommand;
 use Tempest\Console\HasConsole;
 
-// This is a completely AI-generated class, please ignore.
+// This is a (almost) completely AI-generated class, please ignore.
 final class BenchmarkHistoryCommand
 {
     use HasConsole;
@@ -13,19 +13,32 @@ final class BenchmarkHistoryCommand
     #[ConsoleCommand]
     public function __invoke(): void
     {
-        $historyFile = __DIR__ . '/../../leaderboard-history.csv';
-        $leaderboardRelativePath = 'leaderboard.csv';
+        $this->processLeaderboard(
+            leaderboardPath: 'leaderboard.csv',
+            historyFile: __DIR__ . '/../../leaderboard-history.csv',
+            finalistsFile: __DIR__ . '/../../leaderboard-finalists.csv',
+        );
 
-        // Get all commits that modified leaderboard.csv since 2026-03-01
-        $gitLog = shell_exec("git log --format='%H|%ci' --since='2026-03-01' --follow -- {$leaderboardRelativePath}");
+        $this->processLeaderboard(
+            leaderboardPath: 'leaderboard-single-thread.csv',
+            historyFile: __DIR__ . '/../../leaderboard-single-thread-history.csv',
+            finalistsFile: __DIR__ . '/../../leaderboard-single-thread-finalists.csv',
+        );
+
+        $this->success('Done.');
+    }
+
+    private function processLeaderboard(string $leaderboardPath, string $historyFile, string $finalistsFile): void
+    {
+        $gitLog = shell_exec("git log --format='%H|%ci' --since='2026-02-28' --follow -- {$leaderboardPath}");
 
         if (empty($gitLog)) {
-            echo "No git history found for leaderboard.csv\n";
+            $this->error("No git history found for {$leaderboardPath}");
             return;
         }
 
         $commits = array_filter(explode("\n", trim($gitLog)));
-        $commits = array_reverse($commits); // Process oldest first
+        $commits = array_reverse($commits);
 
         $historyData = [];
 
@@ -33,8 +46,7 @@ final class BenchmarkHistoryCommand
             $this->info("Processing commit: {$commitLine}");
             [$commitHash, $commitDate] = explode('|', $commitLine, 2);
 
-            // Get the diff for this commit to see what was added/changed
-            $diff = shell_exec("git show {$commitHash} -- {$leaderboardRelativePath} 2>/dev/null");
+            $diff = shell_exec("git show {$commitHash} -- {$leaderboardPath} 2>/dev/null");
 
             if (empty($diff)) {
                 continue;
@@ -43,19 +55,16 @@ final class BenchmarkHistoryCommand
             $lines = explode("\n", $diff);
 
             foreach ($lines as $line) {
-                // Only process lines that were added (start with +)
                 if (!str_starts_with($line, '+') || str_starts_with($line, '+++')) {
                     continue;
                 }
 
-                // Remove the leading +
                 $line = substr($line, 1);
 
                 if (empty($line) || str_starts_with($line, 'entry_date,')) {
                     continue;
                 }
 
-                // Parse CSV line
                 $parts = explode(',', str_replace(';', ',', $line));
 
                 if (count($parts) >= 3) {
@@ -68,28 +77,76 @@ final class BenchmarkHistoryCommand
             }
         }
 
-        // Sort by date first
         usort($historyData, fn($a, $b) => strcmp($a['entry_date'], $b['entry_date']));
 
-        // Track the current best time for each branch
+        $excludedBranches = ['brendt', 'ghostwriter'];
         $currentBestByBranch = [];
+        $bestCheckpoint = [];
+        $checkpointReachedAt = [];
 
-        // Get all unique timestamps
-        $timestamps = array_unique(array_column($historyData, 'entry_date'));
+        foreach ($historyData as $entry) {
+            $branch = $entry['branch_name'];
 
-        // Build normalized data: for each timestamp, include all branches with their current best time
+            if (in_array($branch, $excludedBranches)) {
+                continue;
+            }
+
+            $time = (float) $entry['time'];
+
+            if (!isset($currentBestByBranch[$branch]) || $time < $currentBestByBranch[$branch]) {
+                $currentBestByBranch[$branch] = $time;
+
+                $checkpoint = floor($time * 100) / 100;
+
+                if (!isset($bestCheckpoint[$branch]) || $checkpoint < $bestCheckpoint[$branch]) {
+                    $bestCheckpoint[$branch] = $checkpoint;
+                    $checkpointReachedAt[$branch] = $entry['entry_date'];
+                }
+            }
+        }
+
+        $allCheckpoints = array_unique(array_values($bestCheckpoint));
+        sort($allCheckpoints);
+        $topCheckpoints = array_slice($allCheckpoints, 0, 3);
+
+        $candidates = [];
+
+        foreach ($bestCheckpoint as $branch => $cp) {
+            if (!in_array($cp, $topCheckpoints)) {
+                continue;
+            }
+
+            $candidates[] = [
+                'branch' => $branch,
+                'checkpoint' => $cp,
+                'time' => $currentBestByBranch[$branch],
+                'reached_at' => $checkpointReachedAt[$branch],
+            ];
+        }
+
+        usort($candidates, fn($a, $b) =>
+            ($a['checkpoint'] <=> $b['checkpoint']) ?: strcmp($a['reached_at'], $b['reached_at']));
+
+        $finalists = array_slice($candidates, 0, 3);
+        $topBranches = array_column($finalists, 'branch');
+        sort($topBranches);
+
+        $currentBestByBranch = [];
         $normalizedData = [];
 
         foreach ($historyData as $entry) {
             $branch = $entry['branch_name'];
-            $time = (float)$entry['time'];
 
-            // Update the current best for this branch
+            if (!in_array($branch, $topBranches)) {
+                continue;
+            }
+
+            $time = (float) $entry['time'];
+
             if (!isset($currentBestByBranch[$branch]) || $time < $currentBestByBranch[$branch]) {
                 $currentBestByBranch[$branch] = $time;
             }
 
-            // Add a snapshot of all branches at this timestamp
             foreach ($currentBestByBranch as $branchName => $bestTime) {
                 $normalizedData[] = [
                     'entry_date' => $entry['entry_date'],
@@ -99,40 +156,26 @@ final class BenchmarkHistoryCommand
             }
         }
 
-        // Exclude certain branches
-        $excludedBranches = ['brendt', 'ghostwriter'];
-        $currentBestByBranch = array_diff_key($currentBestByBranch, array_flip($excludedBranches));
-
-        // Get top 10 branches by best time
-        asort($currentBestByBranch);
-        $topBranches = array_slice(array_keys($currentBestByBranch), 0, 4);
-        sort($topBranches);
-
-        // Group by timestamp, with each branch as a column
         $pivotedData = [];
 
         foreach ($normalizedData as $entry) {
-            if (!in_array($entry['branch_name'], $topBranches)) {
-                continue;
-            }
-
             $date = $entry['entry_date'];
+
             if (!isset($pivotedData[$date])) {
                 $pivotedData[$date] = [];
             }
+
             $pivotedData[$date][$entry['branch_name']] = $entry['time'];
         }
 
-        // Write history to file
         $fp = fopen($historyFile, 'w');
-
-        // Header: entry_date, branch1, branch2, ...
         fputs($fp, 'entry_date,' . implode(',', $topBranches) . "\n");
 
         $previousValues = [];
 
         foreach ($pivotedData as $date => $branches) {
             $currentValues = [];
+
             foreach ($topBranches as $branch) {
                 $currentValues[$branch] = $branches[$branch] ?? '';
             }
@@ -144,14 +187,31 @@ final class BenchmarkHistoryCommand
             $previousValues = $currentValues;
 
             $row = [$date];
+
             foreach ($topBranches as $branch) {
                 $row[] = $currentValues[$branch];
             }
+
             fputs($fp, implode(',', $row) . "\n");
         }
 
         fclose($fp);
 
-        $this->success('Done.');
+        $fp = fopen($finalistsFile, 'w');
+        fputs($fp, "rank,branch_name,checkpoint,time,reached_at\n");
+
+        $rank = 1;
+
+        foreach ($finalists as $finalist) {
+            fputs($fp, implode(',', [
+                $rank++,
+                $finalist['branch'],
+                number_format($finalist['checkpoint'], 2),
+                $finalist['time'],
+                $finalist['reached_at'],
+            ]) . "\n");
+        }
+
+        fclose($fp);
     }
 }
