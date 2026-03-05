@@ -35,7 +35,7 @@ final class Parser
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $di;
-                    $dates[$di] = $key;
+                    $dates[$di] = '20' . $key;
                     $di++;
                 }
             }
@@ -71,9 +71,10 @@ final class Parser
 
         $outputSize = $slugTotal * $di;
 
+        stream_set_read_buffer($bh, 8192);
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
-        $step = \intdiv($fileSize, 8);
+        $step = $fileSize >> 3;
         $boundaries = [0];
         for ($i = 1; $i < 8; $i++) {
             fseek($bh, $step * $i);
@@ -102,7 +103,7 @@ final class Parser
         }
 
         $counts = array_fill(0, $outputSize, 0);
-        $pending = [];
+        $offsets = array_fill(0, 8, 0);
 
         $write = [];
         $except = [];
@@ -112,17 +113,16 @@ final class Parser
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
                 if ($data !== '' && $data !== false) {
-                    $pending[$key] = ($pending[$key] ?? '') . $data;
+                    $off = $offsets[$key];
+                    foreach (unpack('C*', $data) as $v) {
+                        $counts[$off] += $v;
+                        $off++;
+                    }
+                    $offsets[$key] = $off;
                 }
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
-                    $j = 0;
-                    foreach (unpack('C*', $pending[$key] ?? '') as $v) {
-                        $counts[$j] += $v;
-                        $j++;
-                    }
-                    unset($pending[$key]);
                 }
             }
         }
@@ -233,7 +233,7 @@ final class Parser
 
         $datePrefixes = [];
         for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+            $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
         }
 
         $escapedPaths = [];
