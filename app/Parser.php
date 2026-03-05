@@ -14,7 +14,7 @@ use function ftell;
 use function fwrite;
 use function gc_disable;
 use function pcntl_fork;
-use function stream_select;
+use function stream_get_contents;
 use function stream_set_chunk_size;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
@@ -104,7 +104,6 @@ final class Parser
         fclose($bh);
 
         $sockets = [];
-        $socketKeys = [];
 
         for ($w = 0; $w < 8; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -122,35 +121,19 @@ final class Parser
             }
             fclose($pair[1]);
             $sockets[$w] = $pair[0];
-            $socketKeys[(int)$pair[0]] = $w;
         }
 
         $counts = array_fill(0, $outputSize, 0);
-        $pending = array_fill(0, 8, '');
-
-        $write = [];
-        $except = [];
-        while ($sockets !== []) {
-            $read = $sockets;
-            stream_select($read, $write, $except, 5);
-            foreach ($read as $socket) {
-                $socketId = (int)$socket;
-                $key = $socketKeys[$socketId];
-                $data = fread($socket, $outputSize);
-                if ($data !== '' && $data !== false) {
-                    $pending[$key] .= $data;
-                }
-                if (feof($socket)) {
-                    fclose($socket);
-                    unset($sockets[$key]);
-                    unset($socketKeys[$socketId]);
-                    $j = 0;
-                    foreach (unpack('C*', $pending[$key]) as $v) {
-                        $counts[$j] += $v;
-                        $j++;
-                    }
-                    unset($pending[$key]);
-                }
+        foreach ($sockets as $key => $socket) {
+            $data = stream_get_contents($socket);
+            fclose($socket);
+            if ($data === false || $data === '') {
+                continue;
+            }
+            $j = 0;
+            foreach (unpack('C*', $data) as $v) {
+                $counts[$j] += $v;
+                $j++;
             }
         }
 
