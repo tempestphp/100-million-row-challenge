@@ -34,7 +34,7 @@ final class Parser
     private const int WORKER_COUNT = 8;
     private const int READ_CHUNK = 163_840;
     private const int COUNTS_SIZE = 587_188;
-    private const array PRECOMPUTED_BOUNDARIES = [0, 938709353, 1877418706, 2816128060, 3754837413, 4693546766, 5632256120, 6570965473, 7509674827];
+    private const array PRECOMPUTED_BOUNDARIES = [0, 938709421, 1877418773, 2816128080, 3754837434, 4693546767, 5632256171, 6570965489, 7509674827];
 
     public static function parse($inputPath, $outputPath)
     {
@@ -87,7 +87,6 @@ final class Parser
                     $slugBaseMap, $dateIds, $next,
                 );
                 fwrite($pair[1], $output);
-                fclose($pair[1]);
                 exit(0);
             }
             fclose($pair[1]);
