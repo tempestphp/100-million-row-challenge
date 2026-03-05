@@ -100,22 +100,13 @@ final class Parser
         stream_set_read_buffer($bh, 8192);
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
+        $step = $fileSize >> 3;
         $boundaries = [0];
-        if ($fileSize === 7_509_674_827) {
-            $offsets = [938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473];
-        } else {
-            $step = $fileSize >> 3;
-            $offsets = [];
-            for ($i = 1; $i < 8; $i++) {
-                $offsets[] = $step * $i;
-            }
-        }
-        foreach ($offsets as $offset) {
-            fseek($bh, $offset);
+        for ($i = 1; $i < 8; $i++) {
+            fseek($bh, $step * $i);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
-        fclose($bh);
         $boundaries[] = $fileSize;
 
         $sockets = [];
