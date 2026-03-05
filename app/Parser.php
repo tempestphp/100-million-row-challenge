@@ -48,7 +48,7 @@ final class Parser
 
         $bh = fopen($inputPath, 'rb');
         stream_set_read_buffer($bh, 0);
-        $raw = fread($bh, 181000);
+        $raw = fread($bh, 2_097_152);
 
         $paths = [];
         $slugBaseMap = [];
