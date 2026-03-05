@@ -31,10 +31,10 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int WORKER_COUNT = 10;
+    private const int WORKER_COUNT = 8;
     private const int READ_CHUNK = 163_840;
     private const int COUNTS_SIZE = 587_188;
-    private const array PRECOMPUTED_BOUNDARIES = [0, 750967486, 1501935011, 2252902449, 3003870013, 3754837434, 4505804926, 5256772404, 6007739863, 6758707373, 7509674827];
+    private const array PRECOMPUTED_BOUNDARIES = [0, 938709367, 1877418730, 2816128122, 3754837434, 4693546796, 5632256134, 6570965496, 7509674827];
 
     public static function parse($inputPath, $outputPath)
     {
@@ -82,7 +82,6 @@ final class Parser
             stream_set_chunk_size($pair[1], self::COUNTS_SIZE);
             $pid = pcntl_fork();
             if ($pid === 0) {
-                fclose($pair[0]);
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $slugBaseMap, $dateIds, $next,
