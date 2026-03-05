@@ -235,10 +235,20 @@ final class Parser
             }
 
             $p = 25; // slug start (past 25-char URL prefix)
-            $fence = $lastNl - 960; // 8 × ~120-byte max-line guard
+            $fence = $lastNl - 1010; // 10 × 101-byte max-line guard
 
-            // Hot loop, unrolled 8×
+            // Hot loop, unrolled 10×
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
