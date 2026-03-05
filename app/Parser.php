@@ -91,10 +91,10 @@ final class Parser
         $bh = fopen($inputPath, 'rb');
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
-        $step = \intdiv($fileSize, 10);
+        $step = \intdiv($fileSize, 8);
         $boundaries = [0];
-        foreach ([938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473] as $offset) {
-            fseek($bh, $offset);
+        for ($i = 1; $i < 8; $i++) {
+            fseek($bh, $step * $i);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -109,7 +109,6 @@ final class Parser
             stream_set_chunk_size($pair[1], $outputSize);
             $pid = pcntl_fork();
             if ($pid === 0) {
-                fclose($pair[0]);
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $slugBaseMap, $dateIds, $next, $outputSize,
