@@ -54,8 +54,7 @@ final class Parser
         $visitStats = []; // this will hold all the visit counts in the format [url => [dateIndex => count]]
 
         // open the input file and read line by line
-        $readLimit = 512 * 1024; // 512KB
-        $writeLimit = 512 * 1024; // 512KB
+        $readLimit = 2 * 1024 * 1024; // 2MB
         $inputRes = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($inputRes, 0);
         $raw = '';
@@ -93,17 +92,26 @@ final class Parser
         }
 
         // write the result to the output file
+        $writeLimit = 2 * 1024 * 1024; // 2MB
+        /**
+         * By rough estimation, each URL-data-count JSON block is around 48KB.
+         * Find how many iterations will reach the write limit then flush it.
+         */
+        $blockSize = 48 * 1024;
+        $iterationLimit = (int)($writeLimit / $blockSize);
         $outputRes = \fopen($outputPath, 'wb');
-        \stream_set_write_buffer($outputRes, $writeLimit);
+        \stream_set_write_buffer($outputRes, 0);
+        $buffer = '';
         $firstUrlWrittern = false;
+        $i = 0;
         foreach ($visitStats as $url => $data) {
             if ($firstUrlWrittern) {
-                \fwrite($outputRes, "\n    },\n    \"\\/");
+                $buffer .= "\n    },\n    \"\\/";
             } else {
-                \fwrite($outputRes, "{\n    \"\\/");
+                $buffer .= "{\n    \"\\/";
                 $firstUrlWrittern = true;
             }
-            \fwrite($outputRes, str_replace('/', '\\/', $url));
+            $buffer .= \str_replace('/', '\\/', $url);
 
             $firstCountWritten = false;
             foreach ($data as $i => $count) {
@@ -111,16 +119,25 @@ final class Parser
                     continue;
                 }
                 if ($firstCountWritten) {
-                    \fwrite($outputRes, $indexToDates[$i]);
+                    $buffer .= $indexToDates[$i];
                 } else {
-                    \fwrite($outputRes, "\": {\n");
-                    \fwrite($outputRes, substr($indexToDates[$i], 2));
+                    $buffer .= "\": {\n";
+                    $buffer .= \substr($indexToDates[$i], 2);
                     $firstCountWritten = true;
                 }
-                \fwrite($outputRes, (string)$count);
+                $buffer .= (string)$count;
+            }
+
+            ++$i;
+            if ($i >= $iterationLimit) {
+                \fwrite($outputRes, $buffer);
+                $buffer = '';
+                $i = 0;
             }
         }
-        \fwrite($outputRes, "\n    }\n}");
+
+        $buffer .= "\n    }\n}";
+        \fwrite($outputRes, $buffer);
         \fclose($outputRes);
     }
 }
