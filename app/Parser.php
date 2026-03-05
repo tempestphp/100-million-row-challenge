@@ -2,7 +2,6 @@
 
 namespace App;
 
-use function array_fill;
 use function chr;
 use function fclose;
 use function feof;
@@ -10,25 +9,10 @@ use function fopen;
 use function fread;
 use function fseek;
 use function fwrite;
-use function gc_disable;
-use function pcntl_fork;
-use function str_repeat;
-use function str_replace;
-use function stream_select;
-use function stream_set_chunk_size;
-use function stream_set_read_buffer;
-use function stream_set_write_buffer;
-use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function unpack;
-use const SEEK_CUR;
-use const SEEK_END;
-use const STREAM_IPPROTO_IP;
-use const STREAM_PF_UNIX;
-use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
