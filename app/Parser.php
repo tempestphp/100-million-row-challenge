@@ -20,6 +20,7 @@ use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function stream_socket_pair;
 use function str_repeat;
+use function str_replace;
 use function strlen;
 use function strpos;
 use function strrpos;
@@ -66,7 +67,7 @@ final class Parser
 
         $bh = fopen($inputPath, 'rb');
         stream_set_read_buffer($bh, 0);
-        $raw = fread($bh, 2_097_152);
+        $raw = fread($bh, 181_000);
 
         $paths = [];
         $slugBaseMap = [];
@@ -125,7 +126,7 @@ final class Parser
         }
 
         $counts = array_fill(0, $outputSize, 0);
-        $offsets = array_fill(0, 8, 0);
+        $pending = array_fill(0, 8, '');
 
         $write = [];
         $except = [];
@@ -137,17 +138,18 @@ final class Parser
                 $key = $socketKeys[$socketId];
                 $data = fread($socket, $outputSize);
                 if ($data !== '' && $data !== false) {
-                    $off = $offsets[$key];
-                    foreach (unpack('C*', $data) as $v) {
-                        $counts[$off] += $v;
-                        $off++;
-                    }
-                    $offsets[$key] = $off;
+                    $pending[$key] .= $data;
                 }
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
                     unset($socketKeys[$socketId]);
+                    $j = 0;
+                    foreach (unpack('C*', $pending[$key]) as $v) {
+                        $counts[$j] += $v;
+                        $j++;
+                    }
+                    unset($pending[$key]);
                 }
             }
         }
@@ -163,7 +165,7 @@ final class Parser
 
         $escapedPaths = [];
         for ($p = 0; $p < $slugTotal; $p++) {
-            $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
+            $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
         }
 
         $firstPath = true;
