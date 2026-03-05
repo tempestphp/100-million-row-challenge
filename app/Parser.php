@@ -112,10 +112,9 @@ final class Parser
         for ($i = 0; $i < 255; $i++) {
             $next[chr($i)] = chr($i + 1);
         }
-        //$markPhase('date-maps');
 
         $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 181072);
+        stream_set_read_buffer($handle, 0);
         $raw = fread($handle, self::K1);
         fclose($handle);
 
@@ -140,7 +139,6 @@ final class Parser
             $pos = $nl + 1;
         }
         unset($raw);
-        //$markPhase('slug-scan');
 
         $slugBaseMap = [];
         foreach ($slugIdByKey as $slug => $id) {
@@ -151,18 +149,17 @@ final class Parser
 
         $boundaries = [0];
         $bh = fopen($inputPath, 'rb');
-        foreach ([750_967_482, 1_501_934_965, 2_252_902_448, 3_003_869_930, 3_754_837_413, 4_505_804_896, 5_256_772_378, 6_007_739_861] as $offset) {
+        foreach ([938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473] as $offset) {
             fseek($bh, $offset);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
         fclose($bh);
         $boundaries[] = $inputBytes;
-        //$markPhase('chunk-offsets');
 
         $sockets = [];
 
-        for ($w = 0; $w < 8 - 1; $w++) {
+        for ($w = 0; $w < $workerTotal - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
@@ -208,33 +205,22 @@ final class Parser
             $except = [];
             stream_select($read, $write, $except, 5);
             foreach ($read as $socket) {
-                $key = array_search($socket, $sockets, true);
-                $data = fread($socket, 587_188);
-                if ($data !== '' && $data !== false) {
-                    if (!isset($pending[$key])) {
-                        $pending[$key] = $data;
-                    } else {
-                        $pending[$key] .= $data;
-                    }
+                $key = \array_search($socket, $sockets, true);
+                $data = '';
+                while (!feof($socket)) {
+                    $data .= fread($socket, $outputSize);
                 }
-                if (feof($socket)) {
-                    fclose($socket);
-                    unset($sockets[$key]);
-                    $j = 0;
-                    foreach (unpack('C*', $pending[$key]) as $v) {
-                        $counts[$j] += $v;
-                        $j++;
-                    }
-                    unset($pending[$key]);
+                fclose($socket);
+                unset($sockets[$key]);
+                $j = 0;
+                foreach (unpack('C*', $data) as $v) {
+                    $counts[$j] += $v;
+                    $j++;
                 }
             }
         }
-        //$markPhase('parse-and-reduce');
 
         self::q4($outputPath, $counts, $slugKeyById, $dayKeyById, $dateCount);
-        //$markPhase('json-output');
-
-        //$dumpPhases($planId, $workerTotal, $workerTotal);
     }
 
     private static function q2($handle, $start, $end, $slugBaseMap, $dayIdByKey, $next, &$output)
