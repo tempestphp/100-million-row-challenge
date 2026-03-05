@@ -46,10 +46,9 @@ final class Parser
             $next[chr($i)] = chr($i + 1);
         }
 
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, 2_097_152);
-        fclose($handle);
+        $bh = fopen($inputPath, 'rb');
+        stream_set_read_buffer($bh, 0);
+        $raw = fread($bh, 2_097_152);
 
         $paths = [];
         $slugBaseMap = [];
@@ -72,7 +71,6 @@ final class Parser
 
         $outputSize = $slugTotal * $di;
 
-        $bh = fopen($inputPath, 'rb');
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
         $step = \intdiv($fileSize, 8);
@@ -91,8 +89,7 @@ final class Parser
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
-            $pid = pcntl_fork();
-            if ($pid === 0) {
+            if (pcntl_fork() === 0) {
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $slugBaseMap, $dateIds, $next, $outputSize,
@@ -107,10 +104,10 @@ final class Parser
         $counts = array_fill(0, $outputSize, 0);
         $pending = [];
 
+        $write = [];
+        $except = [];
         while ($sockets !== []) {
             $read = $sockets;
-            $write = [];
-            $except = [];
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
@@ -137,7 +134,7 @@ final class Parser
         $inputPath, $start, $end,
         $slugBaseMap, $dateIds, $next, $outputSize,
     ) {
-        $output = str_repeat(chr(0), $outputSize);
+        $output = str_repeat("\0", $outputSize);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
@@ -239,10 +236,15 @@ final class Parser
             $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
         }
 
+        $escapedPaths = [];
+        for ($p = 0; $p < $slugCount; $p++) {
+            $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
+        }
+
         $firstPath = true;
+        $base = 0;
 
         for ($p = 0; $p < $slugCount; $p++) {
-            $base = $p * $dateCount;
             $firstDate = -1;
             for ($d = 0; $d < $dateCount; $d++) {
                 if ($counts[$base + $d] !== 0) {
@@ -251,11 +253,14 @@ final class Parser
                 }
             }
 
-            if ($firstDate === -1) continue;
+            if ($firstDate === -1) {
+                $base += $dateCount;
+                continue;
+            }
 
             $buf = $firstPath ? "\n    " : ",\n    ";
             $firstPath = false;
-            $buf .= '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . "\": {\n" . $datePrefixes[$firstDate] . $counts[$base + $firstDate];
+            $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$base + $firstDate];
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $count = $counts[$base + $d];
@@ -265,6 +270,7 @@ final class Parser
 
             $buf .= "\n    }";
             fwrite($out, $buf);
+            $base += $dateCount;
         }
 
         fwrite($out, "\n}");
