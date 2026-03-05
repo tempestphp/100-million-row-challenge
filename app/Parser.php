@@ -36,11 +36,6 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const int K0 = 163_840;
-    private const int K1   = 2_097_152;
-    private const int K2  = 25;
-    private const int K3     = 10;
-
     public function parse($inputPath, $outputPath)
     {
         $runStartNs = \hrtime(true);
@@ -60,30 +55,12 @@ final class Parser
             ];
             $phaseStartNs = $now;
         };
-        $dumpPhases = static function (string $planId, int $workerTotal, int $chunkTotal) use (&$phaseMarks, $profileEnabled): void {
-            if (! $profileEnabled) {
-                return;
-            }
-
-            \fwrite(STDERR, "[parser-profile] plan={$planId} workers={$workerTotal} chunks={$chunkTotal}\n");
-            foreach ($phaseMarks as $mark) {
-                \fwrite(
-                    STDERR,
-                    \sprintf(
-                        "  %-24s delta=%8.3f ms total=%8.3f ms\n",
-                        $mark['name'],
-                        $mark['delta_ms'],
-                        $mark['total_ms'],
-                    ),
-                );
-            }
-        };
+        
 
         gc_disable();
 
         $inputBytes   = 7_509_674_827;
-        $workerTotal = self::K3;
-        $planId      = 'default';
+        $workerTotal = 10;
 
         $dayIdByKey   = [];
         $dayKeyById     = [];
@@ -115,7 +92,7 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, self::K1);
+        $raw = fread($handle, 2_097_152);
         fclose($handle);
 
         $slugIdByKey   = [];
@@ -128,7 +105,7 @@ final class Parser
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
 
-            $slug = substr($raw, $pos + self::K2, $nl - $pos - 51);
+            $slug = substr($raw, $pos + 25, $nl - $pos - 51);
 
             if (!isset($slugIdByKey[$slug])) {
                 $slugIdByKey[$slug]    = $slugTotal;
@@ -228,8 +205,8 @@ final class Parser
         fseek($handle, $start);
 
         $remaining = $end - $start;
-        $bufSize   = self::K0;
-        $prefixLen = self::K2;
+        $bufSize   = 163_840;
+        $prefixLen = 25;
 
         while ($remaining > 0) {
             $toRead = $remaining > $bufSize ? $bufSize : $remaining;
