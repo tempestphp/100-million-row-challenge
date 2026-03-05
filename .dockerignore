@@ -1,0 +1,5 @@
+data/
+vendor/
+.git/
+DEVNOTES.md
+BENCHMARKS.md
