@@ -271,19 +271,28 @@ final class Parser
 
         for ($p = 0; $p < 268; $p++) {
             $base = $p * 2191;
-            $dateEntries = [];
-
+            $firstDate = -1;
             for ($d = 0; $d < 2191; $d++) {
-                $count = $counts[$base + $d];
-                if ($count === 0) continue;
-                $dateEntries[] = $datePrefixes[$d] . $count;
+                if ($counts[$base + $d] !== 0) {
+                    $firstDate = $d;
+                    break;
+                }
             }
 
-            if ($dateEntries === []) continue;
+            if ($firstDate === -1) continue;
 
             $buf = $firstPath ? "\n    " : ",\n    ";
             $firstPath = false;
-            $buf .= $escapedPaths[$p] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
+            $buf .= $escapedPaths[$p] . ": {\n";
+            $buf .= $datePrefixes[$firstDate] . $counts[$base + $firstDate];
+
+            for ($d = $firstDate + 1; $d < 2191; $d++) {
+                $count = $counts[$base + $d];
+                if ($count === 0) continue;
+                $buf .= ",\n" . $datePrefixes[$d] . $count;
+            }
+
+            $buf .= "\n    }";
             fwrite($out, $buf);
         }
 
