@@ -34,7 +34,7 @@ final class Parser
     private const int WORKER_COUNT = 8;
     private const int READ_CHUNK = 163_840;
     private const int COUNTS_SIZE = 587_188;
-    private const array PRECOMPUTED_BOUNDARIES = [0, 938709367, 1877418730, 2816128122, 3754837434, 4693546796, 5632256134, 6570965496, 7509674827];
+    private const array PRECOMPUTED_BOUNDARIES = [0, 938709353, 1877418706, 2816128060, 3754837413, 4693546766, 5632256120, 6570965473, 7509674827];
 
     public static function parse($inputPath, $outputPath)
     {
