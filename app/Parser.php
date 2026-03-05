@@ -5,6 +5,9 @@ namespace App;
 use App\Commands\Visit;
 
 use const SEEK_CUR;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
+use const STREAM_IPPROTO_IP;
 
 final class Parser
 {
@@ -25,7 +28,7 @@ final class Parser
         }
 
         // Build date lookup table: 2021–2026
-        $dateChars = [];
+        $dateIds = [];
         $dateLabels = [];
         $dateCount = 0;
 
@@ -40,11 +43,17 @@ final class Parser
                 $ymd = ($y % 10) . '-' . $ms . '-';
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymd . ($d < 10 ? '0' : '') . $d;
-                    $dateChars[$key] = chr($dateCount & 0xFF) . chr($dateCount >> 8);
+                    $dateIds[$key] = $dateCount;
                     $dateLabels[$dateCount] = '202' . $key;
                     $dateCount++;
                 }
             }
+        }
+
+        // Byte-increment lookup: chr(i) → chr(i+1)
+        $next = [];
+        for ($i = 0; $i < 255; $i++) {
+            $next[chr($i)] = chr($i + 1);
         }
 
         // Warm-up scan: discover slugs from first 2 MB (preserves file-order for JSON output)
@@ -53,7 +62,7 @@ final class Parser
         $sample = fread($fh, $probeSize);
         fclose($fh);
 
-        $slugIds = [];
+        $slugBaseMap = [];
         $slugLabels = [];
         $slugCount = 0;
 
@@ -64,8 +73,8 @@ final class Parser
                 $nlPos = strpos($sample, "\n", $p + 55);
                 if ($nlPos === false) break;
                 $slug = substr($sample, $p + 25, $nlPos - $p - 51);
-                if (!isset($slugIds[$slug])) {
-                    $slugIds[$slug] = $slugCount;
+                if (!isset($slugBaseMap[$slug])) {
+                    $slugBaseMap[$slug] = $slugCount * $dateCount;
                     $slugLabels[$slugCount] = $slug;
                     $slugCount++;
                 }
@@ -77,12 +86,14 @@ final class Parser
         // Seed any slugs not seen in the warm-up sample
         foreach (Visit::all() as $visit) {
             $slug = substr($visit->uri, 25);
-            if (!isset($slugIds[$slug])) {
-                $slugIds[$slug] = $slugCount;
+            if (!isset($slugBaseMap[$slug])) {
+                $slugBaseMap[$slug] = $slugCount * $dateCount;
                 $slugLabels[$slugCount] = $slug;
                 $slugCount++;
             }
         }
+
+        $outputSize = $slugCount * $dateCount;
 
         // Compute line-aligned chunk boundaries
         $fh = fopen($inputPath, 'rb');
@@ -100,49 +111,61 @@ final class Parser
         }
         $ends[self::WORKERS - 1] = $fileSize;
 
-        // Fork WORKERS - 1 children via temp files; parent handles last chunk
-        $myPid = getmypid();
-        $childMap = [];
+        // Fork WORKERS - 1 children via Unix sockets; parent handles last chunk
+        $sockets = [];
 
         for ($i = 0; $i < self::WORKERS - 1; $i++) {
-            $tmpFile = sys_get_temp_dir() . '/p100m_' . $myPid . '_' . $i;
+            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            stream_set_chunk_size($pair[0], $outputSize);
+            stream_set_chunk_size($pair[1], $outputSize);
             $pid = pcntl_fork();
             if ($pid === -1) {
                 throw new \Exception('pcntl_fork() failed');
             }
             if ($pid === 0) {
+                fclose($pair[0]);
                 $result = $this->processChunk(
                     $inputPath, $starts[$i], $ends[$i],
-                    $slugIds, $dateChars, $slugCount, $dateCount,
+                    $slugBaseMap, $dateIds, $next, $outputSize,
                 );
-                file_put_contents($tmpFile, pack('v*', ...$result));
+                fwrite($pair[1], $result);
+                fclose($pair[1]);
                 exit(0);
             }
-            $childMap[$pid] = $tmpFile;
+            fclose($pair[1]);
+            $sockets[$i] = $pair[0];
         }
 
         // Parent processes last chunk while children run concurrently
-        $counts = $this->processChunk(
+        $parentOutput = $this->processChunk(
             $inputPath, $starts[self::WORKERS - 1], $ends[self::WORKERS - 1],
-            $slugIds, $dateChars, $slugCount, $dateCount,
+            $slugBaseMap, $dateIds, $next, $outputSize,
         );
+        $counts = array_fill(0, $outputSize, 0);
+        $j = 0;
+        foreach (unpack('C*', $parentOutput) as $v) {
+            $counts[$j++] = $v;
+        }
+        unset($parentOutput);
 
-        // Drain children as they finish
-        $pending = count($childMap);
-        while ($pending > 0) {
-            $pid = pcntl_wait($status, WNOHANG);
-            if ($pid <= 0) {
-                $pid = pcntl_wait($status);
+        // Drain children as they finish via stream_select
+        while ($sockets !== []) {
+            $read = $sockets;
+            $write = [];
+            $except = [];
+            stream_select($read, $write, $except, 5);
+            foreach ($read as $key => $socket) {
+                $data = '';
+                while (!feof($socket)) {
+                    $data .= fread($socket, $outputSize);
+                }
+                fclose($socket);
+                unset($sockets[$key]);
+                $j = 0;
+                foreach (unpack('C*', $data) as $v) {
+                    $counts[$j++] += $v;
+                }
             }
-            if (!isset($childMap[$pid])) continue;
-            $tmpFile = $childMap[$pid];
-            $raw = file_get_contents($tmpFile);
-            unlink($tmpFile);
-            $j = 0;
-            foreach (unpack('v*', $raw) as $v) {
-                $counts[$j++] += $v;
-            }
-            $pending--;
         }
 
         // Write JSON
@@ -192,12 +215,12 @@ final class Parser
         string $inputPath,
         int $start,
         int $end,
-        array $slugIds,
-        array $dateChars,
-        int $slugCount,
-        int $dateCount,
-    ): array {
-        $buckets = array_fill(0, $slugCount, '');
+        array $slugBaseMap,
+        array $dateIds,
+        array $next,
+        int $outputSize,
+    ): string {
+        $output = str_repeat(chr(0), $outputSize);
         $fh = fopen($inputPath, 'rb');
         stream_set_read_buffer($fh, 0);
         fseek($fh, $start);
@@ -229,27 +252,33 @@ final class Parser
             // Hot loop, unrolled 6×
             while ($p < $fence) {
                 $nlPos = strpos($chunk, "\n", $p + 55);
-                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $nlPos + 1;
 
                 $nlPos = strpos($chunk, "\n", $p + 55);
-                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $nlPos + 1;
 
                 $nlPos = strpos($chunk, "\n", $p + 55);
-                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $nlPos + 1;
 
                 $nlPos = strpos($chunk, "\n", $p + 55);
-                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $nlPos + 1;
 
                 $nlPos = strpos($chunk, "\n", $p + 55);
-                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $nlPos + 1;
 
                 $nlPos = strpos($chunk, "\n", $p + 55);
-                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $nlPos + 1;
             }
 
@@ -257,23 +286,14 @@ final class Parser
             while ($p < $lastNl) {
                 $nlPos = strpos($chunk, "\n", $p + 55);
                 if ($nlPos === false || $nlPos > $lastNl) break;
-                $buckets[$slugIds[substr($chunk, $p + 25, $nlPos - $p - 51)]] .= $dateChars[substr($chunk, $nlPos - 22, 7)];
+                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $output[$idx] = $next[$output[$idx]];
                 $p = $nlPos + 1;
             }
         }
 
         fclose($fh);
 
-        // Bulk-count via array_count_values (pure C)
-        $counts = array_fill(0, $slugCount * $dateCount, 0);
-        for ($s = 0; $s < $slugCount; $s++) {
-            if ($buckets[$s] === '') continue;
-            $base = $s * $dateCount;
-            foreach (array_count_values(unpack('v*', $buckets[$s])) as $dateId => $cnt) {
-                $counts[$base + $dateId] += $cnt;
-            }
-        }
-
-        return $counts;
+        return $output;
     }
 }
