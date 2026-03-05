@@ -24,7 +24,6 @@ final class Parser
         }
         $i = 0;
         $dateToIndices = [];
-        $initialDateCounts = [];
         for ($year = 1; $year <= 6; $year++) {
             $y = (string)$year;
             $minMonth = match ($year) {
@@ -45,11 +44,11 @@ final class Parser
                 for ($day = 1; $day <= $maxDay; $day++) {
                     $date = $mm . $dd[$day];
                     $dateToIndices[$date] = $i;
-                    $initialDateCounts[$i] = 0;
                     ++$i;
                 }
             }
         }
+        $initialDateCounts = array_fill(0, $i, 0); // this will be used to initialize the visit counts for each URL
 
         $visitStats = []; // this will hold all the visit counts in the format [url => [dateIndex => count]]
 
