@@ -84,25 +84,20 @@ final class Parser
         $outputSize = $slugCount * $dateCount;
 
         // Compute line-aligned chunk boundaries
+        $boundaries = [0];
         $fh = fopen($inputPath, 'rb');
-        $starts = [0];
         for ($i = 1; $i < self::WORKERS; $i++) {
             fseek($fh, (int) ($i * $fileSize / self::WORKERS));
             fgets($fh);
-            $starts[$i] = ftell($fh);
+            $boundaries[] = ftell($fh);
         }
         fclose($fh);
+        $boundaries[] = $fileSize;
 
-        $ends = [];
-        for ($i = 0; $i < self::WORKERS - 1; $i++) {
-            $ends[$i] = $starts[$i + 1];
-        }
-        $ends[self::WORKERS - 1] = $fileSize;
-
-        // Fork WORKERS - 1 children via Unix sockets; parent handles last chunk
+        // Fork ALL workers as children; parent only merges
         $sockets = [];
 
-        for ($i = 0; $i < self::WORKERS - 1; $i++) {
+        for ($i = 0; $i < self::WORKERS; $i++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
@@ -113,7 +108,7 @@ final class Parser
             if ($pid === 0) {
                 fclose($pair[0]);
                 $result = self::processChunk(
-                    $inputPath, $starts[$i], $ends[$i],
+                    $inputPath, $boundaries[$i], $boundaries[$i + 1],
                     $slugBaseMap, $dateIds, $next, $outputSize,
                 );
                 fwrite($pair[1], $result);
@@ -124,19 +119,9 @@ final class Parser
             $sockets[$i] = $pair[0];
         }
 
-        // Parent processes last chunk while children run concurrently
-        $parentOutput = self::processChunk(
-            $inputPath, $starts[self::WORKERS - 1], $ends[self::WORKERS - 1],
-            $slugBaseMap, $dateIds, $next, $outputSize,
-        );
-        $counts = array_fill(0, $outputSize, 0);
-        $j = 0;
-        foreach (unpack('C*', $parentOutput) as $v) {
-            $counts[$j++] = $v;
-        }
-        unset($parentOutput);
-
         // Drain children as they finish via stream_select
+        $counts = array_fill(0, $outputSize, 0);
+
         while ($sockets !== []) {
             $read = $sockets;
             $write = [];
@@ -175,24 +160,24 @@ final class Parser
 
         for ($s = 0; $s < $slugCount; $s++) {
             $base = $s * $dateCount;
-            $body = '';
-            $sep = '';
+            $dateEntries = [];
 
             for ($d = 0; $d < $dateCount; $d++) {
                 $n = $counts[$base + $d];
                 if ($n === 0) {
                     continue;
                 }
-                $body .= $sep . $datePrefixes[$d] . $n;
-                $sep = ",\n";
+                $dateEntries[] = $datePrefixes[$d] . $n;
             }
 
-            if ($body === '') {
+            if ($dateEntries === []) {
                 continue;
             }
 
-            fwrite($out, ($firstSlug ? '' : ',') . "\n    " . $escapedPaths[$s] . ": {\n" . $body . "\n    }");
+            $buf = $firstSlug ? "\n    " : ",\n    ";
             $firstSlug = false;
+            $buf .= $escapedPaths[$s] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
+            fwrite($out, $buf);
         }
 
         fwrite($out, "\n}");
@@ -213,9 +198,10 @@ final class Parser
         stream_set_read_buffer($fh, 0);
         fseek($fh, $start);
         $remaining = $end - $start;
+        $bufSize = self::BUF_SIZE;
 
         while ($remaining > 0) {
-            $chunk = fread($fh, min(self::BUF_SIZE, $remaining));
+            $chunk = fread($fh, $remaining > $bufSize ? $bufSize : $remaining);
             $chunkLen = strlen($chunk);
             if ($chunkLen === 0) {
                 break;
