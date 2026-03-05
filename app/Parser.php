@@ -104,6 +104,8 @@ final class Parser
             $sockets[$w] = $pair[0];
         }
 
+        unset($next, $slugBaseMap, $dateIds, $boundaries);
+
         $counts = array_fill(0, $outputSize, 0);
         $offsets = array_fill(0, 8, 0);
 
@@ -256,11 +258,33 @@ final class Parser
             $firstPath = false;
             $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
 
-            for ($d = $firstDate + 1; $d < $dateCount; $d++) {
-                $idx++;
+            $endIdx = $base + $dateCount;
+            $d = $firstDate + 1;
+            $idx++;
+            $fence2 = $endIdx - 3;
+
+            while ($idx < $fence2) {
                 $count = $counts[$idx];
-                if ($count === 0) continue;
-                $buf .= ",\n" . $datePrefixes[$d] . $count;
+                if ($count !== 0) $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $d++; $idx++;
+
+                $count = $counts[$idx];
+                if ($count !== 0) $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $d++; $idx++;
+
+                $count = $counts[$idx];
+                if ($count !== 0) $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $d++; $idx++;
+
+                $count = $counts[$idx];
+                if ($count !== 0) $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $d++; $idx++;
+            }
+
+            while ($idx < $endIdx) {
+                $count = $counts[$idx];
+                if ($count !== 0) $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $d++; $idx++;
             }
 
             $buf .= "\n    }";
