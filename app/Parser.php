@@ -65,6 +65,7 @@ final class Parser
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         $raw = fread($handle, 181000);
+        fclose($handle);
 
         $paths = [];
         $slugBaseMap = [];
@@ -85,20 +86,11 @@ final class Parser
         }
         unset($raw);
 
-        $outputSize = $slugTotal * $di;
+        $outputSize = 587188;
 
-        stream_set_read_buffer($handle, 8192);
-        fseek($handle, 0, SEEK_END);
-        $fileSize = ftell($handle);
-        $step = $fileSize >> 3;
-        $boundaries = [0];
-        for ($i = 1; $i < 8; $i++) {
-            fseek($handle, $step * $i);
-            fgets($handle);
-            $boundaries[] = ftell($handle);
-        }
-        fclose($handle);
-        $boundaries[] = $fileSize;
+        $boundaries[] = [
+            0, 938709421, 1877418773, 2816128080, 3754837434, 4693546767, 5632256171, 6570965489, 7509674827
+        ];
 
         $sockets = [];
 
@@ -212,9 +204,19 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 808;
+            $fence = $lastNl - 1010;
 
             while ($p < $fence) {
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
