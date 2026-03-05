@@ -5,9 +5,7 @@ namespace App\Commands;
 use Tempest\Cache\Cache;
 use Tempest\Console\ConsoleCommand;
 use Tempest\Console\HasConsole;
-use Tempest\DateTime\DateTime;
 use Tempest\DateTime\Duration;
-use Tempest\DateTime\FormatPattern;
 use Tempest\HttpClient\HttpClient;
 use Throwable;
 use function Tempest\env;
@@ -278,7 +276,7 @@ final class BenchmarkRunCommand
                 return null;
             }
 
-            $commitTimestamp = (int) $commitOutput[0];
+            $commitTimestamp = (int)$commitOutput[0];
 
             // Get the verified label creation date
             // Fetch all events with pagination to find the most recent 'verified' label
@@ -352,7 +350,8 @@ final class BenchmarkRunCommand
         );
 
         $command = sprintf(
-            "hyperfine --warmup 0 --runs 1 --show-output --export-json %s 'cd %s && %s'",
+            "hyperfine --warmup 0 --runs 1 --show-output --prepare=%s --export-json %s 'cd %s && %s'",
+            escapeshellarg('rm -f ' . $actualPath . ' 2> /dev/null'),
             escapeshellarg($resultFile),
             escapeshellarg($benchmarkDir),
             $parseCommand,
@@ -366,7 +365,7 @@ final class BenchmarkRunCommand
             $cleanedOutput = implode(PHP_EOL, preg_replace(
                 '/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -\/]*[@-~])/',
                 '',
-                $output
+                $output,
             ));
 
             $this->prError($prNumber, "Failed to run benchmark");
@@ -376,7 +375,8 @@ final class BenchmarkRunCommand
             ```
             $cleanedOutput
             ```
-            MD);
+            MD,
+            );
 
             return null;
         }
@@ -394,7 +394,8 @@ final class BenchmarkRunCommand
         if ($meanTime < 20) {
             // Second run for fast PRs
             $command = sprintf(
-                "hyperfine --warmup 2 --runs 5 --export-json %s 'cd %s && %s'",
+                "hyperfine --warmup 2 --runs 5 --prepare=%s --export-json %s 'cd %s && %s'",
+                escapeshellarg('rm -f ' . $actualPath . ' 2> /dev/null'),
                 escapeshellarg($resultFile),
                 escapeshellarg($benchmarkDir),
                 $parseCommand,
@@ -418,10 +419,16 @@ final class BenchmarkRunCommand
         // Verify results
         $expectedPath = __DIR__ . '/../../data/real-data-expected.json';
 
-        $actual = file_get_contents($actualPath);
-        $expected = file_get_contents($expectedPath);
+        if (!is_file($actualPath)) {
+            $this->prError($prNumber, "No file actual found");
+            $this->githubComment($prNumber, "Benchmarking failed: no parsed results were stored");
+            return null;
+        }
 
-        if ($actual !== $expected) {
+        $actual = @file_get_contents($actualPath);
+        $expected = @file_get_contents($expectedPath);
+
+        if (! $actual || ! $expected || $actual !== $expected) {
             $this->prError($prNumber, "Validation failed!");
             $this->githubComment($prNumber, "Benchmarking failed: Parsed result did not match expected result");
             return null;

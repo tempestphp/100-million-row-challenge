@@ -154,9 +154,9 @@ bcmath, bz2, calendar, Core, ctype, curl, date, dba, dom, exif, fileinfo, filter
 
 Each submission will be manually verified before its benchmark is run on the benchmark server. We'll also only ever run one single submission at a time to prevent any bias in the results. Additionally, we'll use a consistent, dedicated server to run benchmarks on to ensure that the results are comparable.
 
-If needed, multiple runs will be performed for the top submissions, and their average will be compared. When the challenge is done, the top-5 results will be run multiple times, and we'll take their average result to determine the final score. 
-
 Finally, everyone is asked to respect other participant's entries. You can look at others for inspiration (simply because there's no way we can prevent that from happening), but straight-up copying other entries is prohibited. We'll try our best to watch over this. If you run into any issues, feel free to tag @brendt or @xHeaven in the PR comments.
+
+**Update as of March 5th:** since many of the top submissions have slight variations depending on when they are running their benchmark, we've determined that any improvement of `0.01` or more will be counted, anything less won't. Furthermore, if multiple entries end up having results too close to each other, we'll use their submission time as a way to determine final winners. 
 
 #### Why not one billion?
 
