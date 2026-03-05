@@ -110,13 +110,13 @@ final class Parser
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
             if (pcntl_fork() === 0) {
-                fclose($pair[0]);
+               // fclose($pair[0]);
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $slugBaseMap, $dateIds, $next, $outputSize,
                 );
                 fwrite($pair[1], $output);
-                fclose($pair[1]);
+                //fclose($pair[1]);
                 exit(0);
             }
             fclose($pair[1]);
@@ -216,19 +216,9 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1010;
+            $fence = $lastNl - 808;
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
