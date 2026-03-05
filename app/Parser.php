@@ -18,7 +18,7 @@ final class Parser
 
         // Open input file for reading
         $inputFile = fopen($inputPath, 'r');
-        stream_set_read_buffer($inputFile, $bufferSize);
+        stream_set_read_buffer($inputFile, 0); // Disable buffering for real-time processing
 
         $buffer = '';
 
