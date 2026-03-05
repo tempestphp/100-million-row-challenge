@@ -103,9 +103,6 @@ final class Parser
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
             $pid = pcntl_fork();
-            if ($pid === -1) {
-                throw new \Exception('pcntl_fork() failed');
-            }
             if ($pid === 0) {
                 fclose($pair[0]);
                 $result = str_repeat(chr(0), $outputSize);
@@ -169,13 +166,13 @@ final class Parser
         }
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
+        stream_set_write_buffer($out, 4_194_304);
 
         fwrite($out, '{');
         $firstSlug = true;
 
+        $base = 0;
         for ($s = 0; $s < $slugCount; $s++) {
-            $base = $s * $dateCount;
             $dateEntries = [];
 
             for ($d = 0; $d < $dateCount; $d++) {
@@ -187,6 +184,7 @@ final class Parser
             }
 
             if ($dateEntries === []) {
+                $base += $dateCount;
                 continue;
             }
 
@@ -194,6 +192,7 @@ final class Parser
             $firstSlug = false;
             $buf .= $escapedPaths[$s] . ": {\n" . implode(",\n", $dateEntries) . "\n    }";
             fwrite($out, $buf);
+            $base += $dateCount;
         }
 
         fwrite($out, "\n}");
