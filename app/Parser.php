@@ -9,9 +9,9 @@ use const STREAM_IPPROTO_IP;
 
 final class Parser
 {
-    private const WORKERS = 14;
-    private const BUF_SIZE = 8_388_608;
-    private const PROBE_SIZE = 1_048_576;
+    private const WORKERS = 8;
+    private const BUF_SIZE = 163_840;
+    private const PROBE_SIZE = 181_000;
 
     public static function parse($inputPath, $outputPath): void
     {
@@ -58,6 +58,7 @@ final class Parser
         // Warm-up scan: discover slugs from first probe
         $probeSize = min(self::PROBE_SIZE, $fileSize);
         $fh = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fh, 0);
         $sample = fread($fh, $probeSize);
         fclose($fh);
 
@@ -85,15 +86,14 @@ final class Parser
         $outputSize = $slugCount * $dateCount;
 
         // Compute line-aligned chunk boundaries (all children, parent only merges)
-        $totalChunks = self::WORKERS;
         $boundaries = [0];
-        $fh2 = fopen($inputPath, 'rb');
-        for ($i = 1; $i < $totalChunks; $i++) {
-            fseek($fh2, (int) ($i * $fileSize / $totalChunks));
-            fgets($fh2);
-            $boundaries[] = ftell($fh2);
+        $fh = fopen($inputPath, 'rb');
+        for ($i = 1; $i < self::WORKERS; $i++) {
+            fseek($fh, (int) ($i * $fileSize / self::WORKERS));
+            fgets($fh);
+            $boundaries[] = ftell($fh);
         }
-        fclose($fh2);
+        fclose($fh);
         $boundaries[] = $fileSize;
 
         // Fork ALL workers as children; parent only merges
@@ -153,7 +153,7 @@ final class Parser
         }
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 4_194_304);
+        stream_set_write_buffer($out, 1_048_576);
 
         fwrite($out, '{');
         $firstSlug = true;
@@ -221,7 +221,7 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1000;
+            $fence = $lastNl - 1010;
 
             // Hot loop, unrolled 10×
             while ($p < $fence) {
