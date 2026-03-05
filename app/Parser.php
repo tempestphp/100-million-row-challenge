@@ -9,9 +9,9 @@ use const STREAM_IPPROTO_IP;
 
 final class Parser
 {
-    private const WORKERS = 8;
-    private const BUF_SIZE = 163_840;
-    private const PROBE_SIZE = 2_097_152;
+    private const WORKERS = 14;
+    private const BUF_SIZE = 8_388_608;
+    private const PROBE_SIZE = 1_048_576;
 
     public static function parse($inputPath, $outputPath): void
     {
@@ -25,12 +25,13 @@ final class Parser
             return;
         }
 
-        // Build date lookup table: 2021–2026
+        // Build date lookup table: 2021–2026 (single-digit year key)
         $dateIds = [];
         $dateLabels = [];
         $dateCount = 0;
 
         for ($y = 21; $y <= 26; $y++) {
+            $yd = $y % 10;
             for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
                     2 => ($y === 24) ? 29 : 28,
@@ -38,11 +39,11 @@ final class Parser
                     default => 31,
                 };
                 $ms = ($m < 10 ? '0' : '') . $m;
-                $ymd = $y . '-' . $ms . '-';
+                $ymd = $yd . '-' . $ms . '-';
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymd . ($d < 10 ? '0' : '') . $d;
                     $dateIds[$key] = $dateCount;
-                    $dateLabels[$dateCount] = '20' . $key;
+                    $dateLabels[$dateCount] = '202' . $key;
                     $dateCount++;
                 }
             }
@@ -54,7 +55,7 @@ final class Parser
             $next[chr($i)] = chr($i + 1);
         }
 
-        // Warm-up scan: discover slugs from first 2 MB (preserves file-order for JSON output)
+        // Warm-up scan: discover slugs from first probe
         $probeSize = min(self::PROBE_SIZE, $fileSize);
         $fh = fopen($inputPath, 'rb');
         $sample = fread($fh, $probeSize);
@@ -83,16 +84,16 @@ final class Parser
 
         $outputSize = $slugCount * $dateCount;
 
-        // Compute line-aligned chunk boundaries (9 chunks: 8 children + 1 parent)
-        $totalChunks = self::WORKERS + 1;
+        // Compute line-aligned chunk boundaries (all children, parent only merges)
+        $totalChunks = self::WORKERS;
         $boundaries = [0];
-        $fh = fopen($inputPath, 'rb');
+        $fh2 = fopen($inputPath, 'rb');
         for ($i = 1; $i < $totalChunks; $i++) {
-            fseek($fh, (int) ($i * $fileSize / $totalChunks));
-            fgets($fh);
-            $boundaries[] = ftell($fh);
+            fseek($fh2, (int) ($i * $fileSize / $totalChunks));
+            fgets($fh2);
+            $boundaries[] = ftell($fh2);
         }
-        fclose($fh);
+        fclose($fh2);
         $boundaries[] = $fileSize;
 
         // Fork ALL workers as children; parent only merges
@@ -118,22 +119,8 @@ final class Parser
             $sockets[$i] = $pair[0];
         }
 
-        // Parent processes the last chunk
-        $parentResult = str_repeat(chr(0), $outputSize);
-        self::processChunk(
-            $inputPath, $boundaries[self::WORKERS], $boundaries[$totalChunks],
-            $slugBaseMap, $dateIds, $next, $parentResult,
-        );
-
-        // Initialize counts from parent result
+        // Parent: merge all children results
         $counts = array_fill(0, $outputSize, 0);
-        $j = 0;
-        foreach (unpack('C*', $parentResult) as $v) {
-            $counts[$j++] += $v;
-        }
-        unset($parentResult);
-
-        // Drain children as they finish via stream_select
 
         while ($sockets !== []) {
             $read = $sockets;
@@ -227,74 +214,73 @@ final class Parser
                 break;
             }
 
-            // fseek tail trick: rewind past partial line so next read starts clean
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
                 fseek($fh, -$tail, SEEK_CUR);
                 $remaining += $tail;
             }
 
-            $p = 25; // slug start (past 25-char URL prefix)
-            $fence = $lastNl - 1010; // 10 × 101-byte max-line guard
+            $p = 25;
+            $fence = $lastNl - 1000;
 
             // Hot loop, unrolled 10×
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
             }
 
-            // Tail: handle remaining lines near end of buffer
+            // Tail: remaining lines near end of buffer
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
             }
