@@ -42,19 +42,15 @@ final class Parser
         $dates = [];
         $di = 0;
         for ($y = 21; $y <= 26; $y++) {
-            $mStart = $y === 21 ? 2 : 1;
-            $mEnd = $y === 26 ? 2 : 12;
-            for ($m = $mStart; $m <= $mEnd; $m++) {
+            for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
                     2 => $y === 24 ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
-                $ymStr = $y . '-' . $mStr . '-';
-                $dStart = ($y === 21 && $m === 2) ? 28 : 1;
-                $dEnd = ($y === 26 && $m === 2) ? 27 : $maxD;
-                for ($d = $dStart; $d <= $dEnd; $d++) {
+                $ymStr = "{$y}-{$mStr}-";
+                for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $di;
                     $dates[$di] = '20' . $key;
@@ -78,7 +74,6 @@ final class Parser
         $pos = 0;
         $lastNl = strrpos($raw, "\n") ?: 0;
 
-        $noNew = 0;
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
@@ -87,9 +82,6 @@ final class Parser
                 $paths[$slugTotal] = $slug;
                 $slugBaseMap[$slug] = $slugTotal * $di;
                 $slugTotal++;
-                $noNew = 0;
-            } else if (++$noNew > 5000) {
-                break;
             }
             $pos = $nl + 1;
         }
@@ -108,6 +100,7 @@ final class Parser
             $boundaries[] = ftell($bh);
         }
         $boundaries[] = $fileSize;
+        fclose($bh);
 
         $sockets = [];
         $socketKeys = [];
