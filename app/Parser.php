@@ -13,7 +13,7 @@ final class Parser
     private const BUF_SIZE = 163_840;
     private const PROBE_SIZE = 2_097_152;
 
-    public function parse(string $inputPath, string $outputPath): void
+    public static function parse($inputPath, $outputPath): void
     {
         gc_disable();
         ini_set('memory_limit', '-1');
