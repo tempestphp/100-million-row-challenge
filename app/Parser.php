@@ -68,9 +68,9 @@ final class Parser
             }
         }
 
-        $nextByteByByte = [];
+        $next = [];
         for ($value = 0; $value < 255; $value++) {
-            $nextByteByByte[chr($value)] = chr($value + 1);
+            $next[chr($value)] = chr($value + 1);
         }
 
         $boundaryHandle = fopen($inputPath, 'rb');
@@ -133,7 +133,7 @@ final class Parser
                     $boundaries[$worker + 1],
                     $slugBaseOffsetBySlug,
                     $dateIdentifierByDate,
-                    $nextByteByByte,
+                    $next,
                     $outputSize,
                 );
                 fwrite($pair[1], $output);
@@ -189,7 +189,7 @@ final class Parser
         int $end,
         array $slugBaseOffsetBySlug,
         array $dateIdentifierByDate,
-        array $nextByteByByte,
+        array $next,
         int $outputSize,
     ): string {
         $output = str_repeat("\0", $outputSize);
@@ -223,7 +223,7 @@ final class Parser
                 for ($i = 0; $i < 10; $i++) {
                     $separatorPosition = strpos($chunk, ',', $position);
                     $index = $slugBaseOffsetBySlug[substr($chunk, $position, $separatorPosition - $position)] + $dateIdentifierByDate[substr($chunk, $separatorPosition + 3, 8)];
-                    $output[$index] = $nextByteByByte[$output[$index]];
+                    $output[$index] = $next[$output[$index]];
                     $position = $separatorPosition + 52;
                 }
             }
@@ -235,7 +235,7 @@ final class Parser
                 }
 
                 $index = $slugBaseOffsetBySlug[substr($chunk, $position, $separatorPosition - $position)] + $dateIdentifierByDate[substr($chunk, $separatorPosition + 3, 8)];
-                $output[$index] = $nextByteByByte[$output[$index]];
+                $output[$index] = $next[$output[$index]];
                 $position = $separatorPosition + 52;
             }
         }
