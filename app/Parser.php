@@ -77,8 +77,8 @@ final class Parser
 
         stream_set_read_buffer($bh, 8192);
         fseek($bh, 0, SEEK_END);
-        $fileSize = 7509674827;
-        $step = 938709353;
+        $fileSize = ftell($bh);
+        $step = $fileSize >> 3;
         $boundaries = [0];
         for ($i = 1; $i < 8; $i++) {
             fseek($bh, $step * $i);
