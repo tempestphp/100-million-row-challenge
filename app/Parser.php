@@ -66,8 +66,6 @@ final class Parser
                 $slugBaseMap[$slug] = $slugTotal * $di;
                 $slugTotal++;
                 $noNew = 0;
-            } else if (++$noNew > 5000) {
-                break;
             }
             $pos = $nl + 1;
         }
@@ -160,19 +158,9 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1010;
+            $fence = $lastNl - 808;
 
             while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
                 $sep = strpos($chunk, ',', $p);
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
