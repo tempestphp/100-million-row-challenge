@@ -114,7 +114,6 @@ final class Parser
                     $slugBaseMap, $dateIds, $next, $outputSize,
                 );
                 fwrite($pair[1], $output);
-                fclose($pair[1]);
                 exit(0);
             }
             fclose($pair[1]);
