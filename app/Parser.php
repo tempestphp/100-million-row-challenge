@@ -636,7 +636,7 @@ final class Parser
         $file = \fopen($inputPath, 'r');
         \stream_set_read_buffer($file, 0);
         $filesize = \filesize($inputPath);
-        $length = \ceil($filesize/Parser::$CORES*1.022);
+        $length = \ceil($filesize/Parser::$CORES*1.095);
         for($i=0; $i!=Parser::$CORES; $i++) {
             \fseek($file, $length*$i+$length);
             \fgets($file);
