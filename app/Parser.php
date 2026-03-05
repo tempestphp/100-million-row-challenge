@@ -93,8 +93,8 @@ final class Parser
         $fileSize = ftell($bh);
         $step = \intdiv($fileSize, 10);
         $boundaries = [0];
-        for ($i = 1; $i < 10; $i++) {
-            fseek($bh, $step * $i);
+        foreach ([938_709_353, 1_877_418_706, 2_816_128_060, 3_754_837_413, 4_693_546_766, 5_632_256_120, 6_570_965_473] as $offset) {
+            fseek($bh, $offset);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -103,7 +103,7 @@ final class Parser
 
         $sockets = [];
 
-        for ($w = 0; $w < 10; $w++) {
+        for ($w = 0; $w < 8; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
@@ -273,8 +273,7 @@ final class Parser
 
             $buf = $firstPath ? "\n    " : ",\n    ";
             $firstPath = false;
-            $buf .= '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . "\": {\n";
-            $buf .= $datePrefixes[$firstDate] . $counts[$base + $firstDate];
+            $buf .= '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . "\": {\n" . $datePrefixes[$firstDate] . $counts[$base + $firstDate];
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $count = $counts[$base + $d];
