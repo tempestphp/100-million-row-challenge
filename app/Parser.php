@@ -146,7 +146,45 @@ final class Parser
             }
         }
 
-        self::writeJson($outputPath, $counts, $paths, $dates, $di, $slugTotal);
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 1_048_576);
+        fwrite($out, '{');
+
+        $datePrefixes = [];
+        for ($d = 0; $d < $di; $d++) {
+            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+        }
+
+        $firstPath = true;
+
+        for ($p = 0; $p < $slugTotal; $p++) {
+            $base = $p * $di;
+            $firstDate = -1;
+            for ($d = 0; $d < $di; $d++) {
+                if ($counts[$base + $d] !== 0) {
+                    $firstDate = $d;
+                    break;
+                }
+            }
+
+            if ($firstDate === -1) continue;
+
+            $buf = $firstPath ? "\n    " : ",\n    ";
+            $firstPath = false;
+            $buf .= '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . "\": {\n" . $datePrefixes[$firstDate] . $counts[$base + $firstDate];
+
+            for ($d = $firstDate + 1; $d < $di; $d++) {
+                $count = $counts[$base + $d];
+                if ($count === 0) continue;
+                $buf .= ",\n" . $datePrefixes[$d] . $count;
+            }
+
+            $buf .= "\n    }";
+            fwrite($out, $buf);
+        }
+
+        fwrite($out, "\n}");
+        fclose($out);
     }
 
     private static function parseRange(
@@ -175,7 +213,7 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1010;
+            $fence = $lastNl - 808;
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
@@ -218,15 +256,6 @@ final class Parser
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
@@ -241,49 +270,5 @@ final class Parser
         fclose($handle);
 
         return $output;
-    }
-
-    private static function writeJson(
-        $outputPath, $counts, $paths, $dates, $dateCount, $slugCount,
-    ) {
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
-        fwrite($out, '{');
-
-        $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
-        }
-
-        $firstPath = true;
-
-        for ($p = 0; $p < $slugCount; $p++) {
-            $base = $p * $dateCount;
-            $firstDate = -1;
-            for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$base + $d] !== 0) {
-                    $firstDate = $d;
-                    break;
-                }
-            }
-
-            if ($firstDate === -1) continue;
-
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . "\": {\n" . $datePrefixes[$firstDate] . $counts[$base + $firstDate];
-
-            for ($d = $firstDate + 1; $d < $dateCount; $d++) {
-                $count = $counts[$base + $d];
-                if ($count === 0) continue;
-                $buf .= ",\n" . $datePrefixes[$d] . $count;
-            }
-
-            $buf .= "\n    }";
-            fwrite($out, $buf);
-        }
-
-        fwrite($out, "\n}");
-        fclose($out);
     }
 }
