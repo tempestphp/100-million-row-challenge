@@ -22,10 +22,9 @@ final class Parser
 
         $buffer = '';
 
-        // Initialize results array to store URL path -> date -> count mappings
-        // Use an associative array to maintain insertion order
+        // Initialize results array to store key -> count mappings
         $results = [];
-        $urlOrder = []; // Track order of first appearance
+        $visits = [];
 
         $this->logTime('Initialized');
 
@@ -37,27 +36,35 @@ final class Parser
             $buffer .= $chunk;
           
             // Process complete lines from buffer
-            $this->processBuffer($buffer, $results, $urlOrder);
+            $this->processBuffer($buffer, $results);
         }
         
         $this->logTime('Parsed');
 
         fclose($inputFile);
         
+        // Convert results to nested array format for output
+        foreach ($results as $key => $count) {
+            $split = strpos($key, '|');
+            $path = substr($key, 0, $split);
+            $date = substr($key, $split + 1);
+            $visits[$path][$date] = $count;
+        }
+
         // Sort dates within each URL path for consistent output
-        foreach ($results as &$urlPath) {
+        foreach ($visits as &$urlPath) {
             ksort($urlPath);
         }
 
         unset($urlPath);
 
         // Write to output file
-        file_put_contents($outputPath, json_encode($results, JSON_PRETTY_PRINT));
+        file_put_contents($outputPath, json_encode($visits, JSON_PRETTY_PRINT));
         
         $this->logTime('Written');
     }
 
-    private function processBuffer(string &$buffer, array &$results, array &$urlOrder): void
+    private function processBuffer(string &$buffer, array &$results): void
     {
         $offset = 0;
         $bufferLength = strlen($buffer);
@@ -88,18 +95,10 @@ final class Parser
             $urlPath = substr($buffer, $offset + 19, $commaPos - $offset - 19);
             $date = substr($buffer, $commaPos + 1, $newlinePos - $commaPos - 16);
             
-            // Process the data
-            // Track order of first appearance
-            if (!isset($results[$urlPath])) {
-                $results[$urlPath] = [];
-                $urlOrder[] = $urlPath;
-            }
-            
-            if (!isset($results[$urlPath][$date])) {
-                $results[$urlPath][$date] = 0;
-            }
-            
-            $results[$urlPath][$date]++;
+            $key = $urlPath . '|' . $date; // Combine URL path and date for unique key
+
+            $results[$key] ??= 0;
+            ++$results[$key];
 
             $offset = $newlinePos + 1;
         }
