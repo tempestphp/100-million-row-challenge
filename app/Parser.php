@@ -42,19 +42,19 @@ final class Parser
         $dates = [];
         $di = 0;
         for ($y = 21; $y <= 26; $y++) {
-            for ($m = 1; $m <= 12; $m++) {
-                if ($y === 21 && $m < 2) continue;
-                if ($y === 26 && $m > 2) continue;
+            $mStart = $y === 21 ? 2 : 1;
+            $mEnd = $y === 26 ? 2 : 12;
+            for ($m = $mStart; $m <= $mEnd; $m++) {
                 $maxD = match ($m) {
                     2 => $y === 24 ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
-                $ymStr = "{$y}-{$mStr}-";
-                for ($d = 1; $d <= $maxD; $d++) {
-                    if ($y === 21 && $m === 2 && $d < 28) continue;
-                    if ($y === 26 && $m === 2 && $d > 27) continue;
+                $ymStr = $y . '-' . $mStr . '-';
+                $dStart = ($y === 21 && $m === 2) ? 28 : 1;
+                $dEnd = ($y === 26 && $m === 2) ? 27 : $maxD;
+                for ($d = $dStart; $d <= $dEnd; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $di;
                     $dates[$di] = '20' . $key;
@@ -110,6 +110,7 @@ final class Parser
         $boundaries[] = $fileSize;
 
         $sockets = [];
+        $socketKeys = [];
 
         for ($w = 0; $w < 8; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -127,6 +128,7 @@ final class Parser
             }
             fclose($pair[1]);
             $sockets[$w] = $pair[0];
+            $socketKeys[(int)$pair[0]] = $w;
         }
 
         $counts = array_fill(0, $outputSize, 0);
@@ -137,7 +139,9 @@ final class Parser
         while ($sockets !== []) {
             $read = $sockets;
             stream_select($read, $write, $except, 5);
-            foreach ($read as $key => $socket) {
+            foreach ($read as $socket) {
+                $socketId = (int)$socket;
+                $key = $socketKeys[$socketId];
                 $data = fread($socket, $outputSize);
                 if ($data !== '' && $data !== false) {
                     $off = $offsets[$key];
@@ -150,6 +154,7 @@ final class Parser
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
+                    unset($socketKeys[$socketId]);
                 }
             }
         }
