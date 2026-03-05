@@ -40,11 +40,11 @@ final class Parser
                     default => 31,
                 };
                 $ms = ($m < 10 ? '0' : '') . $m;
-                $ymd = ($y % 10) . '-' . $ms . '-';
+                $ymd = $y . '-' . $ms . '-';
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymd . ($d < 10 ? '0' : '') . $d;
                     $dateIds[$key] = $dateCount;
-                    $dateLabels[$dateCount] = '202' . $key;
+                    $dateLabels[$dateCount] = '20' . $key;
                     $dateCount++;
                 }
             }
@@ -68,17 +68,17 @@ final class Parser
 
         $lastNlW = strrpos($sample, "\n");
         if ($lastNlW !== false) {
-            $p = 0;
+            $p = 25;
             while ($p < $lastNlW) {
-                $nlPos = strpos($sample, "\n", $p + 55);
-                if ($nlPos === false) break;
-                $slug = substr($sample, $p + 25, $nlPos - $p - 51);
+                $sep = strpos($sample, ',', $p);
+                if ($sep === false) break;
+                $slug = substr($sample, $p, $sep - $p);
                 if (!isset($slugBaseMap[$slug])) {
                     $slugBaseMap[$slug] = $slugCount * $dateCount;
                     $slugLabels[$slugCount] = $slug;
                     $slugCount++;
                 }
-                $p = $nlPos + 1;
+                $p = $sep + 52;
             }
         }
         unset($sample);
@@ -246,49 +246,49 @@ final class Parser
                 $remaining += $tail;
             }
 
-            $p = 0; // line starts (each chunk begins at a line boundary)
+            $p = 25; // slug start (past 25-char URL prefix)
             $fence = $lastNl - 720; // 6 × ~120-byte max-line guard
 
             // Hot loop, unrolled 6×
             while ($p < $fence) {
-                $nlPos = strpos($chunk, "\n", $p + 55);
-                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $nlPos + 1;
+                $p = $sep + 52;
 
-                $nlPos = strpos($chunk, "\n", $p + 55);
-                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $nlPos + 1;
+                $p = $sep + 52;
 
-                $nlPos = strpos($chunk, "\n", $p + 55);
-                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $nlPos + 1;
+                $p = $sep + 52;
 
-                $nlPos = strpos($chunk, "\n", $p + 55);
-                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $nlPos + 1;
+                $p = $sep + 52;
 
-                $nlPos = strpos($chunk, "\n", $p + 55);
-                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $nlPos + 1;
+                $p = $sep + 52;
 
-                $nlPos = strpos($chunk, "\n", $p + 55);
-                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $nlPos + 1;
+                $p = $sep + 52;
             }
 
             // Tail: handle remaining lines near end of buffer
             while ($p < $lastNl) {
-                $nlPos = strpos($chunk, "\n", $p + 55);
-                if ($nlPos === false || $nlPos > $lastNl) break;
-                $idx = $slugBaseMap[substr($chunk, $p + 25, $nlPos - $p - 51)] + $dateIds[substr($chunk, $nlPos - 22, 7)];
+                $sep = strpos($chunk, ',', $p);
+                if ($sep === false || $sep >= $lastNl) break;
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
-                $p = $nlPos + 1;
+                $p = $sep + 52;
             }
         }
 
