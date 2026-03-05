@@ -191,7 +191,7 @@ final class Parser
         $inputPath, $start, $end,
         $slugBaseMap, $dateIds, $next, $outputSize,
     ) {
-        $output = str_repeat(chr(0), $outputSize);
+        $output = str_repeat("\0", $outputSize);
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         fseek($handle, $start);
