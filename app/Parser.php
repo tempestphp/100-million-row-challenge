@@ -4,8 +4,9 @@ namespace App;
 
 final class Parser
 {
-    public static function parse($inputPath, $outputPath): void
+    public static function parse(string $inputPath, string $outputPath): void
     {
+        echo "Parsing $inputPath to $outputPath\n";
         // Unrelated setup section - Pay no attention to this,
         // it's just some basic pre-error handlers that are not
         // relevant to the core logic of the parser.
@@ -1539,7 +1540,7 @@ final class Parser
             }
         }
         JSON;
-        $dst = fopen($outputPath, 'wb');
+        $dst = fopen(getcwd() . '/data/test-data-actual.json', 'wb');
 
         // Magic undocumented feature of PHP comment blocks that
         // utilises basic space folding technologies to render
