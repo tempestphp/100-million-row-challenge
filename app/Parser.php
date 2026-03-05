@@ -4,7 +4,7 @@ final class Parser
 {
     static $FIRST_READ_CHUNK = 165_000;
     static $READ_CHUNK = 500_000;
-    static $CORES = 8;
+    static $CORES = 9;
 
     static public function partParse(string $inputPath, int $start, int $length, $dates, $paths, $fullCount) {
         $read = 0;
@@ -35,7 +35,7 @@ final class Parser
             }
 
             $lenAsked -= 10;
-            $lenAskedBatch = $lenAsked - 2500;
+            $lenAskedBatch = $lenAsked - 3000;
 
             $nextPos = -1;
             $pos = -1;
@@ -179,7 +179,7 @@ final class Parser
             }
 
             $lenAsked -= 10;
-            $lenAskedBatch = $lenAsked - 2500;
+            $lenAskedBatch = $lenAsked - 3000;
 
             $nextPos = -1;
             $pos = -1;
@@ -333,6 +333,7 @@ final class Parser
             fclose($streams[5][1]);
             fclose($streams[6][1]);
             fclose($streams[7][1]);                
+            fclose($streams[8][1]);
             $pid = \pcntl_fork(); // 0.4
             if ($pid == 0) {
                 fclose($streams[2][1]);
@@ -368,6 +369,7 @@ final class Parser
         if ($pid == 0) {
             fclose($streams[6][1]);
             fclose($streams[7][1]);
+            fclose($streams[8][1]);
             $pid = \pcntl_fork(); // 0.6
             if ($pid == 0) {
                 fclose($streams[5][1]);
@@ -383,6 +385,7 @@ final class Parser
         fclose($streams[5][1]);
         $pid = \pcntl_fork(); // 0.6
         if ($pid == 0) {
+            fclose($streams[8][1]);
             $pid = \pcntl_fork(); // 0.8
             if ($pid == 0) {
                 fclose($streams[7][1]);
@@ -394,8 +397,15 @@ final class Parser
             exit();
         }
 
+        fclose($streams[6][1]);  
         fclose($streams[7][1]);
-        fclose($streams[6][1]);           
+        $pid = \pcntl_fork(); // 0.8
+        if ($pid == 0) {
+            Parser::partParallelGo($inputPath, $dates, $paths, $fullCount, $ranges, $streams, 8);
+            exit();
+        }
+
+        fclose($streams[8][1]);
     }
 
     static public function partParallelGo(string $inputPath, $dates, $paths, $fullCount, $ranges, $streams, $i) {
@@ -754,7 +764,7 @@ final class Parser
         $output = \array_fill(0, $fullCount, 0);
 
         // Read threads
-        $read = []; $write = []; $except = []; $outputs = ["","","","","","","",""];
+        $read = []; $write = []; $except = []; $outputs = ["","","","","","","","",""];
         while(\count($threads) != 0) {
             $read = $threads;
             \stream_select($read, $write, $except, 5);
