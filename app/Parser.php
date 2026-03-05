@@ -65,7 +65,6 @@ final class Parser
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         $raw = fread($handle, 181000);
-        fclose($handle);
 
         $paths = [];
         $slugBaseMap = [];
@@ -88,17 +87,17 @@ final class Parser
 
         $outputSize = $slugTotal * $di;
 
-        $bh = fopen($inputPath, 'rb');
-        fseek($bh, 0, SEEK_END);
-        $fileSize = ftell($bh);
-        $step = \intdiv($fileSize, 8);
+        stream_set_read_buffer($handle, 8192);
+        fseek($handle, 0, SEEK_END);
+        $fileSize = ftell($handle);
+        $step = $fileSize >> 3;
         $boundaries = [0];
         for ($i = 1; $i < 8; $i++) {
-            fseek($bh, $step * $i);
-            fgets($bh);
-            $boundaries[] = ftell($bh);
+            fseek($handle, $step * $i);
+            fgets($handle);
+            $boundaries[] = ftell($handle);
         }
-        fclose($bh);
+        fclose($handle);
         $boundaries[] = $fileSize;
 
         $sockets = [];
