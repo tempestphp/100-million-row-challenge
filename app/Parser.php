@@ -66,7 +66,7 @@ final class Parser
                 $slugBaseMap[$slug] = $slugTotal * $di;
                 $slugTotal++;
                 $noNew = 0;
-            } else if (++$noNew > 1000) {
+            } else if (++$noNew > 5000) {
                 break;
             }
             $pos = $nl + 1;
@@ -90,7 +90,8 @@ final class Parser
 
         $sockets = [];
 
-        for ($w = 0; $w < 8; $w++) {
+        $w = 8;
+        while ($w-- > 0) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
@@ -116,7 +117,7 @@ final class Parser
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
-                if ($data !== '' && $data !== false) {
+                if ($data !== '' ) {
                     $off = $offsets[$key];
                     foreach (unpack('C*', $data) as $v) {
                         $counts[$off] += $v;
@@ -245,7 +246,7 @@ final class Parser
             $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
         }
 
-        $firstPath = true;
+        $sep = "\n    ";
         $base = 0;
 
         for ($p = 0; $p < $slugCount; $p++) {
@@ -264,9 +265,8 @@ final class Parser
                 continue;
             }
 
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $sep = ",\n    ";
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $idx++;
