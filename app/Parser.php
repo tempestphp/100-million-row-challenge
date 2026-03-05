@@ -38,7 +38,7 @@ final class Parser
 
         \ini_set('memory_limit', self::MEMORY_LIMIT);
 
-        $dateCount = count($this->dates);
+        $dateCount = \count($this->dates);
 
         $start = 0;
         $end = \filesize($inputPath);
@@ -124,7 +124,7 @@ final class Parser
             $firstUri = false;
 
             // Output validation requires that the URI slashes are escaped.
-            $buffer .= "\n    \"\\/blog\\/" . str_replace('/', '\\/', $uri) . "\": {";
+            $buffer .= "\n    \"\\/blog\\/" . \str_replace('/', '\\/', $uri) . "\": {";
 
             $firstDate = true;
 
@@ -146,7 +146,7 @@ final class Parser
         }
         $buffer .= "\n}";
         \fwrite($output, $buffer);
-        @\fclose($output);
+        \fclose($output);
 
         $this->logTime('Written');
     }
@@ -157,8 +157,8 @@ final class Parser
      */
     private function logTime(string $message): void
     {
-        $elapsedTotal = number_format(\microtime(true) - $this->startTime, 4);
-        $elapsedPrevious = number_format(\microtime(true) - ($this->previousTime ?? $this->startTime), 4);
+        $elapsedTotal = \number_format(\microtime(true) - $this->startTime, 4);
+        $elapsedPrevious = \number_format(\microtime(true) - ($this->previousTime ?? $this->startTime), 4);
 
         $this->previousTime = \microtime(true);
 
