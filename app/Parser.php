@@ -42,7 +42,8 @@ final class Parser
         }
 
         $next = [];
-        for ($i = 0; $i < 255; $i++) {
+        $i = 255;
+        while ($i-- > 0) {
             $next[chr($i)] = chr($i + 1);
         }
 
@@ -237,16 +238,18 @@ final class Parser
         fwrite($out, '{');
 
         $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
+        $d = $dateCount;
+        while ($d-- > 0) {
             $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
         }
 
         $escapedPaths = [];
-        for ($p = 0; $p < $slugCount; $p++) {
+        $p = $slugCount;
+        while ($p-- > 0) {
             $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
         }
 
-        $firstPath = true;
+        $sep = "\n    ";
         $base = 0;
 
         for ($p = 0; $p < $slugCount; $p++) {
@@ -265,9 +268,8 @@ final class Parser
                 continue;
             }
 
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $sep = ",\n    ";
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $idx++;
