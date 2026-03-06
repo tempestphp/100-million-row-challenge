@@ -20,10 +20,11 @@ final class Parser
     {
         gc_disable();
 
-        $dateIds = [];
         $dates = [];
+        $ymBase = [];
         $di = 0;
         for ($y = 21; $y <= 26; $y++) {
+            $yStr = (string)$y;
             for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
                     2 => $y === 24 ? 29 : 28,
@@ -31,14 +32,19 @@ final class Parser
                     default => 31,
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
+                $ymBase[$yStr][$mStr] = $di;
                 $ymStr = "{$y}-{$mStr}-";
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
-                    $dateIds[$key] = $di;
                     $dates[$di] = '20' . $key;
                     $di++;
                 }
             }
+        }
+
+        $dayVal = [];
+        for ($d = 1; $d <= 31; $d++) {
+            $dayVal[($d < 10 ? '0' : '') . $d] = $d - 1;
         }
 
         $next = [];
@@ -99,7 +105,7 @@ final class Parser
             if (pcntl_fork() === 0) {
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $slugBaseMap, $dateIds, $next, $outputSize,
+                    $slugBaseMap, $ymBase, $dayVal, $next, $outputSize,
                 );
                 fwrite($pair[1], $output);
                 exit(0);
@@ -138,7 +144,7 @@ final class Parser
 
     private static function parseRange(
         $inputPath, $start, $end,
-        $slugBaseMap, $dateIds, $next, $outputSize,
+        $slugBaseMap, $ymBase, $dayVal, $next, $outputSize,
     ) {
         $output = str_repeat("\0", $outputSize);
         $handle = fopen($inputPath, 'rb');
@@ -147,7 +153,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $toRead = $remaining > 163_840 ? 163_840 : $remaining;
+            $toRead = $remaining > 131_072 ? 131_072 : $remaining;
             $chunk = fread($handle, $toRead);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
@@ -166,52 +172,52 @@ final class Parser
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
                 $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
             }
@@ -219,7 +225,7 @@ final class Parser
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
                 if ($sep === false || $sep >= $lastNl) break;
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $b = $sep + 3; $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $ymBase[$chunk[$b] . $chunk[$b + 1]][$chunk[$b + 3] . $chunk[$b + 4]] + $dayVal[$chunk[$b + 6] . $chunk[$b + 7]];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
             }
