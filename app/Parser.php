@@ -4,8 +4,6 @@ namespace App;
 
 final class Parser
 {
-    private const int PREFIX_LENGTH = 19;
-    private const int DATE_LENGTH = 11;
 
     private array $map = [];
     public function parse(string $inputPath, string $outputPath): void
@@ -13,12 +11,10 @@ final class Parser
         $inputFile = fopen($inputPath, 'r');
         while (($line = fgets($inputFile, 128)) !== false) {
             $commaPos = strpos($line, ',');
-            [$path, $date] = [
-                substr($line,19,$commaPos - 19),
-                substr($line,$commaPos + 1,10)
-            ];
+            $path = substr($line, 19, $commaPos - 19);
+            $date = substr($line, $commaPos + 1, 10);
 
-            $date = str_replace('-', '', $date);
+            $date = (int) str_replace('-', '', $date);
             $this->map[$path][$date] = ($this->map[$path][$date] ?? 0) + 1;
         }
         fclose($inputFile);
