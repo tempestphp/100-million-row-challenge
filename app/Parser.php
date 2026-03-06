@@ -233,16 +233,18 @@ final class Parser
         stream_set_write_buffer($out, 1_048_576);
         fwrite($out, '{');
 
+        $firstDatePrefixes = [];
         $datePrefixes = [];
         $d = $dateCount;
         while ($d-- > 0) {
-            $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
+            $firstDatePrefixes[$d] = "\n        \"" . $dates[$d] . '": ';
+            $datePrefixes[$d] = ",\n        \"" . $dates[$d] . '": ';
         }
 
         $escapedPaths = [];
         $p = $slugCount;
         while ($p-- > 0) {
-            $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
+            $escapedPaths[$p] = "\"\/blog\/" . $paths[$p] . '": {';
         }
 
         $sep = "\n    ";
@@ -264,14 +266,14 @@ final class Parser
                 continue;
             }
 
-            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $buf = $sep . $escapedPaths[$p] . $firstDatePrefixes[$firstDate] . $counts[$idx];
             $sep = ",\n    ";
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $idx++;
                 $count = $counts[$idx];
                 if ($count === 0) continue;
-                $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $buf .= $datePrefixes[$d] . $count;
             }
 
             $buf .= "\n    }";
