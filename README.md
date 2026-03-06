@@ -156,6 +156,8 @@ Each submission will be manually verified before its benchmark is run on the ben
 
 Finally, everyone is asked to respect other participant's entries. You can look at others for inspiration (simply because there's no way we can prevent that from happening), but straight-up copying other entries is prohibited. We'll try our best to watch over this. If you run into any issues, feel free to tag @brendt or @xHeaven in the PR comments.
 
+**Update as of March 5th:** since many of the top submissions have slight variations depending on when they are running their benchmark, we've determined that any improvement of `0.01` or more will be counted, anything less won't. Furthermore, if multiple entries end up having results too close to each other, we'll use their submission time as a way to determine final winners. 
+
 #### Why not one billion?
 
 This challenge was inspired by the [1 billion row challenge in Java](https://github.com/gunnarmorling/1brc). The reason we're using only 100 million rows is because this version has a lot more complexity compared to the Java version (date parsing, JSON encoding, array sorting).
