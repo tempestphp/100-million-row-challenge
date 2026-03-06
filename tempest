@@ -1,6 +1,14 @@
 #!/usr/bin/env php
 <?php
 
+if (($argv[1] ?? null) === 'data:parse') {
+    gc_disable();
+    require __DIR__ . '/app/Commands/Visit.php';
+    require __DIR__ . '/app/Parser.php';
+    \App\Parser::parse(substr($argv[2], 13), substr($argv[3], 14));
+    exit(0);
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
