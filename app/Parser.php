@@ -3,10 +3,11 @@
 namespace App;
 
 use App\Commands\Visit;
-use function array_count_values;
 use function array_fill;
 use function chr;
+use function count;
 use function fclose;
+use function feof;
 use function fgets;
 use function fopen;
 use function fread;
@@ -15,11 +16,11 @@ use function ftell;
 use function fwrite;
 use function gc_disable;
 use function ini_set;
-use function pack;
 use function pcntl_fork;
 use function pcntl_wait;
-use function stream_get_contents;
+use function str_repeat;
 use function stream_select;
+use function stream_set_blocking;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function stream_socket_pair;
@@ -36,8 +37,11 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const W = 10;
+    private const W = 8;
+    private const CH = 16;
     private const C = 163_840;
+    private const IPC_WRITE_CHUNK = 262_144;
+    private const IPC_READ_CHUNK = 262_144;
 
     public function parse(string $in, string $out): void
     {
@@ -57,16 +61,20 @@ final class Parser
                 $ms = ($m < 10 ? '0' : '') . $m;
                 for ($d = 1; $d <= $md; $d++) {
                     $k = "$y-$ms-" . ($d < 10 ? '0' : '') . $d;
-                    $db[$k] = chr($dc & 0xFF) . chr($dc >> 8);
+                    $db[$k] = $dc;
                     $dl[$dc++] = $k;
                 }
             }
         }
+        $nx = [];
+        for ($i = 0; $i < 255; $i++)
+            $nx[chr($i)] = chr($i + 1);
 
         $fh = fopen($in, 'rb');
         stream_set_read_buffer($fh, 0);
-        $raw = fread($fh, min(10_485_760, $sz));
+        $raw = fread($fh, min(2_097_152, $sz));
         $ln = strrpos($raw, "\n") ?: 0;
+        $nlPad = ($ln > 0 && $raw[$ln - 1] === "\r") ? 52 : 51;
         $pi = [];
         $pl = [];
         $pc = 0;
@@ -75,7 +83,7 @@ final class Parser
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false)
                 break;
-            $s = substr($raw, $pos + 25, $nl - $pos - 51);
+            $s = substr($raw, $pos + 25, $nl - $pos - $nlPad);
             if (!isset($pi[$s])) {
                 $pi[$s] = $pc;
                 $pl[$pc++] = $s;
@@ -90,10 +98,14 @@ final class Parser
                 $pl[$pc++] = $s;
             }
         }
+        $pb = [];
+        for ($p = 0; $p < $pc; $p++)
+            $pb[$pl[$p]] = $p * $dc;
+        $cells = $pc * $dc;
 
         $bnd = [0];
-        for ($i = 1; $i < self::W; $i++) {
-            fseek($fh, (int) ($sz * $i / self::W));
+        for ($i = 1; $i < self::CH; $i++) {
+            fseek($fh, (int) ($sz * $i / self::CH));
             fgets($fh);
             $bnd[] = ftell($fh);
         }
@@ -114,12 +126,14 @@ final class Parser
                 for ($j = 0; $j < self::W - 1; $j++)
                     if ($j !== $w)
                         fclose($socks[$j][1]);
-                $wc = static::crunch($in, $bnd[$w], $bnd[$w + 1], $pi, $db, $pc, $dc);
-                $packed = pack('v*', ...$wc);
-                $len = strlen($packed);
+                $blob = static::crunchWorker($in, $bnd, $w, self::W, $pb, $db, $cells, $nx);
+                $len = strlen($blob);
                 $written = 0;
                 while ($written < $len) {
-                    $n = fwrite($socks[$w][1], substr($packed, $written));
+                    $take = $len - $written;
+                    if ($take > self::IPC_WRITE_CHUNK)
+                        $take = self::IPC_WRITE_CHUNK;
+                    $n = fwrite($socks[$w][1], substr($blob, $written, $take));
                     if ($n === false || $n === 0)
                         break;
                     $written += $n;
@@ -132,21 +146,39 @@ final class Parser
         for ($w = 0; $w < self::W - 1; $w++)
             fclose($socks[$w][1]);
 
-        $counts = static::crunch($in, $bnd[self::W - 1], $bnd[self::W], $pi, $db, $pc, $dc);
+        $baseBlob = static::crunchWorker($in, $bnd, self::W - 1, self::W, $pb, $db, $cells, $nx);
+        $counts = array_fill(0, $cells, 0);
+        $j = 0;
+        foreach (unpack('C*', $baseBlob) as $v)
+            $counts[$j++] = $v;
 
         $readers = [];
-        for ($w = 0; $w < self::W - 1; $w++)
-            $readers[(int) $socks[$w][0]] = $socks[$w][0];
+        $payloads = [];
+        for ($w = 0; $w < self::W - 1; $w++) {
+            $sock = $socks[$w][0];
+            stream_set_blocking($sock, false);
+            $id = (int) $sock;
+            $readers[$id] = $sock;
+            $payloads[$id] = '';
+        }
         while ($readers) {
             $read = array_values($readers);
             $w2 = [];
             $ex = [];
-            stream_select($read, $w2, $ex, 30);
+            $ready = stream_select($read, $w2, $ex, 30);
+            if ($ready === false || $ready === 0)
+                continue;
             foreach ($read as $sock) {
-                $data = stream_get_contents($sock);
+                $id = (int) $sock;
+                $chunk = fread($sock, self::IPC_READ_CHUNK);
+                if ($chunk !== false && $chunk !== '')
+                    $payloads[$id] .= $chunk;
+                if (!feof($sock))
+                    continue;
                 fclose($sock);
-                unset($readers[(int) $sock]);
-                $wc = unpack('v*', $data);
+                unset($readers[$id]);
+                $wc = unpack('C*', $payloads[$id]);
+                unset($payloads[$id]);
                 $j = 0;
                 foreach ($wc as $v)
                     $counts[$j++] += $v;
@@ -165,35 +197,44 @@ final class Parser
         $o = fopen($out, 'wb');
         stream_set_write_buffer($o, 1_048_576);
         fwrite($o, '{');
+        $nl = PHP_EOL;
         $first = true;
         $buf = '';
         for ($p = 0; $p < $pc; $p++) {
             $base = $p * $dc;
             $body = '';
-            $sep = "\n";
+            $sep = $nl;
             for ($d = 0; $d < $dc; $d++) {
                 $n = $counts[$base + $d];
                 if (!$n)
                     continue;
                 $body .= $sep . $dp[$d] . $n;
-                $sep = ",\n";
+                $sep = ',' . $nl;
             }
             if (!$body)
                 continue;
-            $buf .= ($first ? '' : ',') . "\n    " . $pp[$p] . ": {" . $body . "\n    }";
+            $buf .= ($first ? '' : ',') . $nl . '    ' . $pp[$p] . ': {' . $body . $nl . '    }';
             $first = false;
             if (strlen($buf) > 131_072) {
                 fwrite($o, $buf);
                 $buf = '';
             }
         }
-        fwrite($o, $buf . "\n}");
+        fwrite($o, $buf . $nl . '}');
         fclose($o);
     }
 
-    private static function crunch(string $in, int $s, int $e, array $pi, array $db, int $pc, int $dc): array
+    private static function crunchWorker(string $in, array $bnd, int $worker, int $workers, array $pb, array $db, int $cells, array $nx): string
     {
-        $bk = array_fill(0, $pc, '');
+        $cnt = str_repeat("\0", $cells);
+        $chunks = count($bnd) - 1;
+        for ($i = $worker; $i < $chunks; $i += $workers)
+            static::crunchInto($in, $bnd[$i], $bnd[$i + 1], $pb, $db, $nx, $cnt);
+        return $cnt;
+    }
+
+    private static function crunchInto(string $in, int $s, int $e, array $pb, array $db, array $nx, string &$cnt): void
+    {
         $h = fopen($in, 'rb');
         stream_set_read_buffer($h, 0);
         fseek($h, $s);
@@ -213,75 +254,85 @@ final class Parser
                 fseek($h, -$t, SEEK_CUR);
                 $rem += $t;
             }
+            $step = ($ln > 0 && $ch[$ln - 1] === "\r") ? 53 : 52;
             $p = 25;
             $f = $ln - 1600;
             while ($p < $f) {
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
                 $c = strpos($ch, ',', $p);
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
             }
             while ($p < $ln) {
                 $c = strpos($ch, ',', $p);
                 if ($c === false || $c >= $ln)
                     break;
-                $bk[$pi[substr($ch, $p, $c - $p)]] .= $db[substr($ch, $c + 3, 8)];
-                $p = $c + 52;
+                $idx = $pb[substr($ch, $p, $c - $p)] + $db[substr($ch, $c + 3, 8)];
+                $cnt[$idx] = $nx[$cnt[$idx]];
+                $p = $c + $step;
             }
         }
         fclose($h);
-        $cnt = array_fill(0, $pc * $dc, 0);
-        for ($p = 0; $p < $pc; $p++) {
-            if ($bk[$p] === '')
-                continue;
-            $base = $p * $dc;
-            foreach (array_count_values(unpack('v*', $bk[$p])) as $id => $n)
-                $cnt[$base + $id] += $n;
-        }
-        return $cnt;
     }
 }
+
