@@ -11,3 +11,8 @@ test-data-actual.json
 .env
 .DS_Store
 .benchmark
+.benchmark-server
+poc/
+scripts/
+Dockerfile.bench
+data/out-*
