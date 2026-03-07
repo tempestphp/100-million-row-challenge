@@ -47,7 +47,7 @@ final class Parser
 
                 if ($len > 0) {
                     $combinedKey = substr($chunk, $start, $len);
-                    $key = crc32($combinedKey);
+                    $key = unpack('Q', hash('xxh64', $combinedKey, true))[1];
 
                     if (isset($rowList[$key])) {
                         $rowList[$key]++;
