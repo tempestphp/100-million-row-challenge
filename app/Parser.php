@@ -6,6 +6,8 @@ use Fidry\CpuCoreCounter\CpuCoreCounter;
 
 final class Parser
 {
+    private const string LINE_PATTERN = '/^.{19}([^,]+),(.{10})/';
+
     private int $workers;
 
     public function __construct()
@@ -79,6 +81,8 @@ final class Parser
 
     private function parseChunk(string $inputPath, int $startOffset, int $endOffset): array
     {
+        \gc_disable();
+
         $data = [];
         $handle = \fopen($inputPath, 'r');
         \fseek($handle, $startOffset);
@@ -89,15 +93,12 @@ final class Parser
         while ($bytesRead < $chunkSize && ($line = \fgets($handle)) !== false) {
             $bytesRead += \strlen($line);
 
-            [$url, $date] = \explode(',', $line, 2);
-            $url = \substr($url, 19); // Remove 'https://stitcher.io'
-            $date = \substr($date, 0, 10); // Keep 'YYYY-MM-DD'
-
-            $data[$url][$date] ??= 0;
-            $data[$url][$date]++;
+            \preg_match(self::LINE_PATTERN, $line, $m);
+            $data[$m[1]][$m[2]] = ($data[$m[1]][$m[2]] ?? 0) + 1;
         }
 
         \fclose($handle);
+        \gc_enable();
 
         return $data;
     }
