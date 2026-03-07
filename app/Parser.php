@@ -3,6 +3,7 @@
 namespace App;
 
 use function array_fill;
+use function getenv;
 use function file_put_contents;
 use function fopen;
 use function gc_disable;
@@ -13,7 +14,7 @@ use function substr;
 
 final class Parser
 {
-    const int FILE_READ_SIZE = 52_428_800;
+    const int FILE_READ_SIZE = 262_144;
 
     /**
      * @throws \DateMalformedStringException
