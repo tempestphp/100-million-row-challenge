@@ -79,8 +79,8 @@ final class Parser
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
         $boundaries = [0];
-        for ($i = 1; $i < 8; $i++) {
-            fseek($bh, ($fileSize >> 3) * $i);
+        for ($i = 1; $i < 4; $i++) {
+            fseek($bh, ($fileSize >> 2) * $i);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -89,7 +89,7 @@ final class Parser
 
         $sockets = [];
 
-        $w = 8;                                                                       
+        $w = 4;
         while ($w-- > 0) {    
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
@@ -106,7 +106,7 @@ final class Parser
         }
 
         $counts = array_fill(0, $outputSize, 0);
-        $offsets = array_fill(0, 8, 0);
+        $offsets = array_fill(0, 4, 0);
 
         $write = [];
         $except = [];
@@ -144,7 +144,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > 163_840 ? 163_840 : $remaining);
+            $chunk = fread($handle, $remaining > 196_608 ? 196_608 : $remaining);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
 
