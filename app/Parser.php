@@ -2,7 +2,13 @@
 
 namespace App;
 
-use Exception;
+use function fclose;
+use function fgets;
+use function file_put_contents;
+use function fopen;
+use function json_encode;
+use function ksort;
+use const JSON_PRETTY_PRINT;
 
 final class Parser
 {
@@ -10,24 +16,20 @@ final class Parser
     {
         $stream = fopen($inputPath, 'r');
 
-        while($line = fgets($stream)) {
-            $string = substr($line, 19);
-            $array = explode(',', $string);
-            $uri = $array[0];
-            $date = substr($array[1], 0, 10);
+        while ($line = fgets($stream)) {
+            $commaPos = strpos($line, ',', 19);
+            $url = substr($line, 19, $commaPos - 19);
+            $date = substr($line, $commaPos + 1, 10);
 
-            if (!isset($result[$uri][$date])) {
-                $result[$uri][$date] = 0;
-            }
-
-            $result[$uri][$date]++;
+            $result[$url][$date] = ($result[$url][$date] ?? 0) + 1;
         }
+        fclose($stream);
 
         foreach ($result as &$dates) {
             ksort($dates);
         }
 
-        $json = json_encode($result, flags: \JSON_PRETTY_PRINT);
+        $json = json_encode($result, flags: JSON_PRETTY_PRINT);
 
         file_put_contents($outputPath, $json);
     }
