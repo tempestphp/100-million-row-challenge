@@ -11,6 +11,7 @@ final class Parser
     private const FIRST_SLUG_OFFSET = 25;
     private const DATE_OFFSET_FROM_EOL = 25;
     private const COMMA_OFFSET_FROM_EOL = 26;
+    private const MIN_LINE_END_OFFSET = 55;
     private const DAY_RANGE = 4096;
     private const DATE_POOL_SIZE = 10_000;
     private const READ_SIZE = 1_048_576;
@@ -148,14 +149,14 @@ final class Parser
         $code .= '    int $uriCount,' . "\n";
         $code .= ') use ($byteChars): void {' . "\n";
         $code .= '    $lineStart = 0;' . "\n";
-        $code .= '    $commaLimit = $limit - 26;' . "\n";
+        $code .= '    $lineLimit = $limit - 1;' . "\n";
         $dayCodeExpression = "            ((ord(\$buffer[\$dateStart + 3]) - 48) << 9)\n";
         $dayCodeExpression .= "            | ((((ord(\$buffer[\$dateStart + 5]) - 48) * 10) + ord(\$buffer[\$dateStart + 6]) - 48) << 5)\n";
         $dayCodeExpression .= "            | (((ord(\$buffer[\$dateStart + 8]) - 48) * 10) + ord(\$buffer[\$dateStart + 9]) - 48)";
         $useDayMajorLayout = self::$useDayMajorLayout;
         $useBandedDayRange = ! $useDayMajorLayout && self::$dayCodeBase !== 0;
         $recordProcessor = static function (string $labelName) use ($trackFirstSeen, $useDateCache, $useByteCounts, $useIntegerDateCache, $dayCodeExpression, $useDayMajorLayout, $useBandedDayRange): string {
-            $body = '        $uriLength = $comma - $lineStart;' . "\n";
+            $body = '        $uriLength = $newline - $lineStart - 26;' . "\n";
             $body .= '        switch ($uriLength) {' . "\n";
 
             foreach (self::$resolverTrees as $uriLength => $tree) {
@@ -180,7 +181,7 @@ final class Parser
                 $body .= "        }\n";
             }
 
-            $body .= "        \$dateStart = \$comma + 1;\n";
+            $body .= "        \$dateStart = \$newline - 25;\n";
 
             if ($useDateCache) {
                 if ($useIntegerDateCache) {
@@ -280,27 +281,27 @@ final class Parser
                 $body .= "        \$sequence++;\n";
             }
 
-            $body .= "        \$lineStart = \$comma + 27;\n";
+            $body .= "        \$lineStart = \$newline + 1;\n";
 
             return $body;
         };
 
         if ($trackFirstSeen) {
-            $code .= '    while ($lineStart < $commaLimit && ($comma = strpos($buffer, ",", $lineStart + ' . self::FIRST_SLUG_OFFSET . ')) !== false) {' . "\n";
+            $code .= '    while ($lineStart < $lineLimit && ($newline = strpos($buffer, "\n", $lineStart + ' . self::MIN_LINE_END_OFFSET . ')) !== false) {' . "\n";
             $code .= $recordProcessor('resolved_uri');
             $code .= "    }\n";
         } else {
-            $code .= '    while ($lineStart < $commaLimit) {' . "\n";
-            $code .= '        $comma = strpos($buffer, ",", $lineStart + ' . self::FIRST_SLUG_OFFSET . ');' . "\n";
-            $code .= '        if ($comma === false) {' . "\n";
+            $code .= '    while ($lineStart < $lineLimit) {' . "\n";
+            $code .= '        $newline = strpos($buffer, "\n", $lineStart + ' . self::MIN_LINE_END_OFFSET . ');' . "\n";
+            $code .= '        if ($newline === false) {' . "\n";
             $code .= "            break;\n";
             $code .= "        }\n";
             $code .= $recordProcessor('resolved_uri_1');
-            $code .= '        if ($lineStart >= $commaLimit) {' . "\n";
+            $code .= '        if ($lineStart >= $lineLimit) {' . "\n";
             $code .= "            break;\n";
             $code .= "        }\n";
-            $code .= '        $comma = strpos($buffer, ",", $lineStart + ' . self::FIRST_SLUG_OFFSET . ');' . "\n";
-            $code .= '        if ($comma === false) {' . "\n";
+            $code .= '        $newline = strpos($buffer, "\n", $lineStart + ' . self::MIN_LINE_END_OFFSET . ');' . "\n";
+            $code .= '        if ($newline === false) {' . "\n";
             $code .= "            break;\n";
             $code .= "        }\n";
             $code .= $recordProcessor('resolved_uri_2');
