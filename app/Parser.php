@@ -21,10 +21,14 @@ final class Parser
     private const int MIN_SLUG_LEN = 4;
     private const int FLUSH_THRESH = 1_048_576;
 
-    public function parse(string $inputPath, string $outputPath): void
+    public static function parse(string $source, string $destination): void
     {
         gc_disable();
+        (new self())->execute($source, $destination);
+    }
 
+    public function execute(string $inputPath, string $outputPath): void
+    {
         $dateIds = [];
         $dates = [];
         $di = 0;
