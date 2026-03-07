@@ -17,7 +17,7 @@ use function substr;
 final class Parser
 {
     private const int DISC_READ    = 4_194_304;
-    private const int READ_BUFFER  = 196_608;
+    private const int READ_BUFFER  = 262_144;
     private const int MIN_SLUG_LEN = 4;
     private const int FLUSH_THRESH = 1_048_576;
 
@@ -98,15 +98,14 @@ final class Parser
         $boundaries[] = $fileSize;
 
         $sockets = [];
-        $w = 8;
-        while ($w-- > 0) {
+        for ($w = 0; $w < 8; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], $outputSize);
-            stream_set_chunk_size($pair[1], $outputSize);
+            stream_set_chunk_size($pair[0], 1048576);
             if (pcntl_fork() === 0) {
+                fclose($pair[0]);
                 $output = $this->parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $slugBaseMap, $dateIds, $next, $outputSize,
+                    $slugBaseMap, $dateIds, $next, $outputSize
                 );
                 fwrite($pair[1], $output);
                 exit(0);
