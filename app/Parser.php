@@ -37,8 +37,8 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const W = 8;
-    private const CH = 16;
+    private const W = 9;
+    private const CH = 27;
     private const C = 163_840;
     private const IPC_WRITE_CHUNK = 262_144;
     private const IPC_READ_CHUNK = 262_144;
