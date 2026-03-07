@@ -1,13 +1,19 @@
 <?php
 
-namespace App;
+declare(strict_types=1);
 
-use Exception;
+namespace App;
 
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        throw new Exception('TODO');
+        Handler::chain([
+            new FileReadHandler($inputPath),
+            new LineCutHandler(),
+            new AggregateHandler(),
+            new JsonPrepareHandler(),
+            new FileWriteHandler($outputPath),
+        ]);
     }
 }
