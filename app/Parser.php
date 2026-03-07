@@ -6,6 +6,8 @@ use function array_fill;
 use function file_put_contents;
 use function fopen;
 use function gc_disable;
+use function strlen;
+use function strpos;
 use function stream_set_read_buffer;
 use function substr;
 
@@ -53,25 +55,41 @@ final class Parser
         $input = fopen($inputPath, 'r');
         stream_set_read_buffer($input, self::FILE_READ_SIZE);
 
-        $back = 0;
-        while (feof($input) === false) {
-            $position = 25;
-            fseek($input, $back, SEEK_CUR);
-            $buffer = fread($input, self::FILE_READ_SIZE);
-            $lastEol = strrpos($buffer, PHP_EOL);
-            $back = $lastEol - strlen($buffer) + 1;
+        $carry = '';
+        while (($chunk = fread($input, self::FILE_READ_SIZE)) !== '') {
+            $buffer = $carry . $chunk;
+            $position = 0;
 
-            while ($position < $lastEol) {
-                $commaPos = strpos($buffer, ',', $position);
+            while (($lineEnd = strpos($buffer, PHP_EOL, $position)) !== false) {
+                $lineLength = $lineEnd - $position;
+                $path = substr($buffer, $position + 25, $lineLength - 51);
+                $date = substr($buffer, $lineEnd - 23, 8);
 
-                $path = substr($buffer, $position, $commaPos - $position);
-                $position = $commaPos;
-                $date = substr($buffer, $position + 3, 8);
-                $position += 52;
-
-                // use dateIds for insertion because those are correctly ordered
                 $dateId = $dateIds[$date];
 
+                $pathId = $pathIds[$path] ?? null;
+                if ($pathId === null) {
+                    $pathId = $pathCount;
+                    $pathIds[$path] = $pathId;
+                    $paths[$pathId] = $path;
+                    $outputData[$pathId] = array_fill(0, $dateCount, 0);
+                    $pathCount++;
+                }
+
+                $outputData[$pathId][$dateId]++;
+                $position = $lineEnd + 1;
+            }
+
+            $carry = substr($buffer, $position);
+        }
+
+        if ($carry !== '') {
+            $lineLength = strlen($carry);
+            $path = substr($carry, 25, $lineLength - 51);
+            $date = substr($carry, $lineLength - 23, 8);
+            $dateId = $dateIds[$date] ?? null;
+
+            if ($dateId !== null) {
                 $pathId = $pathIds[$path] ?? null;
                 if ($pathId === null) {
                     $pathId = $pathCount;
