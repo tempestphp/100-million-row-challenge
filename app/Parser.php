@@ -79,8 +79,8 @@ final class Parser
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
         $boundaries = [0];
-        for ($i = 1; $i < 4; $i++) {
-            fseek($bh, ($fileSize >> 2) * $i);
+        for ($i = 1; $i < 8; $i++) {
+            fseek($bh, ($fileSize >> 3) * $i);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -89,7 +89,7 @@ final class Parser
 
         $sockets = [];
 
-        $w = 4;
+        $w = 8;
         while ($w-- > 0) {    
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
@@ -106,7 +106,7 @@ final class Parser
         }
 
         $counts = array_fill(0, $outputSize, 0);
-        $offsets = array_fill(0, 4, 0);
+        $offsets = array_fill(0, 8, 0);
 
         $write = [];
         $except = [];
@@ -144,7 +144,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > 196_608 ? 196_608 : $remaining);
+            $chunk = fread($handle, $remaining > 163_840 ? 163_840 : $remaining);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
 
@@ -158,15 +158,9 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1010;
+            $fence = $lastNl - 792;
 
             while ($p < $fence) {
-                $idx = $slugBaseMap[substr($chunk, $p, ($sep = strpos($chunk, ',', $p)) - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-                $idx = $slugBaseMap[substr($chunk, $p, ($sep = strpos($chunk, ',', $p)) - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
                 $idx = $slugBaseMap[substr($chunk, $p, ($sep = strpos($chunk, ',', $p)) - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
