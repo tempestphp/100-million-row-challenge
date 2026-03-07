@@ -132,7 +132,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $toRead = $remaining > 163_840 ? 163_840 : $remaining;
+            $toRead = $remaining > 1_048_576 ? 1_048_576 : $remaining;
             $chunk = fread($handle, $toRead);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
