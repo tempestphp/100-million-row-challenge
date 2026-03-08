@@ -1,0 +1,12 @@
+services:
+  parser:
+    build: .
+    cpus: 2
+    mem_limit: 1.5g
+    volumes:
+      - ./data:/app/data
+      - ./app:/app/app
+    tmpfs:
+      - /dev/shm:size=512m
+    working_dir: /app
+    command: ["php", "tempest", "data:parse"]
