@@ -11,3 +11,4 @@ test-data-actual.json
 .env
 .DS_Store
 .benchmark
+.dockerignore
