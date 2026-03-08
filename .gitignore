@@ -16,6 +16,7 @@ test.php
 parse.php
 benchmark.sh
 slug.sh
+tests.sh
 
 gere-*
 mine_*

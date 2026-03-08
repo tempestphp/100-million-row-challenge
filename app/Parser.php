@@ -16,8 +16,8 @@ use function substr;
 
 final class Parser
 {
-    private const int DISC_READ    = 4_194_304;
-    private const int READ_BUFFER  = 262_144;
+    private const int DISC_READ    = 131_072;
+    private const int READ_BUFFER  = 196_608;
     private const int MIN_SLUG_LEN = 4;
     private const int FLUSH_THRESH = 1_048_576;
 
@@ -29,6 +29,8 @@ final class Parser
 
     public function execute(string $inputPath, string $outputPath): void
     {
+        gc_disable();
+
         $dateIds = [];
         $dates = [];
         $di = 0;
@@ -65,7 +67,6 @@ final class Parser
         $pos = 0;
         $lastNl = strrpos($raw, "\n") ?: 0;
 
-        $noNew = 0;
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
@@ -73,10 +74,7 @@ final class Parser
             if (!isset($slugBaseMap[$slug])) {
                 $paths[$slugTotal] = $slug;
                 $slugBaseMap[$slug] = $slugTotal * $di;
-                $slugTotal++;
-                $noNew = 0;
-            } elseif (++$noNew > 5000) {
-                break;
+                if (++$slugTotal === 268) break;
             }
             $pos = $nl + 1;
         }
@@ -98,14 +96,15 @@ final class Parser
         $boundaries[] = $fileSize;
 
         $sockets = [];
-        for ($w = 0; $w < 8; $w++) {
+        $w = 8;
+        while ($w-- > 0) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], 1048576);
+            stream_set_chunk_size($pair[0], $outputSize);
+            stream_set_chunk_size($pair[1], $outputSize);
             if (pcntl_fork() === 0) {
-                fclose($pair[0]);
                 $output = $this->parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
-                    $slugBaseMap, $dateIds, $next, $outputSize
+                    $slugBaseMap, $dateIds, $next, $outputSize,
                 );
                 fwrite($pair[1], $output);
                 exit(0);
@@ -173,7 +172,7 @@ final class Parser
             }
 
             $p     = 25;
-            $fence = $lastNl - 1002;
+            $fence = $lastNl - 1010;
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p + $minSlug);
@@ -258,7 +257,7 @@ final class Parser
 
         $escapedPaths = [];
         for ($p = 0; $p < $slugCount; $p++) {
-            $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
+            $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
         }
 
         $sep  = "\n    ";
