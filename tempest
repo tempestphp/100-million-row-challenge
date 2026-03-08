@@ -1,6 +1,15 @@
 #!/usr/bin/env php
 <?php
 
+if ($argv[1] === 'data:parse') {
+    $a = isset($argv[2]) ? explode('=', $argv[2])[1] : '--input-path=data/data.csv';
+    $b = isset($argv[3]) ? explode('=', $argv[3])[1] : '--output-path=data/data.json';
+    require_once __DIR__ . '/app/Parser.php';
+    \App\Parser::parse($a, $b);
+    
+    exit;
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
