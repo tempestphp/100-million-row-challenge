@@ -1,10 +1,19 @@
 #!/usr/bin/env php
 <?php
 
-use Tempest\Console\ConsoleApplication;
+if (isset($argv[1]) && $argv[1] === 'data:parse') {
+    $input  = $argv[2] ?? __DIR__ . '/data/data.csv';
+    $output = $argv[3] ?? __DIR__ . '/data/data.json';
+    if (($p = strpos($input, '=')) !== false) $input   = substr($input, $p + 1);
+    if (($p = strpos($output, '=')) !== false) $output = substr($output, $p + 1);
 
-require_once getcwd() . '/vendor/autoload.php';
+    require_once __DIR__ . '/app/Parser.php';
+    App\Parser::parse($input, $output);
+    exit(0);
+}
 
-ConsoleApplication::boot(loadBuiltInCommands: false)->run();
+require_once __DIR__ . '/vendor/autoload.php';
+
+\Tempest\Console\ConsoleApplication::boot(loadBuiltInCommands: false)->run();
 
 exit;
