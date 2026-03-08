@@ -10,11 +10,11 @@ final class Parser
         //self::parseDefault($inputPath, $outputPath);
 
 		// Seems to be the fastest option for smaller datasets
-		//self::parseOptimizedWithSort($inputPath, $outputPath);
+		self::parseOptimizedWithSort($inputPath, $outputPath);
 
 		// Seems to be the fastest option for 10 mil rows (but slightly higher memory usage)
 		// it is much slower for the validate case than parseOptimizedWithSort
-		self::parseOptimizedCountingSort($inputPath, $outputPath);
+		//self::parseOptimizedCountingSort($inputPath, $outputPath);
     }
 
 	private static function parseDefault(string $inputPath, string $outputPath): void
