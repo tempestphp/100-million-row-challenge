@@ -18,7 +18,6 @@ use function json_encode;
 use function microtime;
 use function ord;
 use function pcntl_fork;
-use function pcntl_setcpuaffinity;
 use function sem_acquire;
 use function sem_get;
 use function sem_release;
@@ -95,13 +94,10 @@ final class Parser {
         for ($i = 1; $i < self::WORKERS; $i++) {
             $pid = pcntl_fork();
             if ($pid === 0) {
-                // pcntl_setcpuaffinity(null, [$i * 2]);
-                pcntl_setcpuaffinity(null, [$i]);
                 $this->run_m1_string_child($inputPath, $i);
                 exit();
             }
         }
-        pcntl_setcpuaffinity(null, [0]);
 
         $this->run_m1_string_parent($inputPath, $outputPath);
         $this->debug_timing('parse complete');
