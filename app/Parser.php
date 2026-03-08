@@ -43,10 +43,13 @@ use const JSON_PRETTY_PRINT;
 
 final class Parser {
     public const bool DEBUG_TIMING = false;
-    public const int DATE_SLOTS = (365 * 5) + 15;
-    public const int TOTAL_SLOTS = 493120;
+    public const int DATE_SLOTS = (365 * 5) + 15 + 16;
+    // public const int TOTAL_SLOTS = 493120;
+    public const int TOTAL_SLOTS = 497408;
+
     public const int WORKERS = 8;
     public const int CHUNKS = 1024 * 16;
+    public const int PARENT_SEED_SIZE = 1024 * 256;
     public const A_TO_SHORT_PATH = 26;
     public const CARET_TO_SHORT_PATH = 25;
     public const CARET_TO_LONG_PATH = 19;
@@ -76,6 +79,11 @@ final class Parser {
 
         $this->generate_date_maps();
         $this->generate_path_maps();
+
+        if (self::PARENT_SEED_SIZE > intdiv(filesize($inputPath), self::CHUNKS)) {
+            $this->run_m1_small($inputPath, $outputPath);
+            return;
+        }
 
         ChunkQueue::create(1);
 
@@ -236,6 +244,33 @@ final class Parser {
 
 
         $queue->close(true);
+    }
+
+    public function run_m1_small(string $in, string $out): void {
+        $handle = fopen($in, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $filesize = filesize($in);
+
+        $payload0 = str_repeat("\0", self::TOTAL_SLOTS);
+
+        fseek($handle, 0);
+        $this->hotloop_string_first_run_faster($handle, $filesize, $payload0);
+
+        $json = [];
+        foreach ($this->orderseen as $pathid) {
+            $json[$this->id2path[$pathid]] = [];
+        }
+
+        for ($i = 0; $i < self::TOTAL_SLOTS; $i++) {
+            $sum = ord($payload0[$i]);
+            if ($sum > 0) {
+                $pathid = intdiv($i, self::DATE_SLOTS);
+                $dateid = $i % self::DATE_SLOTS;
+                $json[$this->id2path[$pathid]][$this->id2date[$dateid]] = $sum;
+            }
+        }
+
+        file_put_contents($out, json_encode($json, JSON_PRETTY_PRINT));
     }
 
     public function hotloop_string_faster($handle, int $size, string &$counts): void {
