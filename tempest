@@ -1,6 +1,29 @@
 #!/usr/bin/env php
 <?php
 
+if (($argv[1] ?? null) === 'data:parse') {
+    gc_disable();
+    require __DIR__ . '/app/Commands/Visit.php';
+    require __DIR__ . '/app/Parser.php';
+
+    $inputPath = null;
+    $outputPath = null;
+    foreach ($argv as $arg) {
+        if (str_starts_with($arg, '--input-path=')) $inputPath = substr($arg, 13);
+        if (str_starts_with($arg, '--output-path=')) $outputPath = substr($arg, 14);
+        if (str_starts_with($arg, '--inputPath=')) $inputPath = substr($arg, 12);
+        if (str_starts_with($arg, '--outputPath=')) $outputPath = substr($arg, 13);
+    }
+    if (!$inputPath) $inputPath = __DIR__ . '/data/data.csv';
+    if (!$outputPath) $outputPath = __DIR__ . '/data/data.json';
+
+    $t = microtime(true);
+    \App\Parser::run($inputPath, $outputPath);
+    $elapsed = microtime(true) - $t;
+    fwrite(STDERR, "\033[32m{$elapsed}s\033[0m\n");
+    exit(0);
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
