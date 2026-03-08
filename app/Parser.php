@@ -27,7 +27,8 @@ final class Parser
         stream_set_read_buffer($handle, $bufferSize);
 
         $rowList = [];
-        $keyList = [];
+        $keyList = new \SplFixedArray(1000000);
+        $keyIdx = 0;
 
         while (!feof($handle)) {
             $chunk = fread($handle, $bufferSize);
@@ -53,7 +54,8 @@ final class Parser
                         $rowList[$key]++;
                     } else {
                         $rowList[$key] = 1;
-                        $keyList[] = $combinedKey;
+                        $keyList[$keyIdx] = $combinedKey;
+                        ++$keyIdx;
                     }
                 }
 
