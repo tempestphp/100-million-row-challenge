@@ -184,7 +184,7 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1000;
+            $fence = $lastNl - 1002;
 
             while ($p < $fence) {
                 $idx = $slugBaseMap[substr($chunk, $p, ($sep = strpos($chunk, ',', $p)) - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
