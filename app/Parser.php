@@ -12,23 +12,27 @@ use function fseek;
 use function fwrite;
 use function gc_disable;
 use function pcntl_fork;
+use function socket_create_pair;
+use function socket_export_stream;
+use function socket_set_option;
 use function str_repeat;
 use function str_replace;
 use function stream_select;
 use function stream_set_chunk_size;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
-use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
 use function unpack;
+use const AF_UNIX;
 use const SEEK_CUR;
 use const SEEK_END;
-use const STREAM_IPPROTO_IP;
-use const STREAM_PF_UNIX;
-use const STREAM_SOCK_STREAM;
+use const SOCK_STREAM;
+use const SOL_SOCKET;
+use const SO_RCVBUF;
+use const SO_SNDBUF;
 
 final class Parser
 {
@@ -103,24 +107,28 @@ final class Parser
         $sockets = [];
 
         for ($w = 0; $w < 8; $w++) {
-            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], $outputSize);
-            stream_set_chunk_size($pair[1], $outputSize);
+            socket_create_pair(AF_UNIX, SOCK_STREAM, 0, $sockPair);
+            socket_set_option($sockPair[0], SOL_SOCKET, SO_RCVBUF, $outputSize + 8192);
+            socket_set_option($sockPair[1], SOL_SOCKET, SO_SNDBUF, $outputSize + 8192);
+            $r = socket_export_stream($sockPair[0]);
+            $ww = socket_export_stream($sockPair[1]);
+            stream_set_chunk_size($r, $outputSize);
+            stream_set_chunk_size($ww, $outputSize);
             $pid = pcntl_fork();
             if ($pid === 0) {
                 $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $slugBaseMap, $dateIds, $next, $outputSize,
                 );
-                fwrite($pair[1], $output);
+                fwrite($ww, $output);
                 exit(0);
             }
-            fclose($pair[1]);
-            $sockets[$w] = $pair[0];
+            fclose($ww);
+            $sockets[$w] = $r;
         }
 
         $counts = array_fill(0, $outputSize, 0);
-        $pending = [];
+        $offsets = [];
 
         while ($sockets !== []) {
             $read = $sockets;
@@ -130,17 +138,15 @@ final class Parser
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
                 if ($data !== '' && $data !== false) {
-                    $pending[$key] = ($pending[$key] ?? '') . $data;
+                    $off = $offsets[$key] ?? 0;
+                    foreach (unpack('C*', $data) as $v) {
+                        $counts[$off++] += $v;
+                    }
+                    $offsets[$key] = $off;
                 }
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
-                    $j = 0;
-                    foreach (unpack('C*', $pending[$key] ?? '') as $v) {
-                        $counts[$j] += $v;
-                        $j++;
-                    }
-                    unset($pending[$key]);
                 }
             }
         }
