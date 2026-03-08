@@ -2,17 +2,36 @@
 
 namespace App;
 
+use function array_fill;
+use function array_values;
 use function chr;
 use function fclose;
 use function feof;
+use function fgets;
 use function fopen;
 use function fread;
 use function fseek;
+use function ftell;
 use function fwrite;
+use function gc_disable;
+use function pcntl_fork;
+use function str_repeat;
+use function stream_select;
+use function stream_set_chunk_size;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function unpack;
+
+use const SEEK_CUR;
+use const SEEK_END;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
@@ -78,9 +97,10 @@ final class Parser
 
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
+        $step = $fileSize >> 3;
         $boundaries = [0];
         for ($i = 1; $i < 8; $i++) {
-            fseek($bh, ($fileSize >> 3) * $i);
+            fseek($bh, $step * $i);
             fgets($bh);
             $boundaries[] = ftell($bh);
         }
@@ -89,8 +109,8 @@ final class Parser
 
         $sockets = [];
 
-        $w = 8;
-        while ($w-- > 0) {    
+        $w = 7;
+        while ($w-- > 0) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
@@ -105,9 +125,15 @@ final class Parser
             $sockets[$w] = $pair[0];
         }
 
-        $counts = array_fill(0, $outputSize, 0);
-        $offsets = array_fill(0, 8, 0);
+        $parentOutput = self::parseRange(
+            $inputPath, $boundaries[7], $boundaries[8],
+            $slugBaseMap, $dateIds, $next, $outputSize,
+        );
 
+        $counts = array_values(unpack('C*', $parentOutput));
+        unset($parentOutput);
+
+        $offsets = array_fill(0, 7, 0);
         $write = [];
         $except = [];
         while ($sockets !== []) {
@@ -153,14 +179,20 @@ final class Parser
 
             $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
-                fseek($handle, -$tail, SEEK_CUR);
+                fseek($handle, 0 - $tail, SEEK_CUR);
                 $remaining += $tail;
             }
 
             $p = 25;
-            $fence = $lastNl - 792;
+            $fence = $lastNl - 1000;
 
             while ($p < $fence) {
+                $idx = $slugBaseMap[substr($chunk, $p, ($sep = strpos($chunk, ',', $p)) - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+                $idx = $slugBaseMap[substr($chunk, $p, ($sep = strpos($chunk, ',', $p)) - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
                 $idx = $slugBaseMap[substr($chunk, $p, ($sep = strpos($chunk, ',', $p)) - $p)] + $dateIds[substr($chunk, $sep + 4, 7)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
@@ -243,8 +275,9 @@ final class Parser
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $idx++;
-                if ($counts[$idx] === 0) continue;
-                $buf .= $datePrefixes[$d] . $counts[$idx];
+                $count = $counts[$idx];
+                if ($count === 0) continue;
+                $buf .= $datePrefixes[$d] . $count;
             }
 
             $buf .= "\n    }";
