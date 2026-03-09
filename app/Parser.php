@@ -60,14 +60,13 @@ final class Parser
         $noNew = 0;
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
-            if ($nl === false) break;
             $slug = substr($raw, $pos + 25, $nl - $pos - 51);
             if (!isset($slugBaseMap[$slug])) {
                 $paths[$slugTotal] = $slug;
                 $slugBaseMap[$slug] = $slugTotal * $di;
                 $slugTotal++;
                 $noNew = 0;
-            } else if (++$noNew > 5000) {
+            } else if (++$noNew > 4000) {
                 break;
             }
             $pos = $nl + 1;
@@ -176,8 +175,7 @@ final class Parser
                 $buf .= ",\n" . $datePrefixes[$d] . $count;
             }
 
-            $buf .= "\n    }";
-            fwrite($out, $buf);
+            fwrite($out, $buf.= "\n    }");
             $base += $di;
         }
 
