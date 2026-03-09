@@ -115,14 +115,12 @@ final class Parser
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
-                if ($data !== '') {
-                    $off = $offsets[$key];
-                    foreach (unpack('C*', $data) as $v) {
-                        $counts[$off] += $v;
-                        $off++;
-                    }
-                    $offsets[$key] = $off;
+                $off = $offsets[$key];
+                foreach (unpack('C*', $data) as $v) {
+                    $counts[$off] += $v;
+                    $off++;
                 }
+                $offsets[$key] = $off;
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
@@ -256,10 +254,6 @@ final class Parser
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
