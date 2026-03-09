@@ -12,9 +12,9 @@ final class Parser
 
         while (($line = fgets($handle)) !== false) {
             $commaPos = strpos($line, ',');
-            if (false === $commaPos) {
-                break;
-            }
+            // if (false === $commaPos) {
+            //     break;
+            // }
 
             $url = substr($line, 19, $commaPos - 19);
             $timestamp = substr($line, $commaPos + 1, 10);
