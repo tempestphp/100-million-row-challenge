@@ -19,7 +19,7 @@ final class Parser
     public static function parse($inputPath, $outputPath)
     {
         gc_disable();
-        pcntl_setpriority(-20);
+        @pcntl_setpriority(-20);
 
         $dateIds = [];
         $dates = [];
@@ -43,14 +43,13 @@ final class Parser
         }
 
         $next = [];
-        $i = 255;
-        while ($i-- > 0) {
+        for ($i = 0; $i < 255; $i++) {
             $next[chr($i)] = chr($i + 1);
         }
 
         $bh = fopen($inputPath, 'rb');
         stream_set_read_buffer($bh, 0);
-        $raw = fread($bh, 181_000);
+        $raw = fread($bh, 2_097_152);
 
         $paths = [];
         $slugBaseMap = [];
@@ -58,17 +57,14 @@ final class Parser
         $pos = 0;
         $lastNl = strrpos($raw, "\n") ?: 0;
 
-        $noNew = 0;
         while ($pos < $lastNl) {
             $nl = strpos($raw, "\n", $pos + 52);
+            if ($nl === false) break;
             $slug = substr($raw, $pos + 25, $nl - $pos - 51);
             if (!isset($slugBaseMap[$slug])) {
                 $paths[$slugTotal] = $slug;
                 $slugBaseMap[$slug] = $slugTotal * $di;
                 $slugTotal++;
-                $noNew = 0;
-            } else if (++$noNew > 4000) {
-                break;
             }
             $pos = $nl + 1;
         }
@@ -76,6 +72,7 @@ final class Parser
 
         $outputSize = $slugTotal * $di;
 
+        stream_set_read_buffer($bh, 8192);
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
         $step = $fileSize >> 3;
@@ -96,10 +93,11 @@ final class Parser
             stream_set_chunk_size($pair[0], $outputSize);
             stream_set_chunk_size($pair[1], $outputSize);
             if (pcntl_fork() === 0) {
-                fwrite($pair[1], self::parseRange(
+                $output = self::parseRange(
                     $inputPath, $boundaries[$w], $boundaries[$w + 1],
                     $slugBaseMap, $dateIds, $next, $outputSize,
-                ));
+                );
+                fwrite($pair[1], $output);
                 exit(0);
             }
             fclose($pair[1]);
@@ -116,12 +114,14 @@ final class Parser
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
-                $off = $offsets[$key];
-                foreach (unpack('C*', $data) as $v) {
-                    $counts[$off] += $v;
-                    $off++;
+                if ($data !== '' && $data !== false) {
+                    $off = $offsets[$key];
+                    foreach (unpack('C*', $data) as $v) {
+                        $counts[$off] += $v;
+                        $off++;
+                    }
+                    $offsets[$key] = $off;
                 }
-                $offsets[$key] = $off;
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
@@ -134,14 +134,12 @@ final class Parser
         fwrite($out, '{');
 
         $datePrefixes = [];
-        $d = $di;
-        while ($d-- > 0) {
+        for ($d = 0; $d < $di; $d++) {
             $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
         }
 
         $escapedPaths = [];
-        $p = $slugTotal;
-        while ($p-- > 0) {
+        for ($p = 0; $p < $slugTotal; $p++) {
             $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
         }
 
@@ -160,7 +158,7 @@ final class Parser
             }
 
             if ($firstDate === -1) {
-                $base += $dateCount;
+                $base += $di;
                 continue;
             }
 
@@ -174,7 +172,8 @@ final class Parser
                 $buf .= ",\n" . $datePrefixes[$d] . $count;
             }
 
-            fwrite($out, $buf.= "\n    }");
+            $buf .= "\n    }";
+            fwrite($out, $buf);
             $base += $di;
         }
 
@@ -193,7 +192,8 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > 131_072 ? 131_072 : $remaining);
+            $toRead = $remaining > 163_840 ? 163_840 : $remaining;
+            $chunk = fread($handle, $toRead);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
 
@@ -255,6 +255,10 @@ final class Parser
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
 
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
             }
 
             while ($p < $lastNl) {
@@ -266,7 +270,8 @@ final class Parser
             }
         }
 
+        fclose($handle);
+
         return $output;
     }
-
 }
