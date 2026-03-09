@@ -17,10 +17,9 @@ final class Parser
 
         $dateIds = []; self::$keepAlive[] = &$dateIds;
         $id = 0;
-        for($year = 0; $year <= 99; $year++) {
-            $yearS = ($year < 10 ? '0'.$year : (string) $year);
+        for($year = 1; $year <= 6; $year++) {
             for($month = 1; $month <= 12; $month++) {
-                $yearMonthS = $yearS.'-'.($month < 10 ? '0'.$month : (string) $month);
+                $yearMonthS = $year.'-'.($month < 10 ? '0'.$month : (string) $month);
 
                 $dateIds[$yearMonthS.'-01'] = $id++;
                 $dateIds[$yearMonthS.'-02'] = $id++;
@@ -50,8 +49,28 @@ final class Parser
                 $dateIds[$yearMonthS.'-26'] = $id++;
                 $dateIds[$yearMonthS.'-27'] = $id++;
                 $dateIds[$yearMonthS.'-28'] = $id++;
+
+                if (2 === $month && 4 !== $year) {
+                    $id += 3;
+                    continue;
+                }
+
                 $dateIds[$yearMonthS.'-29'] = $id++;
+                if (2 === $month) {
+                    $id += 2;
+                    continue;
+                }
+
                 $dateIds[$yearMonthS.'-30'] = $id++;
+                switch($month) {
+                    case 4:
+                    case 6:
+                    case 9:
+                    case 11:
+                        ++$id;
+                        continue 2;
+                }
+
                 $dateIds[$yearMonthS.'-31'] = $id++;
             }
         }
@@ -89,1303 +108,1260 @@ final class Parser
         $trailingBufferLen = 65*(52+$maxPartialLen);
 
         $b = \fread($f, self::BUFFER_SIZE);
-        $bm = \strlen($b) - $trailingBufferLen;
         $bp = 25;
 
         $sequenceRem = \count($sequence);
         $sequenceId = 0;
-        $aYear = (int) \substr($b, \strpos($b, ",")+1, 4);
 
         if ("\n" === $b[\strlen($b) - 1]) goto s2;
 
 s1:
+        $bm = \strlen($b) - $trailingBufferLen;
         while ($bp<$bm) {
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1; }
         }
 
-        $bp -= 25;
-
 s1e:
-        while(false !== ($i = \strpos($b, "\n", $bp))) {
-            ++$counts[($id = $partialIds[\substr($b, $bp+25, $i-$bp-51)]) + $dateIds[\substr($b, $i-23, 8)]];
-            $bp = 1 + $i;
+        $bm = \strrpos($b, "\n");
+        while($bp < $bm) {
+            $i = \strpos($b, ',', $bp);
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l1e; }
         }
 
-        $bRem = \substr($b, $bp);
-
+        $bRem = \substr($b, $bp-25);
         $b = \fread($f, self::BUFFER_SIZE);
-        $bm = \strlen($b) - $trailingBufferLen;
-        $bp = 26+\strpos($b, "\n", 0);
+        $bp = \strpos($b, "\n", 0);
+        $bRem .= \substr($b, 0, $bp);
+        $bp += 26;
 
-        $bRem .= \substr($b, 0, $bp-25);
-
-        ++$counts[($id = $partialIds[\substr($bRem, 25, \strlen($bRem)-52)]) + $dateIds[\substr($bRem, \strlen($bRem)-24, 8)]];
+        ++$counts[($id = $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]) + $dateIds[\substr($bRem, \strlen($bRem)-22, 7)]];
         if (!isset($sequence[$id])) {
             $sequence[$id] = $sequenceId++;
             if (!(--$sequenceRem)) {
-                if ($bp < \strlen($b)) {
-                    if ("\n" !== $b[\strlen($b) - 1]) {
-                        goto l1;
-                    } else {
-                        goto l2;
-                    }
-                }
-
-                goto o0;
+                if ($bp >= \strlen($b)) goto o0;
+                if ("\n" === $b[\strlen($b)-1]) goto l2;
+                goto l1;
             }
         }
 
-        if ($bp < \strlen($b)) {
-            if ("\n" !== $b[\strlen($b) - 1]) {
-                goto s1;
-            } else {
-                goto s2;
-            }
-        }
-
-        goto o0;
+        if ($bp >= \strlen($b)) goto o0;
+        if ("\n" === $b[\strlen($b)-1]) goto s2;
+        goto s1;
 
 s2:
+        $bm = \strlen($b) - $trailingBufferLen;
         while ($bp<$bm) {
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2; }
         }
-
-        $bp -= 25;
 
 s2e:
-        do {
-            $i = \strpos($b, "\n", $bp+51);
-            ++$counts[($id = $partialIds[\substr($b, $bp+25, $i-$bp-51)]) + $dateIds[\substr($b, $i-23, 8)]];
-            $bp = 1 + $i;
-            if (!isset($sequence[$id])) { 
-                $sequence[$id] = $sequenceId++; 
-                if (!(--$sequenceRem)) {
-                    if (\strlen($b) !== $bp) goto l2e;
-                    goto l2ee;
-                }
-            }
-        } while(\strlen($b) !== $bp);
-
-        $b = \fread($f, self::BUFFER_SIZE);
-        if (0 !== \strlen($b)) {
-            $bm = \strlen($b) - $trailingBufferLen;
-            $bp = 25;
-
-            if ("\n" !== $b[\strlen($b) - 1]) {
-                goto s1;
-            } else {
-                goto s2;
-            }
+        $bm = \strlen($b);
+        while($bp < $bm) {
+            $i = \strpos($b, ',', $bp);
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            $bp = 52 + $i;
+            if (!isset($sequence[$id])) { $sequence[$id] = $sequenceId++; if (!(--$sequenceRem)) goto l2e; }
         }
 
-        goto o0;
+        $b = \fread($f, self::BUFFER_SIZE);
+        if (0 === \strlen($b)) goto o0;
+
+        $bp = 25;
+        if ("\n" === $b[\strlen($b)-1]) goto s2;
+        goto s1;
 
 l1:
+        $bm = \strlen($b) - $trailingBufferLen;
         while ($bp<$bm) {
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
         }
-
-        $bp -= 25;
 
 l1e:
-        while(false !== ($i = \strpos($b, "\n", $bp))) {
-            ++$counts[$partialIds[\substr($b, $bp+25, $i-$bp-51)] + $dateIds[\substr($b, $i-23, 8)]];
-            $bp = 1 + $i;
+        $bm = \strrpos($b, "\n");
+        while($bp < $bm) {
+            $i = \strpos($b, ',', $bp);
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            $bp = 52 + $i;
         }
 
-        $bRem = \substr($b, $bp);
-
+        $bRem = \substr($b, $bp-25);
         $b = \fread($f, self::BUFFER_SIZE);
-        $bm = \strlen($b) - $trailingBufferLen;
-        $bp = 26+\strpos($b, "\n", 0);
+        $bp = \strpos($b, "\n", 0);
+        $bRem .= \substr($b, 0, $bp);
+        $bp += 26;
 
-        $bRem .= \substr($b, 0, $bp-25);
+        ++$counts[($id = $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]) + $dateIds[\substr($bRem, \strlen($bRem)-22, 7)]];
 
-        ++$counts[$partialIds[\substr($bRem, 25, \strlen($bRem)-52)] + $dateIds[\substr($bRem, \strlen($bRem)-24, 8)]];
-
-        if ($bp < \strlen($b)) {
-            if ("\n" !== $b[\strlen($b) - 1]) {
-                goto l1;
-            } else {
-                goto l2;
-            }
-        }
-
-        goto o0;
+        if ($bp >= \strlen($b)) goto o0;
+        if ("\n" === $b[\strlen($b)-1]) goto l2;
+        goto l1;
 
 l2:
+        $bm = \strlen($b) - $trailingBufferLen;
         while ($bp<$bm) {
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
 
             $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 3+$i, 8)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
         }
-
-        $bp -= 25;
 
 l2e:
-        do {
-            $i = \strpos($b, "\n", $bp+51);
-            ++$counts[$partialIds[\substr($b, $bp+25, $i-$bp-51)] + $dateIds[\substr($b, $i-23, 8)]];
-            $bp = 1 + $i;
-        } while(\strlen($b) !== $bp);
-
-l2ee:
-        $b = \fread($f, self::BUFFER_SIZE);
-        if (0 !== \strlen($b)) {
-            $bm = \strlen($b) - $trailingBufferLen;
-            $bp = 25;
-
-            if ("\n" !== $b[\strlen($b) - 1]) {
-                goto l1;
-            } else {
-                goto l2;
-            }
+        $bm = \strlen($b);
+        while($bp < $bm) {
+            $i = \strpos($b, ',', $bp);
+            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            $bp = 52 + $i;
         }
 
-        // goto o0;
+        $b = \fread($f, self::BUFFER_SIZE);
+        if (0 === \strlen($b)) goto o0;
+
+        $bp = 25;
+        if ("\n" === $b[\strlen($b)-1]) goto l2;
+        goto l1;
 
 o0:
         \asort($sequence, \SORT_NUMERIC);
@@ -1403,9 +1379,9 @@ o0:
                 $j = '    "\\/blog\\/'.$partial."\": {\n";
 
             $fy = true;
-            $year = $aYear-5;
-            while($year < ($aYear + 5)) {
-                $id = $partialId + (($year % 100) * 372);
+            $year = 2021;
+            while($year <= 2026) {
+                $id = $partialId + ((($year-21) % 100) * 372);
 
                 if ($counts[$id++]) {
                     if (false === $fy) $j .= ",\n"; else $fy = false;
