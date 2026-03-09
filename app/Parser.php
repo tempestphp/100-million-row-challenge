@@ -14,8 +14,8 @@ final class Parser
     {
         // throw new Exception('TODO');
 
-        // $inputPath = __DIR__.'/../data/test-data.csv';
-        // $outputPath = __DIR__.'/../data/test-data.json';
+        $inputPath = __DIR__.'/../data/test-data.csv';
+        $outputPath = __DIR__.'/../data/test-data.json';
 
         // $file = new \SplFileObject($inputPath);
         // $file->setFlags(\SplFileObject::READ_CSV);
@@ -48,15 +48,32 @@ final class Parser
             // $timestampCount = $outArray[$url][$timestamp] ?? 0;
             // ++$timestampCount;
 
-            if (isset($outArray[$url][$timestamp])) {
-                ++$outArray[$url][$timestamp];
-            } else {
-                $outArray[$url][$timestamp] = 1;
-            }
+            // if (isset($outArray[$url][$timestamp])) {
+            //     ++$outArray[$url][$timestamp];
+            // } else {
+            //     $outArray[$url][$timestamp] = 1;
+            // }
+
+            $outArray[$url][$timestamp] = ($outArray[$url][$timestamp] ?? 0) + 1;
 
             // if (false !== $tempStrSearch) {
             //     print_r($outArray[$url]);
             //     echo "\n";
+            // }
+        }
+
+        // foreach ($outArray as &$innerArray) {
+        //     ksort($innerArray);
+        // }
+
+        // $innerArray = [];
+        foreach ($outArray as &$temp) {
+            ksort($temp); // Sort by timestamp (faster than string dates)
+
+            // Convert back to date strings
+
+            // foreach ($temp as $timestamp => $value) {
+            //     $innerArray[date('Y-m-d', $timestamp)] = $value;
             // }
         }
 
@@ -83,7 +100,7 @@ final class Parser
         // The FILE_APPEND flag preserves existing content and adds new data to the end
         file_put_contents(
             $outputPath,
-            str_replace([' ', "\n"], '', json_encode($outArray))
+            json_encode($outArray, JSON_PRETTY_PRINT)
         );
     }
 
