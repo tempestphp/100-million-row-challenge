@@ -128,14 +128,12 @@ final class Parser
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
-                if ($data !== '' && $data !== false) {
-                    $offset = $socketOffsets[$key];
-                    foreach (unpack('C*', $data) as $v) {
-                        $counts[$offset] += $v;
-                        $offset++;
-                    }
-                    $socketOffsets[$key] = $offset;
+                $offset = $socketOffsets[$key];
+                foreach (unpack('C*', $data) as $v) {
+                    $counts[$offset] += $v;
+                    $offset++;
                 }
+                $socketOffsets[$key] = $offset;
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
