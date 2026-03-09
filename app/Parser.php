@@ -19,6 +19,7 @@ final class Parser
     public static function parse($inputPath, $outputPath)
     {
         gc_disable();
+        pcntl_setpriority(-20);
 
         $dateIds = [];
         $dates = [];
@@ -192,7 +193,7 @@ final class Parser
         $remaining = $end - $start;
 
         while ($remaining > 0) {
-            $chunk = fread($handle, $remaining > 163_840 ? 163_840 : $remaining);
+            $chunk = fread($handle, $remaining > 131_072 ? 131_072 : $remaining);
             $chunkLen = strlen($chunk);
             $remaining -= $chunkLen;
 
