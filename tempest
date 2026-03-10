@@ -5,8 +5,18 @@ $argv = $_SERVER['argv'];
 if (($argv[1] ?? null) === 'data:parse') {
     require __DIR__ . '/app/Parser.php';
 
-    $inputPath = \substr($argv[2] ?? '', 13);
-    $outputPath = \substr($argv[3] ?? '', 14);
+    $inputPath = __DIR__ . '/data/data.csv';
+    $outputPath = __DIR__ . '/data/data.json';
+
+    for ($i = 2; $i < count($argv); $i++) {
+        $arg = $argv[$i];
+        if (str_starts_with($arg, '--input-path=')) {
+            $inputPath = trim(substr($arg, 13), '"\'');
+        } elseif (str_starts_with($arg, '--output-path=')) {
+            $outputPath = trim(substr($arg, 14), '"\'');
+        }
+    }
+
     \App\Parser::parse($inputPath, $outputPath);
     return;
 }
