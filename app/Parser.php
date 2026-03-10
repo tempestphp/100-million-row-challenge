@@ -9,9 +9,9 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        $firstUrl = Visit::all()[0]->uri;
-        $baseUrlLen = strpos($firstUrl, '/', 8) + 1; // 8 is the length of 'https://'
+        $commonUrlPrefixLen = 25; // https://stitcher.io/blog/
         $timestampLen = 25; // e.g. 2024-09-13T06:26:07+00:00
+        $tsPlus1 = $timestampLen + 1;
 
         // With 1,000,000 visits, it is likely each URL will receive some visits on each date.
         // So we can precompute the date indices to save the sorting later.
@@ -38,8 +38,8 @@ final class Parser
 
         $visitStats = []; // sparse: [url => [date => count]] - only non-zero counts stored
 
-        // open the input file and read line by line
-        $readLimit = 8 * 1024 * 1024; // 8MB - larger chunks = fewer syscalls
+        // open the input file
+        $readLimit = 8 * 1024 * 1024; // 8MB
         $inputRes = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($inputRes, 0);
         $raw = '';
@@ -59,8 +59,8 @@ final class Parser
                 if ($newlinePos === false) {
                     break;
                 }
-                $comma = $newlinePos - $timestampLen - 1;
-                $from += $baseUrlLen;
+                $from += $commonUrlPrefixLen;
+                $comma = $newlinePos - $tsPlus1;
                 $url = \substr($raw, $from, $comma - $from);
                 // first three year digits are always 202, so we can skip them
                 $date = \substr($raw, $comma + 4, 7);
@@ -91,12 +91,12 @@ final class Parser
         $urlCount = 0;
         foreach ($visitStats as $url => $stat) {
             if ($firstUrlWritten) {
-                $buffer .= "\n    },\n    \"\\/";
+                $buffer .= "\n    },\n    \"\\/blog\\/";
             } else {
-                $buffer .= "{\n    \"\\/";
+                $buffer .= "{\n    \"\\/blog\\/";
                 $firstUrlWritten = true;
             }
-            $buffer .= \str_replace('/', '\\/', $url);
+            $buffer .= $url;
 
             $firstCountWritten = false;
             foreach ($possibleDates as $i => $date) {
