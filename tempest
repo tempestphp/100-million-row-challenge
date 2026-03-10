@@ -5,6 +5,25 @@ use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
 
+if (isset($_SERVER['argv'][1]) && $_SERVER['argv'][1] === 'data:parse') {
+    $startTime = microtime(true);
+    $inputPath = getcwd() . '/data/data.csv';
+    $outputPath = getcwd() . '/data/data.json';
+
+    foreach ($_SERVER['argv'] as $arg) {
+        if (str_starts_with($arg, '--input-path=')) {
+            $inputPath = substr($arg, 13);
+        } elseif (str_starts_with($arg, '--output-path=')) {
+            $outputPath = substr($arg, 14);
+        }
+    }
+
+    \App\Parser::parse($inputPath, $outputPath);
+    fwrite(STDOUT, "✓ // " . (microtime(true) - $startTime) . "\n");
+
+    exit(0);
+}
+
 ConsoleApplication::boot(loadBuiltInCommands: false)->run();
 
 exit;

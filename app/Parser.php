@@ -2,11 +2,9 @@
 
 namespace App;
 
-use Exception;
-
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    public static function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
         $handle = fopen($inputPath, 'rb');
