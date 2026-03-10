@@ -22,8 +22,7 @@ final class Parser
         for ($i = 10; $i <= 31; ++$i) {
             $dd[$i] = '-' . $i;
         }
-        $i = 0;
-        $dateToIndices = [];
+        $possibleDates = [];
         for ($year = 1; $year <= 6; ++$year) {
             $y = (string)$year;
             $minMonth = $year === 1 ? 2 : 1;
@@ -32,13 +31,12 @@ final class Parser
                 $mm = $y . $dd[$month];
                 for ($day = 1; $day <= 31; ++$day) {
                     $date = $mm . $dd[$day];
-                    $dateToIndices[$date] = $i;
-                    ++$i;
+                    $possibleDates[] = $date;
                 }
             }
         }
 
-        $visitStats = []; // sparse: [url => [dateIndex => count]] - only non-zero counts stored
+        $visitStats = []; // sparse: [url => [date => count]] - only non-zero counts stored
 
         // open the input file and read line by line
         $readLimit = 8 * 1024 * 1024; // 8MB - larger chunks = fewer syscalls
@@ -62,21 +60,21 @@ final class Parser
                 $url = \substr($raw, $from, $comma - $from);
                 // first three year digits are always 202, so we can skip them
                 $date = \substr($raw, $comma + 4, 7);
-                $dateIndex = $dateToIndices[$date];
                 if (!isset($visitStats[$url])) {
                     $visitStats[$url] = [];
                 }
-                $visitStats[$url][$dateIndex] = ($visitStats[$url][$dateIndex] ?? 0) + 1;
+                $visitStats[$url][$date] = ($visitStats[$url][$date] ?? 0) + 1;
                 $from = $newlinePos + 1;
             }
         }
         \fclose($inputRes);
 
         // speed up printing dates by precomputing the date strings
-        $indexToDates = [];
-        foreach ($dateToIndices as $date => $i) {
-            $indexToDates[$i] = ",\n        \"202" . $date . '": ';
+        $dateJsonParts1 = [];
+        foreach ($possibleDates as $date) {
+            $dateJsonParts1[] = ",\n        \"202" . $date . '": ';
         }
+        $dateJsonParts2 = [];
 
         // write the result to the output file
         $writeLimit = 4 * 1024 * 1024; // 4MB buffer
@@ -87,7 +85,7 @@ final class Parser
         $buffer = '';
         $firstUrlWritten = false;
         $urlCount = 0;
-        foreach ($visitStats as $url => $data) {
+        foreach ($visitStats as $url => $stat) {
             if ($firstUrlWritten) {
                 $buffer .= "\n    },\n    \"\\/";
             } else {
@@ -97,19 +95,20 @@ final class Parser
             $buffer .= \str_replace('/', '\\/', $url);
 
             $firstCountWritten = false;
-            foreach ($indexToDates as $idx => $dateStr) {
-                if (!isset($data[$idx])) {
+            foreach ($possibleDates as $i => $date) {
+                if (!isset($stat[$date])) {
                     continue;
                 }
-                $count = $data[$idx];
                 if ($firstCountWritten) {
-                    $buffer .= $dateStr;
+                    $buffer .= $dateJsonParts1[$i];
                 } else {
-                    $buffer .= "\": {\n";
-                    $buffer .= \substr($dateStr, 2);
+                    if (!isset($dateJsonParts2[$i])) {
+                        $dateJsonParts2[$i] = "\": {\n" . \substr($dateJsonParts1[$i], 2);
+                    }
+                    $buffer .= $dateJsonParts2[$i];
                     $firstCountWritten = true;
                 }
-                $buffer .= (string)$count;
+                $buffer .= (string)$stat[$date];
             }
 
             ++$urlCount;
