@@ -31,7 +31,7 @@ final class Parser
     private const int DISCOVERY_BYTES = 262144;
     private const int READ_CHUNK = 393216;
     private const int MIN_SLUG_LEN = 4;
-    private const int FLUSH_THRESHOLD = 1_048_576;
+    private const int FLUSH_THRESHOLD = 4_194_304;
     private const int SOCKET_CHUNK = 262144;
     private const int DISCOVERY_DUPLICATE_LIMIT = 500;
 
@@ -124,9 +124,11 @@ final class Parser
         for ($worker = 0; $worker < self::WORKERS; $worker++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], self::SOCKET_CHUNK);
+            stream_set_read_buffer($pair[0], 0);
 
             if (pcntl_fork() === 0) {
                 fclose($pair[0]);
+                stream_set_write_buffer($pair[1], 0);
 
                 $output = self::parseRange(
                     $inputPath,
