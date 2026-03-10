@@ -24,36 +24,24 @@ final class Parser
         }
         $i = 0;
         $dateToIndices = [];
-        for ($year = 1; $year <= 6; $year++) {
+        for ($year = 1; $year <= 6; ++$year) {
             $y = (string)$year;
-            $minMonth = match ($year) {
-                1 => 2,
-                default => 1,
-            };
-            $maxMonth = match ($year) {
-                6 => 3,
-                default => 12,
-            };
-            for ($month = $minMonth; $month <= $maxMonth; $month++) {
+            $minMonth = $year === 1 ? 2 : 1;
+            $maxMonth = $year === 6 ? 3 : 12;
+            for ($month = $minMonth; $month <= $maxMonth; ++$month) {
                 $mm = $y . $dd[$month];
-                $maxDay = match ($month) {
-                    2 => 29, // not bother to check 28 or 29
-                    4, 6, 9, 11 => 30,
-                    default => 31,
-                };
-                for ($day = 1; $day <= $maxDay; $day++) {
+                for ($day = 1; $day <= 31; ++$day) {
                     $date = $mm . $dd[$day];
                     $dateToIndices[$date] = $i;
                     ++$i;
                 }
             }
         }
-        $initialDateCounts = array_fill(0, $i, 0); // this will be used to initialize the visit counts for each URL
 
-        $visitStats = []; // this will hold all the visit counts in the format [url => [dateIndex => count]]
+        $visitStats = []; // sparse: [url => [dateIndex => count]] - only non-zero counts stored
 
         // open the input file and read line by line
-        $readLimit = 2 * 1024 * 1024; // 2MB
+        $readLimit = 8 * 1024 * 1024; // 8MB - larger chunks = fewer syscalls
         $inputRes = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($inputRes, 0);
         $raw = '';
@@ -76,9 +64,9 @@ final class Parser
                 $date = \substr($raw, $comma + 4, 7);
                 $dateIndex = $dateToIndices[$date];
                 if (!isset($visitStats[$url])) {
-                    $visitStats[$url] = $initialDateCounts;
+                    $visitStats[$url] = [];
                 }
-                ++$visitStats[$url][$dateIndex];
+                $visitStats[$url][$dateIndex] = ($visitStats[$url][$dateIndex] ?? 0) + 1;
                 $from = $newlinePos + 1;
             }
         }
@@ -91,47 +79,44 @@ final class Parser
         }
 
         // write the result to the output file
-        $writeLimit = 2 * 1024 * 1024; // 2MB
-        /**
-         * By rough estimation, each URL-data-count JSON block is around 48KB.
-         * Find how many iterations will reach the write limit then flush it.
-         */
+        $writeLimit = 4 * 1024 * 1024; // 4MB buffer
         $blockSize = 48 * 1024;
         $iterationLimit = (int)($writeLimit / $blockSize);
         $outputRes = \fopen($outputPath, 'wb');
         \stream_set_write_buffer($outputRes, 0);
         $buffer = '';
-        $firstUrlWrittern = false;
-        $i = 0;
+        $firstUrlWritten = false;
+        $urlCount = 0;
         foreach ($visitStats as $url => $data) {
-            if ($firstUrlWrittern) {
+            if ($firstUrlWritten) {
                 $buffer .= "\n    },\n    \"\\/";
             } else {
                 $buffer .= "{\n    \"\\/";
-                $firstUrlWrittern = true;
+                $firstUrlWritten = true;
             }
             $buffer .= \str_replace('/', '\\/', $url);
 
             $firstCountWritten = false;
-            foreach ($data as $i => $count) {
-                if ($count === 0) {
+            foreach ($indexToDates as $idx => $dateStr) {
+                if (!isset($data[$idx])) {
                     continue;
                 }
+                $count = $data[$idx];
                 if ($firstCountWritten) {
-                    $buffer .= $indexToDates[$i];
+                    $buffer .= $dateStr;
                 } else {
                     $buffer .= "\": {\n";
-                    $buffer .= \substr($indexToDates[$i], 2);
+                    $buffer .= \substr($dateStr, 2);
                     $firstCountWritten = true;
                 }
                 $buffer .= (string)$count;
             }
 
-            ++$i;
-            if ($i >= $iterationLimit) {
+            ++$urlCount;
+            if ($urlCount >= $iterationLimit) {
                 \fwrite($outputRes, $buffer);
                 $buffer = '';
-                $i = 0;
+                $urlCount = 0;
             }
         }
 
