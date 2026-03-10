@@ -90,7 +90,7 @@ final class Parser
 
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
-        $workers = 12;
+        $workers = 8;
         $step = intdiv($fileSize, $workers);
         $boundaries = [0];
         for ($i = 1; $i < $workers; $i++) {
