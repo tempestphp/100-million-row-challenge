@@ -43,8 +43,13 @@ final class Parser
         $inputRes = \fopen($inputPath, 'rb');
         \stream_set_read_buffer($inputRes, 0);
         $raw = '';
+        $from = 0;
         while (true) {
-            $raw .= \fread($inputRes, $readLimit);
+            if ($raw !== '') {
+                $remainderLen = \strlen($raw) - $from;
+                \fseek($inputRes, -$remainderLen, \SEEK_CUR);
+            }
+            $raw = \fread($inputRes, $readLimit);
             if ($raw === '' || $raw === false) {
                 break;
             }
@@ -52,7 +57,6 @@ final class Parser
             while (true) {
                 $newlinePos = \strpos($raw, "\n", $from);
                 if ($newlinePos === false) {
-                    $raw = \substr($raw, $from);
                     break;
                 }
                 $comma = $newlinePos - $timestampLen - 1;
