@@ -153,7 +153,7 @@ l1:
 l1s:
         do {
             $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
             $bp = 52 + $i;
         } while ($bp<$bm);
 
