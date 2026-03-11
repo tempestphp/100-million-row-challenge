@@ -100,14 +100,18 @@ final class Parser
 
         $outputSize = $slugTotal * $di;
 
+        stream_set_read_buffer($bh, 8192);
         fseek($bh, 0, SEEK_END);
         $fileSize = ftell($bh);
+        $step = $fileSize >> 3;
+        $boundaries = [0];
+        for ($i = 1; $i < 8; $i++) {
+            fseek($bh, $step * $i);
+            fgets($bh);
+            $boundaries[] = ftell($bh);
+        }
         fclose($bh);
-
-        // Work-stealing: shared counter via file lock
-        $counterFile = tempnam(sys_get_temp_dir(), 'cnt');
-        file_put_contents($counterFile, pack('P', 0));
-        $workUnit = 8_000_000;
+        $boundaries[] = $fileSize;
 
         $sockets = [];
 
@@ -120,41 +124,8 @@ final class Parser
                 $output = str_repeat("\0", $outputSize);
                 $handle = fopen($inputPath, 'rb');
                 stream_set_read_buffer($handle, 0);
-                $alignHandle = fopen($inputPath, 'rb');
-                $ctr = fopen($counterFile, 'c+b');
-
-                while (true) {
-                    flock($ctr, LOCK_EX);
-                    fseek($ctr, 0);
-                    $off = unpack('P', fread($ctr, 8))[1];
-                    if ($off >= $fileSize) {
-                        flock($ctr, LOCK_UN);
-                        break;
-                    }
-                    $nextOff = $off + $workUnit;
-                    if ($nextOff > $fileSize) $nextOff = $fileSize;
-                    fseek($ctr, 0);
-                    fwrite($ctr, pack('P', $nextOff));
-                    flock($ctr, LOCK_UN);
-
-                    if ($off > 0) {
-                        fseek($alignHandle, $off);
-                        fgets($alignHandle);
-                        $start = ftell($alignHandle);
-                    } else {
-                        $start = 0;
-                    }
-
-                    if ($nextOff < $fileSize) {
-                        fseek($alignHandle, $nextOff);
-                        fgets($alignHandle);
-                        $end = ftell($alignHandle);
-                    } else {
-                        $end = $fileSize;
-                    }
-
-                    fseek($handle, $start);
-                    $remaining = $end - $start;
+                fseek($handle, $boundaries[$w]);
+                $remaining = $boundaries[$w + 1] - $boundaries[$w];
 
                     while ($remaining > 0) {
                         $chunk = fread($handle, $remaining > 163_840 ? 163_840 : $remaining);
@@ -222,11 +193,7 @@ final class Parser
                             $p = $sep + 52;
                         }
                     }
-                }
-
                 fclose($handle);
-                fclose($alignHandle);
-                fclose($ctr);
                 fwrite($pair[1], chunk_split($output, 1, "\0"));
                 exit(0);
             }
@@ -251,8 +218,6 @@ final class Parser
                 }
             }
         }
-
-        @unlink($counterFile);
 
         $merged = $buffers[0];
         for ($w = 1; $w < 8; $w++) {
