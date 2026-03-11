@@ -2,6 +2,7 @@
 
 namespace App;
 
+use function array_fill;
 use function chr;
 use function fclose;
 use function feof;
@@ -9,10 +10,25 @@ use function fopen;
 use function fread;
 use function fseek;
 use function fwrite;
+use function gc_disable;
+use function pcntl_fork;
+use function str_repeat;
+use function str_replace;
+use function stream_select;
+use function stream_set_chunk_size;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function unpack;
+use const SEEK_CUR;
+use const SEEK_END;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
@@ -26,12 +42,6 @@ final class Parser
         }
         gc_disable();
 
-        if (function_exists('memory_reset_peak_usage')) {
-            memory_reset_peak_usage();
-        }
-        if (function_exists('pcntl_setpriority')) {
-            @pcntl_setpriority(-10);
-        }
     }
 
     public static function parse($inputPath, $outputPath)
@@ -199,14 +209,13 @@ final class Parser
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, $outputSize);
-                if ($data !== '' && $data !== false) {
                     $off = $offsets[$key];
                     foreach (unpack('C*', $data) as $v) {
                         $counts[$off] += $v;
                         $off++;
                     }
                     $offsets[$key] = $off;
-                }
+                
                 if (feof($socket)) {
                     fclose($socket);
                     unset($sockets[$key]);
@@ -234,7 +243,7 @@ final class Parser
             $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
         }
 
-        $firstPath = true;
+        $sep = "\n    ";
         $base = 0;
 
         for ($p = 0; $p < $slugCount; $p++) {
@@ -253,9 +262,8 @@ final class Parser
                 continue;
             }
 
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $sep = ",\n    ";
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $idx++;
