@@ -5,7 +5,7 @@ namespace App;
 final class Parser
 {
     private const int BUFFER_SIZE = 262144;
-    private const int CHUNK_SIZE = 16777216;
+    private const int CHUNK_SIZE = 262144;
     private const int OUTPUT_BUFFER_SIZE = 1048576;
 
     private static array $keepAlive = [];
