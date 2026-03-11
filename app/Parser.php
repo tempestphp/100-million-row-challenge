@@ -114,14 +114,15 @@ s1:
         do {
             $i = \strpos($b, ',', $bp);
             ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            $bp = 52 + $i;
             if (!isset($sequence[$id])) {
                 $sequence[$id] = $sequenceId++;
                 if (0 === (--$sequenceRem)) {
-                    if (($bp = 52 + $i)>=$bm) goto l1e;
+                    if ($bp>=$bm) goto l1e;
                     goto l1s;
                 }
             }
-        } while (($bp = 52 + $i)<$bm);
+        } while ($bp<$bm);
 
 s1e:
         if ($bp === (25+\strlen($b))) {
@@ -139,7 +140,8 @@ s1e:
         if (!isset($sequence[$id])) {
             $sequence[$id] = $sequenceId++;
             if (0 === (--$sequenceRem)) {
-                if ($bp>=($bm = \strrpos($b, "\n"))) goto l1e;
+                $bm = \strrpos($b, "\n");
+                if ($bp>=$bm) goto l1e;
                 goto l1s;
             }
         }
@@ -152,7 +154,8 @@ l1s:
         do {
             $i = \strpos($b, ',', $bp);
             ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
-        } while (($bp = 52 + $i)<$bm);
+            $bp = 52 + $i;
+        } while ($bp<$bm);
 
 l1e:
         if ($bp === (25+\strlen($b))) {
