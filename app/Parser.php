@@ -257,7 +257,7 @@ final class Parser
         for ($w = 1; $w < 8; $w++) {
             sodium_add($merged, $buffers[$w]);
         }
-        $counts = array_values(unpack('v*', $merged));
+        $counts = (unpack('v*', $merged));
 
         self::writeJson($outputPath, $counts, $paths, $dates, $di, $slugTotal);
     }
@@ -279,7 +279,7 @@ final class Parser
         }
 
         $sep = "\n    ";
-        $base = 0;
+        $base = 1;
         $buf = '{';
 
         for ($p = 0; $p < $slugCount; $p++) {
