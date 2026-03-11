@@ -169,7 +169,7 @@ l1e:
         $bp = 26+\strpos($b, "\n", 0);
         $bRem .= \substr($b, 0, $bp-26);
 
-        ++$counts[($id = $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]) + $dateIds[\substr($bRem, \strlen($bRem)-22, 7)]];
+        ++$counts[$partialIds[\substr($bRem, 25, \strlen($bRem)-51)] + $dateIds[\substr($bRem, \strlen($bRem)-22, 7)]];
 
         goto l1;
 
