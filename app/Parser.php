@@ -64,7 +64,7 @@ final class Parser
 
         $bh = fopen($inputPath, 'rb');
         stream_set_read_buffer($bh, 0);
-        $raw = fread($bh, 2_097_152);
+        $raw = fread($bh, 181000);
 
         $paths = [];
         $slugBaseMap = [];
@@ -72,8 +72,7 @@ final class Parser
         $pos = 0;
         $lastNl = strrpos($raw, "\n") ?: 0;
 
-        $noNew = 0;
-        while ($pos < $lastNl) {
+        while ($pos < $lastNl && $slugTotal < 268) {
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
             $slug = substr($raw, $pos + 25, $nl - $pos - 51);
@@ -81,9 +80,6 @@ final class Parser
                 $paths[$slugTotal] = $slug;
                 $slugBaseMap[$slug] = $slugTotal * $di;
                 $slugTotal++;
-                $noNew = 0;
-            } else if (++$noNew > 5000) {
-                break;
             }
             $pos = $nl + 1;
         }
