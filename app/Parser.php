@@ -189,9 +189,8 @@ o0:
                 $j = '    "\\/blog\\/'.$partial."\": {\n";
 
             $year = 2021;
-o1:
             $id = $partialId + ((($year-21) % 100) * 372);
-
+o1:
             if ($counts[$id++] > 0) {
                 $j .= '        "'.$year.'-01-01": '.$counts[$id-1];
                 goto oy1;
@@ -1667,8 +1666,6 @@ o1:
             continue;
 
 o2:
-            $id = $partialId + ((($year-21) % 100) * 372);
-
             if ($counts[$id++] > 0) {
                 $j .= ",\n        \"".$year.'-01-01": '.$counts[$id-1];
             }
