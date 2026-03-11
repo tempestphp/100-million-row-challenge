@@ -88,9 +88,9 @@ final class Parser
             $sequence[$id] = null;
             $uriIds[$id] = $partial;
 
-            $id += 37200;
+            $id += 2232;
         }
-        $counts = \array_fill(0, \count($partialIds) * 37200, 0); self::$keepAlive[] = &$counts;
+        $counts = \array_fill(0, $id, 0); self::$keepAlive[] = &$counts;
 
         $fo = \fopen($outputPath, 'wb');
         if ($fo === false) throw new \Exception('Output file could not be created: '.$outputPath);
@@ -179,17 +179,15 @@ o0:
         \fwrite($fo, "{\n");
 
         $fu = true;
-        foreach($sequence as $partialId => $sequenceNo) {
+        foreach($sequence as $id => $sequenceNo) {
             if (!isset($sequenceNo)) continue;
 
-            $partial = $uriIds[$partialId];
             if (false === $fu)
-                $j = ",\n".'    "\\/blog\\/'.$partial."\": {\n";
+                $j = ",\n".'    "\\/blog\\/'.$uriIds[$id]."\": {\n";
             else
-                $j = '    "\\/blog\\/'.$partial."\": {\n";
+                $j = '    "\\/blog\\/'.$uriIds[$id]."\": {\n";
 
             $year = 2021;
-            $id = $partialId + ((($year-21) % 100) * 372);
 o1:
             if ($count = $counts[$id++]) {
                 $j .= '        "'.$year.'-01-01": '.$count;
