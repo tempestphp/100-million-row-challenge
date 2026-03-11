@@ -3,7 +3,6 @@
 namespace App;
 
 use function array_fill;
-use function array_values;
 use function chr;
 use function chunk_split;
 use function fclose;
