@@ -32,13 +32,9 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    public static function prepareRuntime(): void
-    {
-        gc_disable();
-    }
-
     public static function parse($inputPath, $outputPath)
-    {
+    {   
+        gc_disable();
         $dateIds = [];
         $dates = [];
         $di = 0;
