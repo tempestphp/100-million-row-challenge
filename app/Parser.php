@@ -3,16 +3,13 @@
 namespace App;
 
 use function array_fill;
-use function array_values;
 use function chr;
-use function chunk_split;
 use function fclose;
 use function feof;
 use function fopen;
 use function fread;
 use function fseek;
 use function fwrite;
-use function sodium_add;
 use function str_replace;
 use function stream_select;
 use function stream_set_chunk_size;
@@ -114,8 +111,8 @@ final class Parser
         $w = 8;
         while ($w-- > 0) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pair[0], $outputSize << 1);
-            stream_set_chunk_size($pair[1], $outputSize << 1);
+            stream_set_chunk_size($pair[0], $outputSize);
+            stream_set_chunk_size($pair[1], $outputSize);
             if (pcntl_fork() === 0) {
                 $output = str_repeat("\0", $outputSize);
                 $handle = fopen($inputPath, 'rb');
@@ -157,7 +154,7 @@ final class Parser
                     $remaining = $end - $start;
 
                     while ($remaining > 0) {
-                        $chunk = fread($handle, $remaining > 524_288 ? 524_288 : $remaining);
+                        $chunk = fread($handle, $remaining > 163_840 ? 163_840 : $remaining);
                         $chunkLen = strlen($chunk);
                         $remaining -= $chunkLen;
 
@@ -227,13 +224,14 @@ final class Parser
                 fclose($handle);
                 fclose($alignHandle);
                 fclose($ctr);
-                fwrite($pair[1], chunk_split($output, 1, "\0"));
+                fwrite($pair[1], $output);
                 exit(0);
             }
             fclose($pair[1]);
             $sockets[$w] = $pair[0];
         }
-        $buffers = array_fill(0, 8, '');
+        $counts = array_fill(0, $outputSize, 0);
+        $socketOffsets = array_fill(0, 8, 0);
 
         $write = [];
         $except = [];
@@ -241,9 +239,14 @@ final class Parser
             $read = $sockets;
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
-                $data = fread($socket, $outputSize << 1);
+                $data = fread($socket, $outputSize);
                 if ($data !== '' && $data !== false) {
-                    $buffers[$key] .= $data;
+                    $offset = $socketOffsets[$key];
+                    foreach (unpack('C*', $data) as $v) {
+                        $counts[$offset] += $v;
+                        $offset++;
+                    }
+                    $socketOffsets[$key] = $offset;
                 }
                 if (feof($socket)) {
                     fclose($socket);
@@ -253,12 +256,6 @@ final class Parser
         }
 
         @unlink($counterFile);
-
-        $merged = $buffers[0];
-        for ($w = 1; $w < 8; $w++) {
-            sodium_add($merged, $buffers[$w]);
-        }
-        $counts = array_values(unpack('v*', $merged));
 
         self::writeJson($outputPath, $counts, $paths, $dates, $di, $slugTotal);
     }
