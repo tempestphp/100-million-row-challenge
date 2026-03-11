@@ -229,6 +229,7 @@ final class Parser
 
             $p = 25;
             $fence = $lastNl - 1010;
+            $fence2 = $lastNl - 202;
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
@@ -283,9 +284,21 @@ final class Parser
 
             }
 
+            while ($p < $fence2) {
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+
+                $sep = strpos($chunk, ',', $p);
+                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
+                $output[$idx] = $next[$output[$idx]];
+                $p = $sep + 52;
+            }
+
             while ($p < $lastNl) {
                 $sep = strpos($chunk, ',', $p);
-                if ($sep === false || $sep >= $lastNl) break;
+                if ($sep === false ) break;
                 $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
                 $output[$idx] = $next[$output[$idx]];
                 $p = $sep + 52;
