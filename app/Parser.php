@@ -1661,8 +1661,7 @@ o1:
                 goto oy372;
             }
 
-            ++$year;
-            if($year <= 2026) goto o1;
+            if(++$year <= 2026) goto o1;
             continue;
 
 o2:
@@ -3141,8 +3140,7 @@ o2:
             }
 
             oy372:
-            ++$year;
-            if($year <= 2026) goto o2;
+            if(++$year <= 2026) goto o2;
             
             $j .= "\n    }";
             \fwrite($fo, $j);
