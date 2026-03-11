@@ -73,7 +73,7 @@ final class Parser
 
         $bh = fopen($inputPath, 'rb');
         stream_set_read_buffer($bh, 0);
-        $raw = fread($bh, 200_000);
+        $raw = fread($bh, 2_097_152);
 
         $paths = [];
         $slugBaseMap = [];
@@ -157,7 +157,7 @@ final class Parser
                     $remaining = $end - $start;
 
                     while ($remaining > 0) {
-                        $chunk = fread($handle, $remaining > 163_840 ? 163_840 : $remaining);
+                        $chunk = fread($handle, $remaining > 524_288 ? 524_288 : $remaining);
                         $chunkLen = strlen($chunk);
                         $remaining -= $chunkLen;
 
