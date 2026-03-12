@@ -6,7 +6,7 @@ namespace App;
 
 final class Parser
 {
-	private const SHM_SIZE = 262144;
+	private const SHM_SIZE = 262144 / 2;
 	private const OFFSET_STATUS = 0;
 	private const OFFSET_LENGTH = 4;
 	private const OFFSET_DATA = 8;
@@ -20,7 +20,7 @@ final class Parser
 
 		\gc_disable();
 
-		$numWorkers = 6;
+		$numWorkers = 4;
 		$outFd      = \fopen($outputPath, 'wb');
 		\stream_set_write_buffer($outFd, 1024 * 1024 * 10);
 		\fwrite($outFd, "{\n");
