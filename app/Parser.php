@@ -8,15 +8,286 @@ final class Parser
     private const int CHUNK_SIZE = 262144;
     private const int OUTPUT_BUFFER_SIZE = 1048576;
 
-    private static array $keepAlive = [];
+    private static array $keepAlive;
 
-    public final static function parse(string $inputPath, string $outputPath): void
+    private static function initialize()
     {
-        \gc_disable();
-        \ini_set('memory_limit', '-1');
-        \set_time_limit(0);
+        self::$keepAlive = [];
 
-        $dateIds = []; self::$keepAlive[] = &$dateIds;
+        $allPartialIds = [
+            'which-editor-to-choose',
+            'tackling_responsive_images-part_1',
+            'tackling_responsive_images-part_2',
+            'image_optimizers',
+            'static_sites_vs_caching',
+            'stitcher-alpha-4',
+            'simplest-plugin-support',
+            'stitcher-alpha-5',
+            'php-generics-and-why-we-need-them',
+            'stitcher-beta-1',
+            'array-objects-with-fixed-types',
+            'performance-101-building-the-better-web',
+            'process-forks',
+            'object-oriented-generators',
+            'responsive-images-as-css-background',
+            'a-programmers-cognitive-load',
+            'mastering-key-bindings',
+            'stitcher-beta-2',
+            'phpstorm-performance',
+            'optimised-uuids-in-mysql',
+            'asynchronous-php',
+            'mysql-import-json-binary-character-set',
+            'where-a-curly-bracket-belongs',
+            'mysql-query-logging',
+            'mysql-show-foreign-key-errors',
+            'responsive-images-done-right',
+            'phpstorm-tips-for-power-users',
+            'what-php-can-be',
+            'phpstorm-performance-issues-on-osx',
+            'dependency-injection-for-beginners',
+            'liskov-and-type-safety',
+            'acquisition-by-giants',
+            'visual-perception-of-code',
+            'service-locator-anti-pattern',
+            'the-web-in-2045',
+            'eloquent-mysql-views',
+            'laravel-view-models',
+            'laravel-view-models-vs-view-composers',
+            'organise-by-domain',
+            'array-merge-vs + ',
+            'share-a-blog-assertchris-io',
+            'phpstorm-performance-october-2018',
+            'structuring-unstructured-data',
+            'share-a-blog-codingwriter-com',
+            'new-in-php-73',
+            'share-a-blog-betterwebtype-com',
+            'have-you-thought-about-casing',
+            'comparing-dates',
+            'share-a-blog-sebastiandedeyne-com',
+            'analytics-for-developers',
+            'announcing-aggregate',
+            'php-jit',
+            'craftsmen-know-their-tools',
+            'laravel-queueable-actions',
+            'php-73-upgrade-mac',
+            'array-destructuring-with-list-in-php',
+            'unsafe-sql-functions-in-laravel',
+            'starting-a-newsletter',
+            'short-closures-in-php',
+            'solid-interfaces-and-final-rant-with-brent',
+            'php-in-2019',
+            'starting-a-podcast',
+            'a-project-at-spatie',
+            'what-are-objects-anyway-rant-with-brent',
+            'tests-and-types',
+            'typed-properties-in-php-74',
+            'preloading-in-php-74',
+            'things-dependency-injection-is-not-about',
+            'a-letter-to-the-php-team',
+            'a-letter-to-the-php-team-reply-to-joe',
+            'guest-posts',
+            'can-i-translate-your-blog',
+            'laravel-has-many-through',
+            'laravel-custom-relation-classes',
+            'new-in-php-74',
+            'php-74-upgrade-mac',
+            'php-preload-benchmarks',
+            'php-in-2020',
+            'enums-without-enums',
+            'bitwise-booleans-in-php',
+            'event-driven-php',
+            'minor-versions-breaking-changes',
+            'combining-event-sourcing-and-stateful-systems',
+            'array-chunk-in-php',
+            'php-8-in-8-code-blocks',
+            'builders-and-architects-two-types-of-programmers',
+            'the-ikea-effect',
+            'php-74-in-7-code-blocks',
+            'improvements-on-laravel-nova',
+            'type-system-in-php-survey',
+            'merging-multidimensional-arrays-in-php',
+            'what-is-array-plus-in-php',
+            'type-system-in-php-survey-results',
+            'constructor-promotion-in-php-8',
+            'abstract-resources-in-laravel-nova',
+            'braille-and-the-history-of-software',
+            'jit-in-real-life-web-applications',
+            'php-8-match-or-switch',
+            'why-we-need-named-params-in-php',
+            'shorthand-comparisons-in-php',
+            'php-8-before-and-after',
+            'php-8-named-arguments',
+            'my-journey-into-event-sourcing',
+            'differences',
+            'annotations',
+            'dont-get-stuck',
+            'attributes-in-php-8',
+            'the-case-for-transpiled-generics',
+            'phpstorm-scopes',
+            'why-light-themes-are-better-according-to-science',
+            'what-a-good-pr-looks-like',
+            'front-line-php',
+            'php-8-jit-setup',
+            'php-8-nullsafe-operator',
+            'new-in-php-8',
+            'php-8-upgrade-mac',
+            'when-i-lost-a-few-hundred-leads',
+            'websites-like-star-wars',
+            'php-reimagined',
+            'a-storm-in-a-glass-of-water',
+            'php-enums-before-php-81',
+            'php-enums',
+            'dont-write-your-own-framework',
+            'honesty',
+            'thoughts-on-event-sourcing',
+            'what-event-sourcing-is-not-about',
+            'fibers-with-a-grain-of-salt',
+            'php-in-2021',
+            'parallel-php',
+            'why-we-need-multi-line-short-closures-in-php',
+            'a-new-major-version-of-laravel-event-sourcing',
+            'what-about-config-builders',
+            'opinion-driven-design',
+            'php-version-stats-july-2021',
+            'what-about-request-classes',
+            'cloning-readonly-properties-in-php-81',
+            'an-event-driven-mindset',
+            'php-81-before-and-after',
+            'optimistic-or-realistic-estimates',
+            'we-dont-need-runtime-type-checks',
+            'the-road-to-php',
+            'why-do-i-write',
+            'rational-thinking',
+            'named-arguments-and-variadic-functions',
+            're-on-using-psr-abstractions',
+            'my-ikea-clock',
+            'php-81-readonly-properties',
+            'birth-and-death-of-a-framework',
+            'php-81-new-in-initializers',
+            'route-attributes',
+            'generics-in-php-video',
+            'php-81-in-8-code-blocks',
+            'new-in-php-81',
+            'php-81-performance-in-real-life',
+            'php-81-upgrade-mac',
+            'how-to-be-right-on-the-internet',
+            'php-version-stats-january-2022',
+            'php-in-2022',
+            'how-i-plan',
+            'twitter-home-made-me-miserable',
+            'its-your-fault',
+            'dealing-with-dependencies',
+            'php-in-2021-video',
+            'generics-in-php-1',
+            'generics-in-php-2',
+            'generics-in-php-3',
+            'generics-in-php-4',
+            'goodbye',
+            'strategies',
+            'dealing-with-deprecations',
+            'attribute-usage-in-top-php-packages',
+            'php-enum-style-guide',
+            'clean-and-minimalistic-phpstorm',
+            'stitcher-turns-5',
+            'php-version-stats-july-2022',
+            'evolution-of-a-php-object',
+            'uncertainty-doubt-and-static-analysis',
+            'road-to-php-82',
+            'php-performance-across-versions',
+            'light-colour-schemes-are-better',
+            'deprecated-dynamic-properties-in-php-82',
+            'php-reimagined-part-2',
+            'thoughts-on-asymmetric-visibility',
+            'uses',
+            'php-82-in-8-code-blocks',
+            'readonly-classes-in-php-82',
+            'deprecating-spatie-dto',
+            'php-82-upgrade-mac',
+            'php-annotated',
+            'you-cannot-find-me-on-mastodon',
+            'new-in-php-82',
+            'all-i-want-for-christmas',
+            'upgrading-to-php-82',
+            'php-version-stats-january-2023',
+            'php-in-2023',
+            'tabs-are-better',
+            'sponsors',
+            'why-curly-brackets-go-on-new-lines',
+            'my-10-favourite-php-functions',
+            'acronyms',
+            'code-folding',
+            'light-colour-schemes',
+            'slashdash',
+            'thank-you-kinsta',
+            'cloning-readonly-properties-in-php-83',
+            'limited-by-committee',
+            'things-considered-harmful',
+            'procedurally-generated-game-in-php',
+            'dont-be-clever',
+            'override-in-php-83',
+            'php-version-stats-july-2023',
+            'is-a-or-acts-as',
+            'rfc-vote',
+            'new-in-php-83',
+            'i-dont-know',
+            'passion-projects',
+            'php-version-stats-january-2024',
+            'the-framework-that-gets-out-of-your-way',
+            'a-syntax-highlighter-that-doesnt-suck',
+            'building-a-custom-language-in-tempest-highlight',
+            'testing-patterns',
+            'php-in-2024',
+            'tagged-singletons',
+            'twitter-exit',
+            'a-vocal-minority',
+            'php-version-stats-july-2024',
+            'you-should',
+            'new-with-parentheses-php-84',
+            'html-5-in-php-84',
+            'array-find-in-php-84',
+            'its-all-just-text',
+            'improved-lazy-loading',
+            'i-dont-code-the-way-i-used-to',
+            'php-84-at-least',
+            'extends-vs-implements',
+            'a-simple-approach-to-static-generation',
+            'building-a-framework',
+            'tagging-tempest-livestream',
+            'things-i-learned-writing-a-fiction-novel',
+            'unfair-advantage',
+            'new-in-php-84',
+            'php-version-stats-january-2025',
+            'theoretical-engineers',
+            'static-websites-with-tempest',
+            'request-objects-in-tempest',
+            'php-verse-2025',
+            'tempest-discovery-explained',
+            'php-version-stats-june-2025',
+            'pipe-operator-in-php-85',
+            'a-year-of-property-hooks',
+            'readonly-or-private-set',
+            'things-i-wish-i-knew',
+            'impact-charts',
+            'whats-your-motivator',
+            'vendor-locked',
+            'reducing-code-motion',
+            'sponsoring-open-source',
+            'my-wishlist-for-php-in-2026',
+            'game-changing-editions',
+            'new-in-php-85',
+            'flooded-rss',
+            'php-2026',
+            'open-source-strategies',
+            'not-optional',
+            'processing-11-million-rows',
+            'ai-induced-skepticism',
+            'php-86-partial-function-application',
+            '11-million-rows-in-seconds',
+        ];
+
+        $allL = '0000100111111011010101000001101111111111101011011';
+
+        $dateIds = [];
         $id = 0;
         for($year = 1; $year <= 6; $year++) {
             for($month = 1; $month <= 12; $month++) {
@@ -76,104 +347,31 @@ final class Parser
             }
         }
 
-        $partialIds = []; self::$keepAlive[] = &$partialIds;
-        $uriIds = []; self::$keepAlive[] = &$uriIds;
-        $sequence = []; self::$keepAlive[] = &$sequence;
+        $partialIds = [];
+        $partialBeIds = [];
+        $uriIds = [];
+        $sequence = [];
         $id = 0;
-        foreach(\App\Commands\Visit::all() as $visit) {
-            $partial = \substr($visit->uri, 25);
-
-            $partialIds[$partial] = $id;
+        foreach($allPartialIds as $partial) {
+            $l = \strlen($partial);
+            if ('1' === $allL[$l]) {
+                $partialBeIds[$partial[0].$partial[$l-1].\chr($l)] = $id;
+            } else {
+                $partialIds[$partial] = $id;
+            }
 
             $sequence[$id] = null;
             $uriIds[$id] = $partial;
 
             $id += 2232;
         }
-        $counts = \array_fill(0, $id, 0); self::$keepAlive[] = &$counts;
+        $counts = \array_fill(0, $id, 0);
+        
+        return [$allL, $partialIds, $partialBeIds, $sequence, $uriIds, $dateIds, $counts];
+    }
 
-        $fo = \fopen($outputPath, 'wb');
-        if ($fo === false) throw new \Exception('Output file could not be created: '.$outputPath);
-        \stream_set_write_buffer($fo, self::OUTPUT_BUFFER_SIZE);
-        self::$keepAlive[] = &$fo;
-
-        $f = \fopen($inputPath, 'rb');
-        if (false === $f) throw new \Exception('Input file could not be opened: '.$inputPath);
-        \stream_set_read_buffer($f, 0);
-        \stream_set_chunk_size($f, self::CHUNK_SIZE);
-        self::$keepAlive[] = &$f;
-
-        $b = \fread($f, self::BUFFER_SIZE);
-        $bp = 25;
-
-        $sequenceRem = \count($sequence);
-        $sequenceId = 0;
-
-s1:
-        $bm = \strrpos($b, "\n");
-        do {
-            $i = \strpos($b, ',', $bp);
-            ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
-            $bp = 52 + $i;
-            if (!isset($sequence[$id])) {
-                $sequence[$id] = $sequenceId++;
-                if (0 === (--$sequenceRem)) {
-                    if ($bp>=$bm) goto l1e;
-                    goto l1s;
-                }
-            }
-        } while ($bp<$bm);
-
-s1e:
-        if ($bp === (25+\strlen($b))) {
-            if (0 === \strlen($b = \fread($f, self::BUFFER_SIZE))) goto o0;
-            $bp = 25;
-            goto s1;
-        }
-
-        $bRem = \substr($b, $bp-25);
-        $b = \fread($f, self::BUFFER_SIZE);
-        $bp = 26+\strpos($b, "\n", 0);
-        $bRem .= \substr($b, 0, $bp-26);
-
-        ++$counts[($id = $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]) + $dateIds[\substr($bRem, \strlen($bRem)-22, 7)]];
-        if (!isset($sequence[$id])) {
-            $sequence[$id] = $sequenceId++;
-            if (0 === (--$sequenceRem)) {
-                $bm = \strrpos($b, "\n");
-                if ($bp>=$bm) goto l1e;
-                goto l1s;
-            }
-        }
-
-        goto s1;
-
-l1:
-        $bm = \strrpos($b, "\n");
-l1s:
-        do {
-            $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
-            $bp = 52 + $i;
-        } while ($bp<$bm);
-
-l1e:
-        if ($bp === (25+\strlen($b))) {
-            if (0 === \strlen($b = \fread($f, self::BUFFER_SIZE))) goto o0;
-            $bp = 25;
-            goto l1;
-        }
-
-        $bRem = \substr($b, $bp-25);
-        $b = \fread($f, self::BUFFER_SIZE);
-        $bp = 26+\strpos($b, "\n", 0);
-        $bRem .= \substr($b, 0, $bp-26);
-
-        ++$counts[$partialIds[\substr($bRem, 25, \strlen($bRem)-51)] + $dateIds[\substr($bRem, \strlen($bRem)-22, 7)]];
-
-        goto l1;
-
-o0:
+    private static function writeJson(&$fo, &$sequence, $uriIds, $counts)
+    {
         \asort($sequence, \SORT_NUMERIC);
 
         \fwrite($fo, "{\n");
@@ -3139,14 +3337,128 @@ o2:
 
             oy372:
             if(++$year <= 2026) goto o2;
-            
+
             $j .= "\n    }";
             \fwrite($fo, $j);
             $fu = false;
         }
 
         \fwrite($fo, "\n}");
+   }
+
+    public final static function parse(string $inputPath, string $outputPath): void
+    {
+        \gc_disable();
+        \ini_set('memory_limit', '-1');
+        \set_time_limit(0);
+
+        list($allL, $partialIds, $partialBeIds, $sequence, $uriIds, $dateIds, $counts) = self::initialize();
+
+        $fo = \fopen($outputPath, 'wb');
+        if ($fo === false) throw new \Exception('Output file could not be created: '.$outputPath);
+        \stream_set_write_buffer($fo, self::OUTPUT_BUFFER_SIZE);
+        self::$keepAlive[] = &$fo;
+
+        $f = \fopen($inputPath, 'rb');
+        if (false === $f) throw new \Exception('Input file could not be opened: '.$inputPath);
+        \stream_set_read_buffer($f, 0);
+        \stream_set_chunk_size($f, self::CHUNK_SIZE);
+        self::$keepAlive[] = &$f;
+
+        $b = \fread($f, self::BUFFER_SIZE);
+        $bp = 25;
+
+        $sequenceRem = \count($sequence);
+        $sequenceId = 0;
+
+s1:
+        $bm = \strrpos($b, "\n");
+        do {
+            $i = \strpos($b, ',', $bp);
+            ++$counts[$dateIds[\substr($b, 4+$i, 7)] +
+                ($id = ($allL[$i-$bp] === '1'
+                        ? $partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)]
+                        : $partialIds[\substr($b, $bp, $i-$bp)]
+                       )
+                )];
+            $bp = 52 + $i;
+            if (!isset($sequence[$id])) {
+                $sequence[$id] = $sequenceId++;
+                if (0 === (--$sequenceRem)) {
+                    if ($bp>=$bm) goto l1e;
+                    goto l1s;
+                }
+            }
+        } while ($bp<$bm);
+
+s1e:
+        if ($bp === (25+\strlen($b))) {
+            if (0 === \strlen($b = \fread($f, self::BUFFER_SIZE))) goto o0;
+            $bp = 25;
+            goto s1;
+        }
+
+        $bRem = \substr($b, $bp-25);
+        $b = \fread($f, self::BUFFER_SIZE);
+        $bp = \strpos($b, "\n", 0);
+        $bRem .= \substr($b, 0, $bp);
+        $bp += 26;
+
+        ++$counts[$dateIds[\substr($bRem, \strlen($bRem)-22, 7)] +
+            ($id = ($allL[$i-$bp] === '1'
+                    ? $partialBeIds[$bRem[25].$b[\strlen($bRem)-1].\chr(\strlen($bRem))]
+                    : $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]
+                   )
+            )];
+        if (!isset($sequence[$id])) {
+            $sequence[$id] = $sequenceId++;
+            if (0 === (--$sequenceRem)) {
+                $bm = \strrpos($b, "\n");
+                if ($bp>=$bm) goto l1e;
+                goto l1s;
+            }
+        }
+
+        goto s1;
+
+l1:
+        $bm = \strrpos($b, "\n");
+l1s:
+        do {
+            $i = \strpos($b, ',', $bp);
+            ++$counts[$dateIds[\substr($b, 4+$i, 7)] +
+                ('1' === $allL[$i-$bp]
+                 ? $partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)]
+                 : $partialIds[\substr($b, $bp, $i-$bp)]
+                )];
+            $bp = 52 + $i;
+        } while ($bp<$bm);
+
+l1e:
+        if ($bp === (25+\strlen($b))) {
+            if (0 === \strlen($b = \fread($f, self::BUFFER_SIZE))) goto o0;
+            $bp = 25;
+            goto l1;
+        }
+
+        $bRem = \substr($b, $bp-25);
+        $b = \fread($f, self::BUFFER_SIZE);
+        $bp = \strpos($b, "\n", 0);
+        $bRem .= \substr($b, 0, $bp);
+        $bp += 26;
+
+        ++$counts[$dateIds[\substr($bRem, \strlen($bRem)-22, 7)] +
+            ('1' === $allL[$i-$bp]
+             ? $partialBeIds[$bRem[25].$b[\strlen($bRem)-1].\chr(\strlen($bRem))]
+             : $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]
+            )];
+
+        goto l1;
+
+o0:
+        self::writeJson($fo, $sequence, $uriIds, $counts);
+
         \fclose($fo);
- //       \exit();
+        \exit();
     }
 }
