@@ -20,13 +20,9 @@ final class Parser
 	public function parse(string $inputPath, string $outputPath): void
 	{
 
-		if (opcache_is_script_cached(__FILE__) === false) {
-		 opcache_compile_file(__FILE__);
-		}
-
 		gc_disable();
 
-		$numWorkers = 7;
+		$numWorkers = 8;
 		$outFd      = fopen($outputPath, 'wb');
 		stream_set_write_buffer($outFd, 0);
 		fwrite($outFd, "{\n");
