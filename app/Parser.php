@@ -58,7 +58,8 @@ final class Parser
         }
 
         $next = [];
-        for ($i = 0; $i < 255; $i++) {
+        $i = 255;
+        while ($i-- > 0) {
             $next[chr($i)] = chr($i + 1);
         }
 
@@ -94,7 +95,7 @@ final class Parser
         $fileSize = ftell($bh);
         $step = $fileSize >> 3;
         $boundaries = [0];
-        for ($i = 1; $i < 8; $i++) {
+        for ($i = 1; $i < 9; $i++) {
             fseek($bh, $step * $i);
             fgets($bh);
             $boundaries[] = ftell($bh);
@@ -253,12 +254,14 @@ final class Parser
         fwrite($out, '{');
 
         $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
+        $d = $dateCount;
+        while ($d-- > 0) {
             $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
         }
 
         $escapedPaths = [];
-        for ($p = 0; $p < $slugCount; $p++) {
+        $p = $slugCount;
+        while ($p-- > 0) {
             $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
         }
 
