@@ -6,7 +6,7 @@ namespace App;
 
 final class Parser
 {
-	private const SHM_SIZE = 524288;
+	private const SHM_SIZE = 262144;
 	private const OFFSET_STATUS = 0;
 	private const OFFSET_LENGTH = 4;
 	private const OFFSET_DATA = 8;
@@ -20,7 +20,7 @@ final class Parser
 
 		\gc_disable();
 
-		$numWorkers = 7;
+		$numWorkers = 6;
 		$outFd      = \fopen($outputPath, 'wb');
 		\stream_set_write_buffer($outFd, 1024 * 1024 * 10);
 		\fwrite($outFd, "{\n");
@@ -37,7 +37,7 @@ final class Parser
 				$numWorkers = 1;
 			}
 
-			$keyBase = \ftok(__FILE__, 'P');
+			$keyBase = \ftok(__FILE__, 'p');
 			for ($i = 0; $i < $numWorkers; $i++)
 			{
 				$shmId      = \shmop_open($keyBase + $i, "n", 0666, self::SHM_SIZE);
