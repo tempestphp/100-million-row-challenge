@@ -35,9 +35,10 @@ use function unpack;
 
 final class Parser
 {
-    private const int WORKER_COUNT = 12;
-    private const int READ_BUFFER_SIZE = 1024*1024;// used to read the file
-    private const int CHUNKS_COUNT = 300; // how many chunks will be used (try to find a balance between overhead and full cores utilization)
+    private const int WORKER_COUNT = 10;
+    private const int READ_BUFFER_SIZE = 4*1024*1024;// used to read the file
+    private const int SMALL_CHUNK_SIZE = 64*1024;
+    private const int CHUNKS_COUNT = self::WORKER_COUNT * 25; // how many chunks will be used (try to find a balance between overhead and full cores utilization)
     private const int SAMPLE_SIZE = 2*1024*1024; //initial piece of logs that contains all unique URIs
     private const int URI_PREFIX_LENGTH = 19; //how long the URI before path
     private const int REMAINING_SIZE = 27; //the size of log row without URI
@@ -59,7 +60,7 @@ final class Parser
             $monthEnd = ($year === 6) ? 3 : 12;
             for ($month = $monthStart; $month <= $monthEnd; $month++) {
                 $daysInMonth = match ($month) {
-                    2 => $year === 4 ? 29 : 28, // 4-й год в вашем цикле — високосный
+                    2 => $year === 4 ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31
                 };
@@ -216,94 +217,112 @@ final class Parser
 
     private static function processChunk($handle, int $start, int $end, array $packedMap, array $dateToId, array $incrementMap, string &$outputBuffer): void
     {
-        $currentPos = $end;
+        fseek($handle, $start);
+
+        $remainingBytes = $end - $start;
         $readBufferSize = self::READ_BUFFER_SIZE;
-        $threshold = 1400; //should be enough for unrolling
+        $chunkLimit = self::SMALL_CHUNK_SIZE;
+
+        $leftover = '';
+
+        while ($remainingBytes > 0) {
+            $bytesToRead = min($remainingBytes, $readBufferSize);
+            $data = fread($handle, $bytesToRead);
+            if ($data === false || $data === '') break;
+
+            $remainingBytes -= strlen($data);
+            $currentOffset = 0;
+            $dataLength = strlen($data);
+
+            while ($currentOffset < $dataLength) {
+                $targetEnd = $currentOffset + ($chunkLimit - strlen($leftover));
+
+                $lastNL = strrpos($data, "\n", $targetEnd > $dataLength ? 0 : ($targetEnd - $dataLength));
+
+                if ($lastNL !== false && $lastNL >= $currentOffset) {
+                    $chunk = $leftover . substr($data, $currentOffset, $lastNL - $currentOffset + 1);
+                    self::processL2Chunk($chunk, $packedMap, $dateToId, $incrementMap, $outputBuffer);
+
+                    $leftover = '';
+                    $currentOffset = $lastNL + 1;
+                } else {
+                    $leftover .= substr($data, $currentOffset);
+                    break;
+                }
+            }
+        }
+        if ($leftover !== '') {
+            if (substr($leftover, -1) !== "\n") {
+                $leftover .= "\n";
+            }
+            self::processL2Chunk($leftover, $packedMap, $dateToId, $incrementMap, $outputBuffer);
+        }
+    }
+
+    private static function processL2Chunk(string $data, array &$packedMap, array &$dateToId, array &$incrementMap, string &$outputBuffer): void
+    {
+        $pointer = strlen($data) - 1;
         $mask = self::INDEX_MASK;
         $shift = self::BIT_SHIFT;
+        $threshold = 1100;
 
-        while ($currentPos > $start) {
-            $bytesToRead = min($readBufferSize, $currentPos - $start);
-            $readOffset = $currentPos - $bytesToRead;
+        while ($pointer > $threshold) {
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-            fseek($handle, $readOffset);
-            $dataChunk = fread($handle, $bytesToRead);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-            $pointer = strlen($dataChunk) - 1;
-            $firstNewLineInChunk = strpos($dataChunk, "\n");
-            $stopPosition = ($readOffset <= $start) ? -1 : $firstNewLineInChunk;
-            $unrollLimit = $stopPosition + $threshold;
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-            while ($pointer > $unrollLimit) {
-                 $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                 $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                 $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                 $pointer -= ($packedVal >> $shift);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
 
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
+        }
 
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
-
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
-
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
-
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
-
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
-            }
-
-            while ($pointer > $stopPosition) {
-                $packedVal = $packedMap[substr($dataChunk, $pointer - 48, 22)];
-                $targetIdx = ($packedVal & $mask) + $dateToId[substr($dataChunk, $pointer - 22, 7)];
-                $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
-                $pointer -= ($packedVal >> $shift);
-            }
-
-            $currentPos = $readOffset + $stopPosition + 1;
+        while ($pointer >= 48) {
+            $packedVal = $packedMap[substr($data, $pointer - 48, 22)];
+            $targetIdx = ($packedVal & $mask) + $dateToId[substr($data, $pointer - 22, 7)];
+            $outputBuffer[$targetIdx] = $incrementMap[$outputBuffer[$targetIdx]];
+            $pointer -= ($packedVal >> $shift);
         }
     }
 
