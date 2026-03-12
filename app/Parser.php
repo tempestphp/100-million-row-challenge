@@ -3375,12 +3375,13 @@ s1:
         $bm = \strrpos($b, "\n");
         do {
             $i = \strpos($b, ',', $bp);
-            ++$counts[$dateIds[\substr($b, 4+$i, 7)] +
+            ++$counts[
                 ($id = ($allL[$i-$bp] === '1'
                         ? $partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)]
                         : $partialIds[\substr($b, $bp, $i-$bp)]
                        )
-                )];
+                ) + $dateIds[\substr($b, 4+$i, 7)]
+            ];
             $bp = 52 + $i;
             if (!isset($sequence[$id])) {
                 $sequence[$id] = $sequenceId++;
@@ -3404,12 +3405,14 @@ s1e:
         $bRem .= \substr($b, 0, $bp);
         $bp += 26;
 
-        ++$counts[$dateIds[\substr($bRem, \strlen($bRem)-22, 7)] +
-            ($id = ($allL[$i-$bp] === '1'
-                    ? $partialBeIds[$bRem[25].$b[\strlen($bRem)-1].\chr(\strlen($bRem))]
-                    : $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]
+        $i = \strlen($bRem)-26;
+        ++$counts[
+            ($id = ('1' === $allL[$i-25]
+                    ? $partialBeIds[$bRem[25].$bRem[$i-1].\chr($i-25)]
+                    : $partialIds[\substr($bRem, 25, $i-25)]
                    )
-            )];
+            ) + $dateIds[\substr($bRem, 4+$i, 7)]
+        ];
         if (!isset($sequence[$id])) {
             $sequence[$id] = $sequenceId++;
             if (0 === (--$sequenceRem)) {
@@ -3426,11 +3429,12 @@ l1:
 l1s:
         do {
             $i = \strpos($b, ',', $bp);
-            ++$counts[$dateIds[\substr($b, 4+$i, 7)] +
+            ++$counts[
                 ('1' === $allL[$i-$bp]
                  ? $partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)]
                  : $partialIds[\substr($b, $bp, $i-$bp)]
-                )];
+                ) + $dateIds[\substr($b, 4+$i, 7)]
+            ];
             $bp = 52 + $i;
         } while ($bp<$bm);
 
@@ -3447,11 +3451,13 @@ l1e:
         $bRem .= \substr($b, 0, $bp);
         $bp += 26;
 
-        ++$counts[$dateIds[\substr($bRem, \strlen($bRem)-22, 7)] +
-            ('1' === $allL[$i-$bp]
-             ? $partialBeIds[$bRem[25].$b[\strlen($bRem)-1].\chr(\strlen($bRem))]
-             : $partialIds[\substr($bRem, 25, \strlen($bRem)-51)]
-            )];
+        $i = \strlen($bRem)-26;
+        ++$counts[
+            ('1' === $allL[$i-25]
+             ? $partialBeIds[$bRem[25].$bRem[$i-1].\chr($i-25)]
+             : $partialIds[\substr($bRem, 25, $i-25)]
+            ) + $dateIds[\substr($bRem, 4+$i, 7)]
+        ];
 
         goto l1;
 
@@ -3459,6 +3465,6 @@ o0:
         self::writeJson($fo, $sequence, $uriIds, $counts);
 
         \fclose($fo);
-        \exit();
+ //       \exit();
     }
 }
