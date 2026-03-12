@@ -3,6 +3,7 @@
 namespace App;
 
 use function array_fill;
+use function array_values;
 use function chr;
 use function chunk_split;
 use function fclose;
@@ -262,7 +263,7 @@ final class Parser
         for ($w = 1; $w < 8; $w++) {
             sodium_add($merged, $buffers[$w]);
         }
-        $counts = unpack('v*', $merged);
+        $counts = array_values(unpack('v*', $merged));
 
         self::writeJson($outputPath, $counts, $paths, $dates, $di, $slugTotal);
     }
@@ -284,7 +285,7 @@ final class Parser
         }
 
         $sep = "\n    ";
-        $base = 1;
+        $base = 0;
         $buf = '{';
 
         for ($p = 0; $p < $slugCount; $p++) {
