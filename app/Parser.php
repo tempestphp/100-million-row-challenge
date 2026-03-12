@@ -176,7 +176,7 @@ final class Parser
             }
 
             $p = 25;
-            $fence = $lastNl - 1010;
+            $fence = $lastNl - 5000;
 
             while ($p < $fence) {
                 $sep = strpos($chunk, ',', $p);
@@ -266,7 +266,7 @@ final class Parser
         }
 
         $firstPath = true;
-        $base = 0;
+        $base =0;
 
         for ($p = 0; $p < $slugCount; $p++) {
             $firstDate = -1;
