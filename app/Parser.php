@@ -36,7 +36,7 @@ use function unpack;
 final class Parser
 {
     private const int WORKER_COUNT = 8;
-    private const int READ_BUFFER_SIZE = 320*1024;// used to read the file
+    private const int READ_BUFFER_SIZE = 4*1024*1024;// used to read the file
     private const int SMALL_CHUNK_SIZE = 128*1024;
     private const int CHUNKS_COUNT = self::WORKER_COUNT * 10; // how many chunks will be used (try to find a balance between overhead and full cores utilization)
     private const int SAMPLE_SIZE = 2*1024*1024; //initial piece of logs that contains all unique URIs
