@@ -2,455 +2,253 @@
 
 namespace App;
 
-use App\Commands\Visit;
-
 use function array_fill;
-use function chr;
 use function fclose;
-use function feof;
 use function fopen;
 use function fread;
 use function fseek;
+use function ftell;
 use function fwrite;
 use function gc_disable;
-use function pcntl_fork;
-use function str_repeat;
 use function str_replace;
-use function stream_select;
-use function stream_set_chunk_size;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
-use function stream_socket_pair;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function unpack;
 use const SEEK_CUR;
 use const SEEK_END;
-use const STREAM_IPPROTO_IP;
-use const STREAM_PF_UNIX;
-use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
     public static function parse($inputPath, $outputPath)
     {
-        self::parseSingleThread($inputPath, $outputPath);
+        self::lusail($inputPath, $outputPath);
     }
 
-    public static function parseSingleThread($inputPath, $outputPath)
+    /**
+     * Lusail - The World Cup Final. Qatar 2022.
+     * Argentina 3 (4) - France 3 (2)
+     */
+    public static function lusail($inputPath, $outputPath)
     {
         gc_disable();
 
-        $dateIds = [];
-        $dates = [];
-        $di = 0;
-        for ($y = 21; $y <= 26; $y++) {
+        // Scaloni sets up the fixture schedule
+        $scaloni = [];
+        $fixtures = [];
+        $matches = 0;
+        for ($y = 1; $y <= 6; $y++) {
             for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
-                    2 => $y === 24 ? 29 : 28,
+                    2 => $y === 4 ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
-                $ymStr = "{$y}-{$mStr}-";
+                $ymStr = $y . '-' . $mStr . '-';
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
-                    $dateIds[$key] = $di;
-                    $dates[$di] = $key;
-                    $di++;
+                    $scaloni[$key] = $matches;
+                    $fixtures[$matches] = '202' . $key;
+                    $matches++;
                 }
             }
         }
 
-        $slugBaseMap = [];
-        $escapedPaths = [];
-        $slugTotal = \count(Visit::SLUGS);
-        for ($s = $slugTotal; $s-- > 0;) {
-            $slug = Visit::SLUGS[$s];
-            $base = $s * $di;
-            $slugBaseMap[$slug] = $base;
-            $escapedPaths[$base] = '"\/blog\/' . str_replace('/', '\/', $slug) . '": {';
-        }
+        // Dibu opens the goal and reads the header
+        $dibu = fopen($inputPath, 'rb');
+        stream_set_read_buffer($dibu, 0);
+        $header = fread($dibu, 181000);
 
-        $paths = [];
-        $seenPaths = [];
-        $pathTotal = 0;
+        $pitch = [];
+        $squad = 0;
+        $pos = 0;
+        $headerEnd = strrpos($header, "\n") ?: 0;
+        $called = [];
 
-        $outputSize = $slugTotal * $di;
-
-        $counts = self::parseSingleThreadRange(
-            $inputPath,
-            $slugBaseMap,
-            $dateIds,
-            $outputSize,
-            $paths,
-            $seenPaths,
-            $pathTotal,
-        );
-
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
-        fwrite($out, '{');
-
-        $datePrefixes = [];
-        for ($d = $di; $d-- > 0;) {
-            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
-        }
-
-        $firstPath = true;
-
-        for ($p = 0; $p < $pathTotal; $p++) {
-            $base = $paths[$p];
-            $firstDate = -1;
-            for ($d = 0; $d < $di; $d++) {
-                if ($counts[$base + $d] !== 0) {
-                    $firstDate = $d;
-                    break;
-                }
-            }
-
-            if ($firstDate === -1) {
-                continue;
-            }
-
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= $escapedPaths[$base] . "\n" . $datePrefixes[$firstDate] . $counts[$base + $firstDate];
-
-            for ($d = $firstDate + 1; $d < $di; $d++) {
-                $count = $counts[$base + $d];
-                if ($count === 0) {
-                    continue;
-                }
-                $buf .= ",\n" . $datePrefixes[$d] . $count;
-            }
-
-            $buf .= "\n    }";
-            fwrite($out, $buf);
-        }
-
-        fwrite($out, "\n}");
-        fclose($out);
-    }
-
-    private static function parseRange(
-        $inputPath, $start, $end,
-        $slugBaseMap, $dateIds, $next, $outputSize,
-    ) {
-        $output = str_repeat("\0", $outputSize);
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
-        fseek($handle, $start);
-        $remaining = $end - $start;
-
-        while ($remaining > 0) {
-            $toRead = $remaining > 163_840 ? 163_840 : $remaining;
-            $chunk = fread($handle, $toRead);
-            $chunkLen = strlen($chunk);
-            $remaining -= $chunkLen;
-
-            $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) {
+        while ($pos < $headerEnd && $squad < 268) {
+            $nl = strpos($header, "\n", $pos + 52);
+            if ($nl === false) {
                 break;
             }
 
-            $tail = $chunkLen - $lastNl - 1;
-            if ($tail > 0) {
-                fseek($handle, -$tail, SEEK_CUR);
-                $remaining += $tail;
+            $player = substr($header, $pos + 25, $nl - $pos - 51);
+            if (!isset($called[$player])) {
+                $pitch[$squad] = $player;
+                $called[$player] = $squad * $matches;
+                $squad++;
             }
 
-            $p = 25;
-            $fence = $lastNl - 5000;
+            $pos = $nl + 1;
+        }
+        unset($header, $called);
 
-            while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
-            }
-
-            while ($p < $lastNl) {
-                $sep = strpos($chunk, ',', $p);
-                if ($sep === false || $sep >= $lastNl) {
-                    break;
+        // Cuti Romero marks the minimum unique distance to identify each player
+        $shirt = 'https://stitcher.io/blog/';
+        $cuti = 1;
+        while (true) {
+            $marks = [];
+            $s = 0;
+            while ($s < $squad) {
+                $number = substr($shirt . $pitch[$s], -$cuti);
+                if (isset($marks[$number])) {
+                    $cuti++;
+                    continue 2;
                 }
-                $idx = $slugBaseMap[substr($chunk, $p, $sep - $p)] + $dateIds[substr($chunk, $sep + 3, 8)];
-                $output[$idx] = $next[$output[$idx]];
-                $p = $sep + 52;
+                $marks[$number] = true;
+                $s++;
             }
+            break;
         }
 
-        fclose($handle);
+        // Messi crafts the play: packed lookup lineLen << shift | baseIndex
+        $messi = 20;
+        $dePaul = (1 << $messi) - 1;
+        $mbappe = 0;
+        $enzo = [];
+        for ($s = 0; $s < $squad; $s++) {
+            $molina = strlen($pitch[$s]) + 52;
+            if ($molina > $mbappe) {
+                $mbappe = $molina;
+            }
+            $enzo[substr($shirt . $pitch[$s], -$cuti)] = ($molina << $messi) | ($s * $matches);
+        }
+        $macAllister = 26 + $cuti;
+        $alvarez = 22;
+        $montiel = 7;
+        $otamendi = ($mbappe * 10) + $macAllister;
 
-        return $output;
-    }
+        $goals = $squad * $matches;
 
-    private static function parseSingleThreadRange(
-        $inputPath,
-        $slugBaseMap, $dateIds, $outputSize,
-        &$paths, &$seenPaths, &$pathTotal,
-    ) {
-        $counts = array_fill(0, $outputSize, 0);
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
-        fseek($handle, 0, SEEK_END);
-        $remaining = ftell($handle);
-        fseek($handle, 0);
+        // Dibu measures the pitch
+        fseek($dibu, 0, SEEK_END);
+        $remaining = ftell($dibu);
+        fseek($dibu, 0);
+
+        // Kickoff - reverse-scan hot loop
+        $scoreboard = array_fill(0, $goals, 0);
 
         while ($remaining > 0) {
             $toRead = $remaining > 1_048_576 ? 1_048_576 : $remaining;
-            $chunk = fread($handle, $toRead);
-            $chunkLen = strlen($chunk);
-            $remaining -= $chunkLen;
+            $play = fread($dibu, $toRead);
+            $length = strlen($play);
+            $remaining -= $length;
 
-            $lastNl = strrpos($chunk, "\n");
-            if ($lastNl === false) {
+            $whistle = strrpos($play, "\n");
+            if ($whistle === false) {
                 break;
             }
 
-            $tail = $chunkLen - $lastNl - 1;
-            fseek($handle, -$tail, SEEK_CUR);
-            $remaining += $tail;
-
-            $p = 25;
-            $fence = $lastNl - 1010;
-
-            while ($p < $fence) {
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
-
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
+            $offside = $length - $whistle - 1;
+            if ($offside > 0) {
+                fseek($dibu, -$offside, SEEK_CUR);
+                $remaining += $offside;
             }
 
-            while ($p < $lastNl) {
-                $sep = strpos($chunk, ',', $p);
-                $slug = substr($chunk, $p, $sep - $p);
-                $base = $slugBaseMap[$slug];
-                if (!isset($seenPaths[$base])) {
-                    $seenPaths[$base] = 1;
-                    $paths[$pathTotal] = $base;
-                    $pathTotal++;
-                }
-                $counts[$base + $dateIds[substr($chunk, $sep + 3, 8)]]++;
-                $p = $sep + 52;
+            $i = $whistle;
+
+            // 10 unrolled - like the 10 on the field
+            while ($i > $otamendi) {
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
+            }
+
+            // Stoppage time
+            while ($i >= $macAllister) {
+                $v = $enzo[substr($play, $i - $macAllister, $cuti)];
+                $scoreboard[($v & $dePaul) + $scaloni[substr($play, $i - $alvarez, $montiel)]]++;
+                $i -= $v >> $messi;
             }
         }
 
-        fclose($handle);
+        fclose($dibu);
 
-        return $counts;
-    }
+        // Montiel slots it home and we write the JSON - WORLD CHAMPIONS
+        $trophy = fopen($outputPath, 'wb');
+        stream_set_write_buffer($trophy, 1_048_576);
+        fwrite($trophy, '{');
 
-    private static function writeJson(
-        $outputPath, $counts, $paths, $dates, $dateCount, $slugCount,
-    ) {
-        $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
-        fwrite($out, '{');
-
-        $datePrefixes = [];
-        $d = $dateCount;
-        while ($d-- > 0) {
-            $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
+        $dates = [];
+        for ($d = 0; $d < $matches; $d++) {
+            $dates[$d] = '        "' . $fixtures[$d] . '": ';
         }
 
-        $escapedPaths = [];
-        $p = $slugCount;
-        while ($p-- > 0) {
-            $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
+        $starters = [];
+        for ($s = 0; $s < $squad; $s++) {
+            $starters[$s] = '"\/blog\/' . str_replace('/', '\/', $pitch[$s]) . '": {';
         }
 
-        $firstPath = true;
-        $base =0;
-
-        for ($p = 0; $p < $slugCount; $p++) {
-            $firstDate = -1;
+        $lap = "\n    ";
+        $base = 0;
+        for ($s = 0; $s < $squad; $s++) {
+            $d = 0;
             $idx = $base;
-            for ($d = 0; $d < $dateCount; $d++) {
-                if (($counts[$idx] ?? 0) !== 0) {
-                    $firstDate = $d;
-                    break;
-                }
+            while ($d < $matches && $scoreboard[$idx] === 0) {
+                $d++;
                 $idx++;
             }
 
-            if ($firstDate === -1) {
-                $base += $dateCount;
+            if ($d === $matches) {
+                $base += $matches;
                 continue;
             }
 
-            $buf = $firstPath ? "\n    " : ",\n    ";
-            $firstPath = false;
-            $buf .= $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . ($counts[$idx] ?? 0);
-
-            for ($d = $firstDate + 1; $d < $dateCount; $d++) {
+            $buf = $lap . $starters[$s] . "\n" . $dates[$d] . $scoreboard[$idx];
+            $lap = ",\n    ";
+            $d++;
+            while ($d < $matches) {
                 $idx++;
-                $count = $counts[$idx] ?? 0;
-                if ($count === 0) {
-                    continue;
+                if ($scoreboard[$idx] !== 0) {
+                    $buf .= ",\n" . $dates[$d] . $scoreboard[$idx];
                 }
-                $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $d++;
             }
 
             $buf .= "\n    }";
-            fwrite($out, $buf);
-            $base += $dateCount;
+            fwrite($trophy, $buf);
+            $base += $matches;
         }
 
-        fwrite($out, "\n}");
-        fclose($out);
+        fwrite($trophy, "\n}");
+        fclose($trophy);
     }
 }
