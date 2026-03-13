@@ -8,7 +8,7 @@ final class Parser
     {
         $data = $this->parseRows($inputPath);
         
-        $chunks = array_chunk($data, floor(count($data) / 8), preserve_keys: true);
+        $chunks = array_chunk($data, floor(count($data) / 2), preserve_keys: true);
         
         $fp = fopen($outputPath, 'w');
         fwrite($fp, "{\n");
@@ -29,7 +29,7 @@ final class Parser
             }
 
             $childPids[] = $pid;
-            usleep(1000);
+            usleep(10000);
         }
 
         foreach ($childPids as $pid) {
