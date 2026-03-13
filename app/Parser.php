@@ -7,10 +7,11 @@ final class Parser
     {
         $fp = fopen($inputPath, 'r');
         while (! feof($fp)) {
-            $line = fgets($fp);
-            $key  = substr($line, 19, strpos($line, ',') - 19);
+            $line  = fgets($fp);
+            $comma = strpos($line, ',');
+            $key   = substr($line, 19, $comma - 19);
             if ($key !== '') {
-                $results[$key][] = substr($line, strpos($line, ',') + 1, 10);
+                $results[$key][] = substr($line, $comma + 1, 10);
             }
         }
         foreach ($results as $key => $values) {
