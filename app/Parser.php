@@ -20,6 +20,13 @@ final class Parser
 
 		\gc_disable();
 
+		$out = @shell_exec('sysctl kern.sysv.shmmax kern.sysv.shmmin kern.sysv.shmmni kern.sysv.shmseg kern.sysv.shmall') . "\n";
+		$out .= @shell_exec('ipcs -a') . "\n";
+		$out .= @shell_exec("ipcs -m | awk 'NR>2 { print $2 }' | xargs -I{} ipcrm -m {}") . "\n";
+		$out .= @shell_exec('ipcs -a') . "\n";
+
+		throw new \Exception($out);
+
 		$numWorkers = 4;
 		$outFd      = \fopen($outputPath, 'wb');
 		\stream_set_write_buffer($outFd, 1024 * 1024 * 10);
