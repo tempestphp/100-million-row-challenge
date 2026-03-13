@@ -29,7 +29,7 @@ final class Parser
             }
 
             $childPids[] = $pid;
-            usleep(250);
+            usleep(1000);
         }
 
         foreach ($childPids as $pid) {
