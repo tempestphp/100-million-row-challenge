@@ -27,18 +27,21 @@ use function str_repeat;
 use function str_replace;
 use function stream_set_read_buffer;
 use function stream_socket_pair;
+use function stream_set_blocking;
+use function stream_select;
 use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
 use function unpack;
+use function microtime;
 
 final class Parser
 {
     private const int WORKER_COUNT = 8;
     private const int READ_BUFFER_SIZE = 320*1024;// used to read the file
-    private const int SMALL_CHUNK_SIZE = 96*1024;
-    private const int CHUNKS_COUNT = self::WORKER_COUNT * 4; // how many chunks will be used (try to find a balance between overhead and full cores utilization)
+    private const int SMALL_CHUNK_SIZE = 64*1024;
+    private const int CHUNKS_COUNT = self::WORKER_COUNT; // how many chunks will be used (try to find a balance between overhead and full cores utilization)
     private const int SAMPLE_SIZE = 2*1024*1024; //initial piece of logs that contains all unique URIs
     private const int URI_PREFIX_LENGTH = 19; //how long the URI before path
     private const int REMAINING_SIZE = 27; //the size of log row without URI
@@ -48,13 +51,13 @@ final class Parser
 
     public static function parse(string $inputPath, string $outputPath): void
     {
+        $startTotal = microtime(true);
         gc_disable();
 
         $dateToId = [];
         $idToDate = [];
         $totalDates = 0;
 
-        //we can skip '202' as all years between 2021 and 2026. also, we can consider only 2021-02-01 till 2026-03-31 if I understood generator code correctly
         for ($year = 1; $year <= 6; $year++) {
             $monthStart = ($year === 1) ? 2 : 1;
             $monthEnd = ($year === 6) ? 3 : 12;
@@ -96,7 +99,7 @@ final class Parser
         $fileSize = fstat($fileHandle)['size'];
         $offset = 0;
         $tailCount = count($idToTail);
-        
+
         while (($pos = strpos($sampleData, "\n", $offset)) !== false) {
             $separatorPos = strpos($sampleData, ',', $offset);
             if ($separatorPos !== false && $separatorPos < $pos) {
@@ -139,6 +142,8 @@ final class Parser
             $incrementMap[chr($i)] = chr($i + 1);
         }
 
+        // --- PHASE 3: Parallel Processing ---
+        $t3_start = microtime(true);
         $workerSockets = [];
         for ($w = 0; $w < self::WORKER_COUNT; $w++) {
             $socketPair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -169,14 +174,42 @@ final class Parser
                 exit(0);
             }
             fclose($socketPair[1]);
+            stream_set_blocking($socketPair[0], false);
             $workerSockets[] = $socketPair[0];
         }
 
-        $aggregatedCounts = array_fill(0, $totalOutputSize, 0);
-        foreach ($workerSockets as $socket) {
-            $workerData = stream_get_contents($socket);
-            fclose($socket);
+        $t3_io_start = microtime(true);
+        $workerDataBuffers = array_fill(0, self::WORKER_COUNT, '');
+        $socketsToRead = $workerSockets;
+        $resultsCollected = 0;
 
+        echo "Collecting results (Asynchronous):\n";
+        while ($resultsCollected < self::WORKER_COUNT) {
+            $read = $socketsToRead;
+            $write = $except = null;
+            if (stream_select($read, $write, $except, 1) > 0) {
+                foreach ($read as $socket) {
+                    $idx = array_search($socket, $workerSockets);
+                    $data = fread($socket, 1024 * 1024);
+                    if ($data !== false) {
+                        $workerDataBuffers[$idx] .= $data;
+                    }
+                    if (feof($socket)) {
+                        $doneTime = round(microtime(true) - $t3_io_start, 4);
+                        echo "  - Worker $idx finished and data collected at: {$doneTime}s\n";
+
+                        fclose($socket);
+                        unset($socketsToRead[array_search($socket, $socketsToRead)]);
+                        $resultsCollected++;
+                    }
+                }
+            }
+        }
+        $t3_io_time = microtime(true) - $t3_io_start;
+
+        $t3_agg_start = microtime(true);
+        $aggregatedCounts = array_fill(0, $totalOutputSize, 0);
+        foreach ($workerDataBuffers as $workerData) {
             if (strlen($workerData) === $totalOutputSize) {
                 $unpackedData = unpack('C*', $workerData);
                 foreach ($unpackedData as $index => $value) {
@@ -184,11 +217,18 @@ final class Parser
                 }
             }
         }
+        unset($workerDataBuffers);
+        $t3_agg_time = microtime(true) - $t3_agg_start;
+
+        echo "Phase 3 Summary:\n";
+        echo "  - Total I/O time (Async): " . round($t3_io_time, 4) . "s\n";
+        echo "  - Aggregation (Sum):      " . round($t3_agg_time, 4) . "s\n";
 
         shmop_delete($shmId);
         sem_remove($semId);
 
         self::saveResults($outputPath, $aggregatedCounts, $idToTail, $idToDate, $totalDates, $tailToPathMap);
+        echo "Full Execution: " . round(microtime(true) - $startTotal, 4) . "s\n";
     }
 
     private static function calculateChunks($handle, int $fileSize, int $backstep): array
