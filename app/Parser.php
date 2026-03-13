@@ -3375,11 +3375,11 @@ s1:
         $bm = \strrpos($b, "\n");
         do {
             $i = \strpos($b, ',', $bp);
-            ++$counts[
-                ($allL[$i-$bp] === '1'
-                 ? ($id = $partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]
-                 : ($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]
-                )];
+            if('1' === $allL[$i-$bp]) {
+                ++$counts[($id = $partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            } else {
+                ++$counts[($id = $partialIds[\substr($b, $bp, $i-$bp)]) + $dateIds[\substr($b, 4+$i, 7)]];
+            }
             $bp = 52 + $i;
             if (!isset($sequence[$id])) {
                 $sequence[$id] = $sequenceId++;
@@ -3404,11 +3404,11 @@ s1e:
         $bp += 26;
 
         $i = \strlen($bRem)-26;
-        ++$counts[
-            ('1' === $allL[$i-25]
-             ? ($id = $partialBeIds[$bRem[25].$bRem[$i-1].\chr($i-25)]) + $dateIds[\substr($bRem, 4+$i, 7)]
-             : ($id = $partialIds[\substr($bRem, 25, $i-25)]) + $dateIds[\substr($bRem, 4+$i, 7)]
-            )];
+        if ('1' === $allL[$i-25]) {
+            ++$counts[($id = $partialBeIds[$bRem[25].$bRem[$i-1].\chr($i-25)]) + $dateIds[\substr($bRem, 4+$i, 7)]];
+        } else {
+            ++$counts[($id = $partialIds[\substr($bRem, 25, $i-25)]) + $dateIds[\substr($bRem, 4+$i, 7)]];
+        }
         if (!isset($sequence[$id])) {
             $sequence[$id] = $sequenceId++;
             if (0 === (--$sequenceRem)) {
@@ -3425,11 +3425,11 @@ l1:
 l1s:
         do {
             $i = \strpos($b, ',', $bp);
-            ++$counts[
-                ('1' === $allL[$i-$bp]
-                 ? $partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]
-                 : $partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]
-                )];
+            if ('1' === $allL[$i-$bp]) {
+                ++$counts[$partialBeIds[$b[$bp].$b[$i-1].\chr($i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
+            } else {
+                ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
+            }
             $bp = 52 + $i;
         } while ($bp<$bm);
 
@@ -3447,11 +3447,11 @@ l1e:
         $bp += 26;
 
         $i = \strlen($bRem)-26;
-        ++$counts[
-            ('1' === $allL[$i-25]
-             ? $partialBeIds[$bRem[25].$bRem[$i-1].\chr($i-25)] + $dateIds[\substr($bRem, 4+$i, 7)]
-             : $partialIds[\substr($bRem, 25, $i-25)] + $dateIds[\substr($bRem, 4+$i, 7)]
-            )];
+        if ('1' === $allL[$i-25]) {
+            ++$counts[$partialBeIds[$bRem[25].$bRem[$i-1].\chr($i-25)] + $dateIds[\substr($bRem, 4+$i, 7)]];
+        } else {
+            ++$counts[$partialIds[\substr($bRem, 25, $i-25)] + $dateIds[\substr($bRem, 4+$i, 7)]];
+        }
 
         goto l1;
 
