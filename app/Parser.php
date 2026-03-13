@@ -45,7 +45,7 @@ final class Parser
     private function processChunk(array $chunk, string $outputPath): void
     {
         $fragment = '';
-        $padding0 = '    ';;
+        $padding0 = '    ';
         $padding1 = '        ';
         
         foreach ($chunk as $key => $rows) {
