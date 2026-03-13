@@ -21,11 +21,15 @@ final class Parser
         }
 
         for ($y = 21; $y <= 26; $y++) {
-            $yS = "$y-";
+            $yearPrefix = $y . '-';
             $monthDays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-            if ($y % 4 === 0) $monthDays[2] = 29;
+
+            if ($y === 24) {
+                $monthDays[2] = 29;
+            }
+
             for ($m = 1; $m <= 12; $m++) {
-                $prefix = $yS . $paddings[$m] . '-';
+                $prefix = $yearPrefix . $paddings[$m] . '-';
                 $days = $monthDays[$m];
                 for ($d = 1; $d <= $days; $d++) {
                     $key = $prefix . $paddings[$d];
@@ -37,13 +41,18 @@ final class Parser
         }
 
         $h = \fopen($inputPath, 'rb');
-        $sample = \fread($h, \min($fileSize, 2_097_152));
+        \stream_set_read_buffer($h, 0);
+        $sample = \fread($h, $fileSize > 181000 ? 181000 : $fileSize);
         \fclose($h);
 
         $slugBase = [];
         $slugLabels = [];
         $numSlugs = 0;
         $bound = \strrpos($sample, "\n");
+        if ($bound === false) {
+            $bound = 0;
+        }
+
         for ($pos = 0; $pos < $bound;) {
             $nl = \strpos($sample, "\n", $pos + 52);
             if ($nl === false) break;
@@ -55,6 +64,8 @@ final class Parser
             }
             $pos = $nl + 1;
         }
+
+        unset($sample);
 
         foreach (Visit::all() as $visit) {
             $slug = \substr($visit->uri, 25);
@@ -71,9 +82,14 @@ final class Parser
         $remaining = $fileSize;
 
         while ($remaining > 0) {
-            $chunk = \fread($h, \min($remaining, 262_144));
+            $toRead = $remaining > 1_048_576 ? 1_048_576 : $remaining;
+            $chunk = \fread($h, $toRead);
             $len = \strlen($chunk);
-            if ($len === 0) break;
+
+            if ($len === 0) {
+                break;
+            }
+
             $remaining -= $len;
 
             $lastNl = \strrpos($chunk, "\n");
@@ -85,15 +101,45 @@ final class Parser
             }
 
             $pos = 25;
-            $safe = $lastNl - 600;
+            $safe = $lastNl - 1010;
 
             while ($pos < $safe) {
                 $s = \strpos($chunk, ',', $pos);
                 $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
                 $pos = $s + 52;
+
                 $s = \strpos($chunk, ',', $pos);
                 $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
                 $pos = $s + 52;
+
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+
+                $s = \strpos($chunk, ',', $pos);
+                $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
+                $pos = $s + 52;
+
                 $s = \strpos($chunk, ',', $pos);
                 $counts[$slugBase[\substr($chunk, $pos, $s - $pos)] + $dateIds[\substr($chunk, $s + 3, 8)]]++;
                 $pos = $s + 52;
@@ -126,21 +172,40 @@ final class Parser
 
         for ($sId = 0; $sId < $numSlugs; $sId++) {
             $base = $sId * $numDates;
-            $body = '';
-            $sep = '';
+            $firstDate = -1;
+
             for ($dId = 0; $dId < $numDates; $dId++) {
-                if (($val = $counts[$base + $dId]) > 0) {
-                    $body .= $sep . $datePfx[$dId] . $val;
-                    $sep = ",\n";
+                if ($counts[$base + $dId] !== 0) {
+                    $firstDate = $dId;
+                    break;
                 }
             }
 
-            if (!empty($body)) {
-                $hdr = '"\/blog\/' . \str_replace('/', '\/', $slugs[$sId]) . '"';
-                \fwrite($out, ($firstSlug ? '' : ',') . "\n    " . $hdr . ": {\n" . $body . "\n    }");
-                $firstSlug = false;
+            if ($firstDate === -1) {
+                continue;
             }
+
+            $buffer = $firstSlug ? "\n    " : ",\n    ";
+            $firstSlug = false;
+
+            $buffer .= '"\/blog\/' . \str_replace('/', '\/', $slugs[$sId]) . '": {' . "\n";
+            $buffer .= $datePfx[$firstDate] . $counts[$base + $firstDate];
+
+            for ($dId = $firstDate + 1; $dId < $numDates; $dId++) {
+                $count = $counts[$base + $dId];
+
+                if ($count === 0) {
+                    continue;
+                }
+
+                $buffer .= ",\n" . $datePfx[$dId] . $count;
+            }
+
+            $buffer .= "\n    }";
+
+            \fwrite($out, $buffer);
         }
+
         \fwrite($out, "\n}");
         \fclose($out);
     }
