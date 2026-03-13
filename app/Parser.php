@@ -34,7 +34,16 @@ final class Parser
 {
     public static function parse($inputPath, $outputPath)
     {
+        if (gc_enabled()) {
+            gc_collect_cycles();
+        }
+        if (function_exists('gc_mem_caches')) {
+            gc_mem_caches();
+        }
         gc_disable();
+        if (function_exists('pcntl_setpriority')) {
+            @pcntl_setpriority(-10);
+        }
 
         $dateIds = [];
         $dates = [];
