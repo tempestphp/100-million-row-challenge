@@ -28,8 +28,6 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
-use function unpack;
-use const SEEK_CUR;
 use const SEEK_END;
 use const STREAM_IPPROTO_IP;
 use const STREAM_PF_UNIX;
@@ -134,6 +132,8 @@ final class Parser
             break;
         }
 
+        $shift = 20;
+        $mask = (1 << $shift) - 1;
         $maxStride = 0;
         $slugBaseMap = [];
         for ($p = 0; $p < $slugTotal; $p++) {
@@ -141,10 +141,10 @@ final class Parser
             if ($stride > $maxStride) {
                 $maxStride = $stride;
             }
-            $slugBaseMap[substr($prefix . $paths[$p], -$tailLength)] = ($stride << 20) | ($p * $dateCount);
+            $slugBaseMap[substr($prefix . $paths[$p], -$tailLength)] = ($stride << $shift) | ($p * $dateCount);
         }
         $tailOffset = 26 + $tailLength;
-        $fence = ($maxStride * 10) + $tailOffset;
+        $fence = ($maxStride * 8) + $tailOffset;
 
         $outputSize = $slugTotal * $dateCount;
 
@@ -157,7 +157,7 @@ final class Parser
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         while ($lo < $fileSize) {
-            $hi = $lo + 0x800000;
+            $hi = $lo + (1 << 23);
             if ($hi > $fileSize) {
                 $hi = $fileSize;
             }
@@ -225,61 +225,51 @@ final class Parser
 
                         while ($p > $fence) {
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
                         }
 
                         while ($p >= $tailOffset) {
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & 0xFFFFF) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
+                            $idx = ($packed & $mask) + $yearMonthBase[$chunk[$p - 22]][$chunk[$p - 20]][$chunk[$p - 19]] + $dayOff[$chunk[$p - 17]][$chunk[$p - 16]];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> 20;
+                            $p -= $packed >> $shift;
                         }
                     }
                 }
