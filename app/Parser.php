@@ -6,6 +6,8 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
+        // error_reporting(E_ALL);
+        ini_set('memory_limit', '4096M');
         $data = $this->parseRows($inputPath);
         
         $chunks = array_chunk($data, floor(count($data) / 2), preserve_keys: true);
@@ -40,6 +42,8 @@ final class Parser
         fseek($fp, -2, SEEK_END);
         fwrite($fp, "\n}");
         fclose($fp);
+        
+        // echo memory_get_peak_usage(true) / 1024 / 1024 . 'M'.PHP_EOL;
     }
 
     private function processChunk(array $chunk, string $outputPath): void
