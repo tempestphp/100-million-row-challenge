@@ -106,7 +106,7 @@ final class Parser
         }
 
         $shift = 20;
-        $mask = (1 << $shift) - 1;
+        $mask = 0xFFFFF;
         $maxStride = 0;
         $slugBaseMap = [];
         for ($p = 0; $p < $slugTotal; $p++) {
@@ -163,11 +163,15 @@ final class Parser
         $bucketSize = $slugTotal * $dateCount;
         $frameBytes = $bucketSize << 1;
         $keyOffset = 26 + $keyBytes;
-        $slotMask = (1 << 20) - 1;
+        $slotMask = 0xFFFFF;
         $batchLimit = ($maxStride * 10) + $keyOffset;
         $chunkCount = \count($chunks);
 
         $sockets = [];
+
+        $dateOff = 22;
+        $dateLen = 7;
+        $shift = 20;
 
         for ($w = 0; $w < $workers; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
@@ -178,9 +182,7 @@ final class Parser
                 $output = str_repeat("\0", $outputSize);
                 $reader = fopen($inputPath, 'rb');
                 stream_set_read_buffer($reader, 0);
-                $dateOff = 22;
-                $dateLen = 7;
-                $shift = 20;
+                
 
                 for ($ci = $w; $ci < $chunkCount; $ci +=8) {
                     [$start, $end] = $chunks[$ci];
