@@ -175,59 +175,59 @@ final class Parser
                         while ($p > $fence) {
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
 
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
                         }
 
                         while ($p >= $tailOffset) {
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
+                            $tmp = $output[$idx]; $output[$idx] = $next[$tmp];
                             $p -= $packed >> $shift;
                         }
                     }
