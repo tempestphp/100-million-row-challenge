@@ -27,6 +27,7 @@ use function strlen;
 use function strpos;
 use function strrpos;
 use function substr;
+use function unpack;
 use const SEEK_CUR;
 use const SEEK_END;
 use const STREAM_IPPROTO_IP;
@@ -39,7 +40,7 @@ final class Parser
     {
         gc_disable();
 
-        $workers = 9;
+        $workers = 8;
 
         $dateIds = [];
         $dates = [];
@@ -102,7 +103,7 @@ final class Parser
         $tailOffset = 26 + $tailLength;
         $dateOffset = 22;
         $dateLength = 7;
-        $fence = ($maxStride * 10) + $tailOffset;
+        $fence = ($maxStride * 12) + $tailOffset;
 
         $outputSize = $slugTotal * $dateCount;
 
