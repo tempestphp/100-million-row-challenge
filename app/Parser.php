@@ -79,42 +79,14 @@ final class Parser
 
         while ($pos < $lastNl && $slugTotal < 268) {
             $nl = strpos($raw, "\n", $pos + 52);
-            if ($nl === false || $nl > $lastNl) {
-                break;
-            }
-
+            if ($nl === false) break;
             $slug = substr($raw, $pos + 25, $nl - $pos - 51);
-            if (! isset($slugBaseMap[$slug])) {
+            if (!isset($slugBaseMap[$slug])) {
                 $paths[$slugTotal] = $slug;
                 $slugBaseMap[$slug] = $slugTotal * $dateCount;
                 $slugTotal++;
             }
-
             $pos = $nl + 1;
-        }
-
-        if ($slugTotal < 268) {
-            $carry = substr($raw, $lastNl + 1);
-            while ($slugTotal < 268 && ! feof($handle)) {
-                $chunk = $carry . fread($handle, 2_097_152);
-                if ($chunk === '') break;
-                $lastNl = strrpos($chunk, "\n");
-                if ($lastNl === false) { $carry = $chunk; continue; }
-                $pos = 25;
-                while ($pos < $lastNl) {
-                    $sep = strpos($chunk, ',', $pos);
-                    if ($sep === false || $sep >= $lastNl) break;
-                    $slug = substr($chunk, $pos, $sep - $pos);
-                    if (! isset($slugBaseMap[$slug])) {
-                        $paths[$slugTotal] = $slug;
-                        $slugBaseMap[$slug] = $slugTotal * $dateCount;
-                        $slugTotal++;
-                        if ($slugTotal === 268) break 2;
-                    }
-                    $pos = $sep + 52;
-                }
-                $carry = substr($chunk, $lastNl + 1);
-            }
         }
         unset($raw);
 
@@ -147,44 +119,53 @@ final class Parser
         $tailOffset = 26 + $tailLength;
         $dateOffset = 22;
         $dateLength = 7;
-        $fence = ($maxStride * 8) + $tailOffset;
+        $fence = ($maxStride *9) + $tailOffset;
 
         $outputSize = $slugTotal * $dateCount;
 
         fseek($handle, 0, SEEK_END);
         $fileSize = ftell($handle);
-        fclose($handle);
 
         $chunks = [];
         $lo = 0;
-        $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         while ($lo < $fileSize) {
-            $hi = $lo + (1 << 23);
-            if ($hi > $fileSize) {
-                $hi = $fileSize;
-            }
-
-            $from = 0;
-            if ($lo > 0) {
-                fseek($handle, $lo);
-                fgets($handle);
-                $from = ftell($handle);
-            }
-
-            $to = $fileSize;
-            if ($hi < $fileSize) {
-                fseek($handle, $hi);
-                fgets($handle);
-                $to = ftell($handle);
-            }
-
-            $chunks[] = [$from, $to];
+            $hi = $lo + 8_388_608;
+            if ($hi > $fileSize) { $hi = $fileSize; }
+            $start = 0;
+            if ($lo > 0) { fseek($handle, $lo); fgets($handle); $start = ftell($handle); }
+            $end = $fileSize;
+            if ($hi < $fileSize) { fseek($handle, $hi); fgets($handle); $end = ftell($handle); }
+            $chunks[] = [$start, $end];
             $lo = $hi;
         }
         fclose($handle);
 
-        $chunkCount = count($chunks);
+        $keyBytes = 1;
+        while (true) {
+            $keys = [];
+            foreach ($paths as $slug) {
+                $key = substr($prefix . $slug, -$keyBytes);
+                if (isset($keys[$key])) { $keyBytes++; continue 2; }
+                $keys[$key] = true;
+            }
+            break;
+        }
+
+        $maxStride = 0;
+        $slugLookup = [];
+        foreach ($paths as $id => $slug) {
+            $stride = strlen($slug) + 52;
+            if ($stride > $maxStride) { $maxStride = $stride; }
+            $slugLookup[substr($prefix . $slug, -$keyBytes)] = ($stride << 20) | ($id * $dateCount);
+        }
+
+        $bucketSize = $slugTotal * $dateCount;
+        $frameBytes = $bucketSize << 1;
+        $keyOffset = 26 + $keyBytes;
+        $slotMask = (1 << 20) - 1;
+        $batchLimit = ($maxStride * 10) + $keyOffset;
+        $chunkCount = \count($chunks);
 
         $sockets = [];
 
@@ -197,86 +178,79 @@ final class Parser
                 $output = str_repeat("\0", $outputSize);
                 $reader = fopen($inputPath, 'rb');
                 stream_set_read_buffer($reader, 0);
-                $dateOff = $dateOffset;
-                $dateLen = $dateLength;
-                $sh = $shift;
-                $mk = $mask;
+                $dateOff = 22;
+                $dateLen = 7;
+                $shift = 20;
 
-                for ($chunkIndex = $w; $chunkIndex < $chunkCount; $chunkIndex += $workers) {
-                    [$from, $to] = $chunks[$chunkIndex];
-                    fseek($reader, $from);
-                    $left = $to - $from;
+                for ($ci = $w; $ci < $chunkCount; $ci +=8) {
+                    [$start, $end] = $chunks[$ci];
+                    fseek($reader, $start);
+                    $remaining = $end - $start;
 
-                    while ($left > 0) {
-                        $chunk = fread($reader, $left > 163_840 ? 163_840 : $left);
+                    while ($remaining > 0) {
+                        $toRead = $remaining > 163_840 ? 163_840 : $remaining;
+                        $chunk = fread($reader, $toRead);
                         $chunkLen = strlen($chunk);
-                        $left -= $chunkLen;
-
+                        $remaining -= $chunkLen;
                         $lastNl = strrpos($chunk, "\n");
-                        if ($lastNl === false) break;
-
+                        if ($lastNl === false) { break; }
                         $tail = $chunkLen - $lastNl - 1;
-                        if ($tail > 0) {
-                            fseek($reader, -$tail, SEEK_CUR);
-                            $left += $tail;
+                        if ($tail > 0) { fseek($reader, -$tail, SEEK_CUR); $remaining += $tail; }
+
+                        $pos = $lastNl;
+                        while ($pos > $batchLimit) {
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
+
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
+
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
+
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
+
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
+
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
+
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
+
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $pos -= $token >> $shift;
                         }
 
-                        $p = $lastNl;
-
-                        while ($p > $fence) {
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
+                        while ($pos >= $keyOffset) {
+                            $token = $slugLookup[substr($chunk, $pos - $keyOffset, $keyBytes)];
+                            $idx = ($token & $slotMask) + $dateIds[substr($chunk, $pos - $dateOff, $dateLen)];
                             $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
-                        }
-
-                        while ($p >= $tailOffset) {
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mk) + $dateIds[substr($chunk, $p - $dateOff, $dateLen)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $sh;
+                            $pos -= $token >> $shift;
                         }
                     }
                 }
 
                 fclose($reader);
                 fwrite($pair[1], chunk_split($output, 1, "\0"));
-                fclose($pair[1]);
                 exit(0);
             }
             fclose($pair[1]);
