@@ -5,7 +5,7 @@ namespace App;
 final class Parser
 {
     private const int BUFFER_SIZE = 262144;
-    private const int CHUNK_SIZE = 262144;
+    private const int CHUNK_SIZE = 67108864;
     private const int OUTPUT_BUFFER_SIZE = 20971520;
 
     private static $f;
@@ -3471,8 +3471,8 @@ l1e:
 
         $f = \fopen($inputPath, 'rb');
         if (false === $f) throw new \Exception('Input file could not be opened: '.$inputPath);
-        \stream_set_read_buffer($f, 0);
         \stream_set_chunk_size($f, self::CHUNK_SIZE);
+        \stream_set_read_buffer($f, self::CHUNK_SIZE);
         self::$f = $f;
 
         self::initialize();
