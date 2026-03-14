@@ -51,9 +51,9 @@ final class Parser
                 $mStr = ($m < 10 ? '0' : '') . $m;
                 $ymStr = "{$y}-{$mStr}-";
                 for ($d = 1; $d <= $maxD; $d++) {
-                    $dStr = ($d < 10 ? '0' : '') . $d;
-                    $dateIds[$ymStr . $dStr] = $dateCount;
-                    $dates[$dateCount] = '202' . $y . '-' . $mStr . '-' . $dStr;
+                    $key = $ymStr . (($d < 10 ? '0' : '') . $d);
+                    $dateIds[$key] = $dateCount;
+                    $dates[$dateCount] = '202' . $key;
                     $dateCount++;
                 }
             }
@@ -90,14 +90,16 @@ final class Parser
 
         $tailLength = 1;
         while (true) {
-            $testMap = [];
-            $collision = false;
+            $slugBaseMap = [];
             for ($p = 0; $p < $slugTotal; $p++) {
                 $tail = substr($prefix . $paths[$p], -$tailLength);
-                if (isset($testMap[$tail])) { $tailLength++; $collision = true; break; }
-                $testMap[$tail] = true;
+                if (isset($slugBaseMap[$tail])) {
+                    $tailLength++;
+                    continue 2;
+                }
+                $slugBaseMap[$tail] = true;
             }
-            if (!$collision) break;
+            break;
         }
 
         $shift = 20;
@@ -239,7 +241,6 @@ final class Parser
                 exit(0);
             }
             fclose($pair[1]);
-            stream_set_read_buffer($pair[0], 0);
             $sockets[$w] = $pair[0];
         }
 
@@ -267,6 +268,10 @@ final class Parser
         }
         $counts = unpack('v*', $merged);
 
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 4_194_304);
+        fwrite($out, '{');
+
         $datePrefixes = [];
         for ($d = 0; $d < $dateCount; $d++) {
             $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
@@ -277,7 +282,6 @@ final class Parser
             $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
         }
 
-        $json = '{';
         $sep = "\n    ";
         $base = 1;
 
@@ -291,21 +295,22 @@ final class Parser
 
             if ($firstDate === -1) { $base += $dateCount; continue; }
 
-            $json .= $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
             $sep = ",\n    ";
 
             for ($d = $firstDate + 1; $d < $dateCount; $d++) {
                 $idx++;
                 $count = $counts[$idx];
                 if ($count === 0) continue;
-                $json .= ",\n" . $datePrefixes[$d] . $count;
+                $buf .= ",\n" . $datePrefixes[$d] . $count;
             }
 
-            $json .= "\n    }";
+            $buf .= "\n    }";
+            fwrite($out, $buf);
             $base += $dateCount;
         }
 
-        $json .= "\n}";
-        file_put_contents($outputPath, $json);
+        fwrite($out, "\n}");
+        fclose($out);
     }
 }
