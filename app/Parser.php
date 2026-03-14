@@ -43,7 +43,7 @@ final class Parser
                 if ($count !== 0) {
                     \fprintf(
                         $stream,
-                        "{$date_sep}        \"%d-%02d-%02d\": {$count}}",
+                        "{$date_sep}        \"%d-%02d-%02d\": {$count}",
                         ($date >> 9) + 2021,
                         ($date >> 5) & 0b1111,
                         $date & 0b11111,
@@ -53,7 +53,7 @@ final class Parser
             }
             $path_sep = "\n    },";
         }
-        \fwrite($stream, "\n    }\n}\n");
+        \fwrite($stream, "\n    }\n}");
 
         \fsync($stream) and \fclose($stream);
     }
