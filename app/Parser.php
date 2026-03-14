@@ -287,7 +287,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
+        stream_set_write_buffer($out, 4_194_304);
         fwrite($out, '{');
 
         $datePrefixes = [];
@@ -297,7 +297,7 @@ final class Parser
 
         $escapedPaths = [];
         for ($p = 0; $p < $slugTotal; $p++) {
-            $escapedPaths[$p] = '"\/blog\/' . str_replace('/', '\/', $paths[$p]) . '": {';
+            $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
         }
 
         $sep = "\n    ";
