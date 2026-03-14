@@ -122,7 +122,7 @@ final class Parser
         $fileSize = ftell($handle);
         fclose($handle);
 
-        $grain = 1 << 23;
+        $grain = 1 << 25;
         $chunks = [];
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -140,7 +140,7 @@ final class Parser
         fclose($handle);
         $chunkCount = count($chunks);
 
-        $workers = 8;
+        $workers = 9;
         $sockets = [];
 
         for ($w = 0; $w < $workers; $w++) {
@@ -269,7 +269,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 3_145_728);
+        stream_set_write_buffer($out, 4_194_304);
         fwrite($out, '{');
 
         $datePrefixes = [];
