@@ -276,7 +276,7 @@ final class BenchmarkRunCommand
                 return null;
             }
 
-            $commitTimestamp = (int) $commitOutput[0];
+            $commitTimestamp = (int)$commitOutput[0];
 
             // Get the verified label creation date
             // Fetch all events with pagination to find the most recent 'verified' label
@@ -365,7 +365,7 @@ final class BenchmarkRunCommand
             $cleanedOutput = implode(PHP_EOL, preg_replace(
                 '/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -\/]*[@-~])/',
                 '',
-                $output
+                $output,
             ));
 
             $this->prError($prNumber, "Failed to run benchmark");
@@ -375,22 +375,24 @@ final class BenchmarkRunCommand
             ```
             $cleanedOutput
             ```
-            MD);
+            MD,
+            );
 
             return null;
         }
 
         // Parse results
-        $results = json_decode(file_get_contents($resultFile), true);
-        $meanTime = $results['results'][0]['mean'] ?? null;
+        $resultJson = file_get_contents($resultFile);
+        $results = json_decode($resultJson, true);
+        $minTime = $results['results'][0]['mean'] ?? null;
 
-        if ($meanTime === null) {
+        if ($minTime === null) {
             $this->prError($prNumber, "Failed to parse benchmark results");
             $this->githubComment($prNumber, 'Benchmarking failed: Unable to parse results');
             return null;
         }
 
-        if ($meanTime < 20) {
+        if ($minTime < 5) {
             // Second run for fast PRs
             $command = sprintf(
                 "hyperfine --warmup 2 --runs 5 --prepare=%s --export-json %s 'cd %s && %s'",
@@ -411,30 +413,47 @@ final class BenchmarkRunCommand
             }
 
             // Parse results
-            $results = json_decode(file_get_contents($resultFile), true);
-            $meanTime = $results['results'][0]['mean'] ?? null;
+            $resultJson = file_get_contents($resultFile);
+            $results = json_decode($resultJson, true);
+            $minTime = $results['results'][0]['min'] ?? null;
         }
+
+        $minTime = floor($minTime * 1000) / 1000;
 
         // Verify results
         $expectedPath = __DIR__ . '/../../data/real-data-expected.json';
 
-        $actual = file_get_contents($actualPath);
-        $expected = file_get_contents($expectedPath);
+        if (!is_file($actualPath)) {
+            $this->prError($prNumber, "No file actual found");
+            $this->githubComment($prNumber, "Benchmarking failed: no parsed results were stored");
+            return null;
+        }
 
-        if ($actual !== $expected) {
+        $actual = @file_get_contents($actualPath);
+        $expected = @file_get_contents($expectedPath);
+
+        if (! $actual || ! $expected || $actual !== $expected) {
             $this->prError($prNumber, "Validation failed!");
             $this->githubComment($prNumber, "Benchmarking failed: Parsed result did not match expected result");
             return null;
         }
 
         // Post results
-        $this->prSuccess($prNumber, "Benchmark complete: {$meanTime}s");
-        $this->githubComment($prNumber, "Benchmarking complete! Mean execution time: **{$meanTime}s**");
+        $this->prSuccess($prNumber, "Benchmark complete: {$minTime}s");
+        $this->githubComment($prNumber, <<<MD
+        Benchmarking complete! Best execution time: **{$minTime}s**
+        
+        Full results:
+        
+        ```json
+        {$resultJson}
+        ```
+        MD);
 
         // Clean up
         exec("rm -rf " . escapeshellarg($benchmarkDir));
 
-        return $meanTime;
+        return $minTime;
     }
 
     private function addLeaderboardResult(string $file, int $prNumber, string $branch, ?float $newTime): void
