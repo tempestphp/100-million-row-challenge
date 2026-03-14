@@ -18,7 +18,6 @@ use function gc_disable;
 use function pcntl_fork;
 use function sodium_add;
 use function str_repeat;
-use function str_replace;
 use function stream_select;
 use function stream_set_chunk_size;
 use function stream_set_read_buffer;
