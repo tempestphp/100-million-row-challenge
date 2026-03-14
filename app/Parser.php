@@ -140,7 +140,7 @@ final class Parser
         fclose($handle);
         $chunkCount = count($chunks);
 
-        $workers = 9;
+        $workers = 8;
         $sockets = [];
 
         for ($w = 0; $w < $workers; $w++) {
