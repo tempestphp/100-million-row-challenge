@@ -3347,7 +3347,7 @@ o2:
     private static function parseFileSequence()
     {
         $b = '';
-        $bp = 0;
+        $bp = 25;
         $bm = 0;
         $i = 0;
 
@@ -3364,7 +3364,6 @@ o2:
 
         // --------------------------------------------------------------------
         $b = \fread($f, self::BUFFER_SIZE);
-        $bp = 25;
 
 s1:
         $bm = \strrpos($b, "\n");
@@ -3468,7 +3467,7 @@ l1e:
         $fo = \fopen($outputPath, 'wb');
         if ($fo === false) throw new \Exception('Output file could not be created: '.$outputPath);
         \stream_set_write_buffer($fo, self::OUTPUT_BUFFER_SIZE);
-        self::$fo = &$fo;
+        self::$fo = $fo;
 
         $f = \fopen($inputPath, 'rb');
         if (false === $f) throw new \Exception('Input file could not be opened: '.$inputPath);
