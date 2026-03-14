@@ -120,7 +120,7 @@ final class Parser
         $fileSize = ftell($handle);
         fclose($handle);
 
-        $grain = 1 << 22;
+        $grain = 1 << 23;
         $chunks = [];
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -157,7 +157,7 @@ final class Parser
                     $remaining = $to - $from;
 
                     while ($remaining > 0) {
-                        $chunk = fread($reader, $remaining > 98_304 ? 98_304 : $remaining);
+                        $chunk = fread($reader, $remaining > 131_072 ? 131_072 : $remaining);
                         $chunkLen = strlen($chunk);
                         $remaining -= $chunkLen;
 
@@ -267,7 +267,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
+        stream_set_write_buffer($out, 2_097_152);
         fwrite($out, '{');
 
         $datePrefixes = [];
