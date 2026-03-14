@@ -122,7 +122,7 @@ final class Parser
         $fileSize = ftell($handle);
         fclose($handle);
 
-        $grain = 1 << 25;
+        $grain = 1 << 23;
         $chunks = [];
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -263,7 +263,7 @@ final class Parser
         }
 
         $merged = $buffers[0];
-        for ($w = $workers - 1; $w > 0; $w--) {
+        for ($w = 1; $w < $workers; $w++) {
             sodium_add($merged, $buffers[$w]);
         }
         $counts = unpack('v*', $merged);
