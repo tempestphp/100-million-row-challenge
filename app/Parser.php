@@ -114,7 +114,7 @@ final class Parser
         $tailOffset = 26 + $tailLength;
         $dateOffset = 22;
         $dateLength = 7;
-        $fence = ($maxStride * 10) + $tailOffset;
+        $fence = ($maxStride * 12) + $tailOffset;
 
         $outputSize = $slugTotal * $dateCount;
 
@@ -122,7 +122,7 @@ final class Parser
         $fileSize = ftell($handle);
         fclose($handle);
 
-        $grain = 1 << 24;
+        $grain = 1 << 23;
         $chunks = [];
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -175,62 +175,22 @@ final class Parser
                         $p = $lastNl;
 
                         while ($p > $fence) {
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
-
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
 
                         while ($p >= $tailOffset) {
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
-                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
-                            $output[$idx] = $next[$output[$idx]];
-                            $p -= $packed >> $shift;
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
                     }
                 }
@@ -245,13 +205,11 @@ final class Parser
         }
 
         $buffers = array_fill(0, $workers, '');
-        $write = [];
-        $except = [];
         while ($sockets !== []) {
-            $read = $sockets;
-            stream_select($read, $write, $except, 5);
+            $read = $sockets; $write = []; $except = [];
+            stream_select($read, $write, $except, null);
             foreach ($read as $key => $socket) {
-                $data = fread($socket, $outputSize << 1);
+                $data = fread($socket, 8_388_608);
                 if ($data !== '' && $data !== false) {
                     $buffers[$key] .= $data;
                 }
