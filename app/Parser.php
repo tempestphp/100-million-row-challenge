@@ -41,7 +41,7 @@ final class Parser
     {
         gc_disable();
 
-        $threads = 10;
+        $threads = 8;
 
         $bump = [];
         for ($c = 0; $c < 255; $c++) {
@@ -117,7 +117,7 @@ final class Parser
         $totalBytes = ftell($fd);
         fclose($fd);
 
-        $grain = 16777216;
+        $grain = 1 << 25;
         $tasks = [];
         $bound = 0;
         
@@ -165,25 +165,21 @@ final class Parser
                     [$from, $to] = $tasks[$job];
                     fseek($reader, $from);
                     $left = $to - $from;
-                    $leftover = '';
 
                     while ($left > 0) {
-                        $toRead = $left > 131072 ? 131072 : $left;
-                        $buf = $leftover . fread($reader, $toRead);
+                        $buf = fread($reader, $left > 131072 ? 131072 : $left);
                         $cLen = strlen($buf);
-                        $left -= $toRead;
+                        $left -= $cLen;
 
                         $lastBrk = strrpos($buf, "\n");
                         if ($lastBrk === false) {
-                            $leftover = $buf;
-                            continue;
+                            break;
                         }
 
                         $over = $cLen - $lastBrk - 1;
                         if ($over > 0) {
-                            $leftover = substr($buf, $lastBrk + 1);
-                        } else {
-                            $leftover = '';
+                            fseek($reader, -$over, SEEK_CUR);
+                            $left += $over;
                         }
 
                         $p = $lastBrk;
