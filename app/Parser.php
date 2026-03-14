@@ -42,9 +42,7 @@ final class Parser
         $dates = [];
         $dateCount = 0;
         for ($y = 1; $y <= 6; $y++) {
-            $mStart = ($y === 1) ? 2 : 1;
-            $mEnd = ($y === 6) ? 2 : 12;
-            for ($m = $mStart; $m <= $mEnd; $m++) {
+            for ($m = 1; $m <= 12; $m++) {
                 $maxD = match ($m) {
                     2 => $y === 4 ? 29 : 28,
                     4, 6, 9, 11 => 30,
@@ -52,9 +50,7 @@ final class Parser
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
                 $ymStr = "{$y}-{$mStr}-";
-                $dStart = ($y === 1 && $m === 2) ? 27 : 1;
-                $dEnd = ($y === 6 && $m === 2) ? 26 : $maxD;
-                for ($d = $dStart; $d <= $dEnd; $d++) {
+                for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $dateCount;
                     $dates[$dateCount] = '202' . $key;
