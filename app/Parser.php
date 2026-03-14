@@ -10,7 +10,7 @@ final class Parser
     // the path and the date portion of the ISO 8601 timestamp.
     private const string RE = '/^.{19}([^,]+),(\d{4}-\d{2}-\d{2})/m';
 
-    // Small read buffer keeps the PCRE subject string hot in L1 cache.
+    // 4KB buffer - optimal for L1/L2 cache
     private const int BUF = 4096;
 
     public function parse(string $inputPath, string $outputPath): void
@@ -21,8 +21,9 @@ final class Parser
             return;
         }
 
-        $numWorkers = $this->cpuCount();
-        if ($numWorkers > 1 && $fileSize > 32 * 1024 * 1024 && function_exists('pcntl_fork')) {
+        $cpuCount = $this->cpuCount();
+        $numWorkers = min($cpuCount, max(2, (int) ceil($fileSize / (20 * 1024 * 1024))));
+        if ($numWorkers > 1 && $fileSize > 20 * 1024 * 1024 && function_exists('pcntl_fork')) {
             $stats = $this->parseParallel($inputPath, $fileSize, $numWorkers);
         } else {
             $stats = $this->parseSegment($inputPath, 0, $fileSize);
@@ -43,12 +44,32 @@ final class Parser
             return $count;
         }
 
-        $n = (int) @shell_exec('nproc 2>/dev/null');
-        if ($n < 2) {
+        $n = 0;
+
+        // Method 1: nproc (Linux)
+        if ($n < 2 && function_exists('shell_exec')) {
+            $n = (int) @shell_exec('nproc 2>/dev/null');
+        }
+
+        // Method 2: sysctl (macOS)
+        if ($n < 2 && function_exists('shell_exec')) {
             $n = (int) @shell_exec('sysctl -n hw.logicalcpu 2>/dev/null');
         }
 
-        return $count = ($n > 1 ? min($n, 16) : 4);
+        // Method 3: /proc/cpuinfo (Linux fallback if shell_exec disabled)
+        if ($n < 2 && @is_readable('/proc/cpuinfo')) {
+            $cpuinfo = @file_get_contents('/proc/cpuinfo');
+            if ($cpuinfo !== false) {
+                $n = substr_count($cpuinfo, 'processor');
+            }
+        }
+
+        // Method 4: sysconf (POSIX)
+        if ($n < 2 && function_exists('posix_sysconf') && defined('POSIX_SC_NPROCESSORS_ONLN')) {
+            $n = (int) posix_sysconf(POSIX_SC_NPROCESSORS_ONLN);
+        }
+
+        return $count = ($n > 1 ? min($n, 16) : 8);
     }
 
     private function parseParallel(string $inputPath, int $fileSize, int $numWorkers): array
@@ -73,6 +94,7 @@ final class Parser
             }
 
             if ($pid === 0) {
+                @ini_set('memory_limit', '-1');
                 $stats = $this->parseSegment($inputPath, $segStart, $segEnd);
                 file_put_contents(
                     $tmpFile,
@@ -84,36 +106,38 @@ final class Parser
             $pids[$w] = $pid;
         }
 
-        foreach ($pids as $pid) {
-            pcntl_waitpid($pid, $status);
-        }
-
         $merged = [];
-        for ($w = 0; $w < $actualWorkers; $w++) {
-            if (!isset($tmpFiles[$w]) || !file_exists($tmpFiles[$w])) {
-                continue;
-            }
+        $pidToWorker = array_flip($pids);
+        $remaining = count($pids);
 
-            $raw = file_get_contents($tmpFiles[$w]);
-            unlink($tmpFiles[$w]);
-            $partial = $useIgbinary ? igbinary_unserialize($raw) : unserialize($raw);
+        while ($remaining > 0) {
+            $pid = pcntl_waitpid(-1, $status, WNOHANG);
+            if ($pid > 0 && isset($pidToWorker[$pid])) {
+                $w = $pidToWorker[$pid];
+                $remaining--;
+                $raw = file_get_contents($tmpFiles[$w]);
+                unlink($tmpFiles[$w]);
+                $partial = $useIgbinary ? igbinary_unserialize($raw) : unserialize($raw);
 
-            if (!is_array($partial)) {
-                continue;
-            }
+                if (!is_array($partial)) {
+                    continue;
+                }
 
-            foreach ($partial as $path => $dates) {
-                if (!isset($merged[$path])) {
-                    $merged[$path] = $dates;
-                } else {
-                    foreach ($dates as $date => $count) {
-                        if (isset($merged[$path][$date])) {
-                            $merged[$path][$date] += $count;
-                        } else {
-                            $merged[$path][$date] = $count;
+                foreach ($partial as $path => $dates) {
+                    if (!isset($merged[$path])) {
+                        $merged[$path] = $dates;
+                    } else {
+                        foreach ($dates as $date => $count) {
+                            if (isset($merged[$path][$date])) {
+                                $merged[$path][$date] += $count;
+                            } else {
+                                $merged[$path][$date] = $count;
+                            }
                         }
                     }
                 }
+            } elseif ($pid === 0) {
+                usleep(100);
             }
         }
 
@@ -160,6 +184,32 @@ final class Parser
 
     private function parseSegment(string $inputPath, int $start, int $end): array
     {
+        // For small segments, read entire content at once
+        if ($end - $start < 16 * 1024 * 1024) {
+            $content = file_get_contents($inputPath, false, null, $start, $end - $start);
+            if ($content === false || $content === '') {
+                return [];
+            }
+
+            preg_match_all(self::RE, $content, $m);
+            $stats = [];
+            $paths = $m[1];
+            $dates = $m[2];
+            $len = count($paths);
+
+            for ($i = 0; $i < $len; $i++) {
+                $p = $paths[$i];
+                $d = $dates[$i];
+                if (isset($stats[$p][$d])) {
+                    $stats[$p][$d]++;
+                } else {
+                    $stats[$p][$d] = 1;
+                }
+            }
+            return $stats;
+        }
+
+        // For large segments, use chunked reading
         $handle = fopen($inputPath, 'rb');
         if ($start > 0) {
             fseek($handle, $start);
@@ -189,8 +239,12 @@ final class Parser
             }
 
             preg_match_all(self::RE, $block, $m);
+            $paths = $m[1];
             $dates = $m[2];
-            foreach ($m[1] as $i => $p) {
+            $len = count($paths);
+
+            for ($i = 0; $i < $len; $i++) {
+                $p = $paths[$i];
                 $d = $dates[$i];
                 if (isset($stats[$p][$d])) {
                     $stats[$p][$d]++;
@@ -203,8 +257,12 @@ final class Parser
         // Handle a trailing line that had no terminating newline.
         if ($carry !== '') {
             preg_match_all(self::RE, $carry, $m);
+            $paths = $m[1];
             $dates = $m[2];
-            foreach ($m[1] as $i => $p) {
+            $len = count($paths);
+
+            for ($i = 0; $i < $len; $i++) {
+                $p = $paths[$i];
                 $d = $dates[$i];
                 if (isset($stats[$p][$d])) {
                     $stats[$p][$d]++;
