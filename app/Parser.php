@@ -53,7 +53,7 @@ final class Parser
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $dateCount;
-                    $dates[$dateCount] = '202' . $key;
+                    $datePrefixes[$dateCount] = '        "202' . $key . '": ';
                     $dateCount++;
                 }
             }
@@ -230,11 +230,6 @@ final class Parser
         stream_set_write_buffer($out, 4_194_304);
         fwrite($out, '{');
 
-        $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
-        }
-
         $escapedPaths = [];
         for ($p = 0; $p < $slugTotal; $p++) {
             $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
@@ -244,28 +239,26 @@ final class Parser
         $base = 1;
 
         for ($p = 0; $p < $slugTotal; $p++) {
-            $firstDate = -1;
-            $idx = $base;
-            for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$idx] !== 0) { $firstDate = $d; break; }
-                $idx++;
+            $limit = $base + $dateCount;
+
+            while ($base < $limit && $counts[$base] === 0) {
+                $base++;
             }
 
-            if ($firstDate === -1) { $base += $dateCount; continue; }
+            if ($base === $limit) continue;
 
-            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $dOff = $base - ($limit - $dateCount);
+            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$dOff] . $counts[$base];
             $sep = ",\n    ";
 
-            for ($d = $firstDate + 1; $d < $dateCount; $d++) {
-                $idx++;
-                $count = $counts[$idx];
+            for ($base++; $base < $limit; $base++) {
+                $count = $counts[$base];
                 if ($count === 0) continue;
-                $buf .= ",\n" . $datePrefixes[$d] . $count;
+                $buf .= ",\n" . $datePrefixes[$base - ($limit - $dateCount)] . $count;
             }
 
             $buf .= "\n    }";
             fwrite($out, $buf);
-            $base += $dateCount;
         }
 
         fwrite($out, "\n}");
