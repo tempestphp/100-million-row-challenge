@@ -287,7 +287,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 4_194_304);
+        stream_set_write_buffer($out, 2097152);
         fwrite($out, '{');
 
         $datePrefixes = [];
