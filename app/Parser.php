@@ -147,7 +147,6 @@ final class Parser
             stream_set_chunk_size($pair[1], $outputSize << 1);
             if (pcntl_fork() === 0) {
                 fclose($pair[0]);
-                stream_set_write_buffer($pair[1], 0);
                 $output = str_repeat("\0", $outputSize);
                 $reader = fopen($inputPath, 'rb');
                 stream_set_read_buffer($reader, 0);
@@ -268,7 +267,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 4_194_304);
+        stream_set_write_buffer($out, 8_388_608);
         fwrite($out, '{');
 
         $datePrefixes = [];
