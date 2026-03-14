@@ -4,6 +4,7 @@ namespace App;
 use function array_fill;
 use function chr;
 use function chunk_split;
+use function count;
 use function fclose;
 use function feof;
 use function fgets;
@@ -13,10 +14,10 @@ use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
-use function intdiv;
 use function pcntl_fork;
 use function sodium_add;
 use function str_repeat;
+use function str_replace;
 use function stream_select;
 use function stream_set_chunk_size;
 use function stream_set_read_buffer;
@@ -39,183 +40,305 @@ final class Parser
     public static function parse($inputPath, $outputPath)
     {
         gc_disable();
-        $workers = 8;
 
-        $dIds = [];
-        $dStrs = [];
-        $dTotal = 0;
+
+        $dateTbl = [];
+        $jsonDates = [];
+        $totalDates = 0;
         
         for ($y = 1; $y <= 6; $y++) {
             for ($m = 1; $m <= 12; $m++) {
-                $max = match ($m) { 2 => $y === 4 ? 29 : 28, 4, 6, 9, 11 => 30, default => 31 };
-                $mm = $m < 10 ? "0$m" : (string)$m;
-                for ($d = 1; $d <= $max; $d++) {
-                    $dd = $d < 10 ? "0$d" : (string)$d;
-                    $dIds["$y-$mm-$dd"] = $dTotal;
-                    $dStrs[$dTotal] = "        \"202$y-$mm-$dd\": ";
-                    $dTotal++;
+                $dim = match ($m) { 2 => $y === 4 ? 29 : 28, 4, 6, 9, 11 => 30, default => 31 };
+                $mStr = $m < 10 ? "0$m" : (string)$m;
+                
+                for ($d = 1; $d <= $dim; $d++) {
+                    $dStr = $d < 10 ? "0$d" : (string)$d;
+                    $dateTbl["$y-$mStr-$dStr"] = $totalDates;
+                    $jsonDates[$totalDates] = "        \"202$y-$mStr-$dStr\": ";
+                    $totalDates++;
                 }
             }
         }
 
-        $inc = [];
-        for ($i = 0; $i < 255; $i++) $inc[chr($i)] = chr($i + 1);
 
-        $fd = fopen($inputPath, 'rb');
-        stream_set_read_buffer($fd, 0);
-        $head = fread($fd, 524288); 
+        $add1 = [];
+        for ($i = 0; $i < 255; $i++) {
+            $add1[chr($i)] = chr($i + 1);
+        }
+        $add1[chr(255)] = chr(255);
+
+
+        $fh = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fh, 0);
+        $head = fread($fh, 262144);
         
-        $urls = [];
-        $uMap = [];
-        $uTotal = 0;
-        $ptr = 0;
-        $endNl = strrpos($head, "\n") ?: 0;
+        $slugs = [];
+        $slugSeen = [];
+        $slugTotal = 0;
+        $cursor = 0;
+        $lastNl = strrpos($head, "\n") ?: 0;
 
-        while ($ptr < $endNl && $uTotal < 268) {
-            $nextNl = strpos($head, "\n", $ptr + 52);
+        while ($cursor < $lastNl && $slugTotal < 268) {
+            $nextNl = strpos($head, "\n", $cursor + 52);
             if ($nextNl === false) break;
             
-            $route = substr($head, $ptr + 25, $nextNl - $ptr - 51);
-            if (!isset($uMap[$route])) {
-                $urls[$uTotal] = $route;
-                $uMap[$route] = true;
-                $uTotal++;
+            $slug = substr($head, $cursor + 25, $nextNl - $cursor - 51);
+            if (!isset($slugSeen[$slug])) {
+                $slugs[$slugTotal] = $slug;
+                $slugSeen[$slug] = true;
+                $slugTotal++;
             }
-            $ptr = $nextNl + 1;
+            $cursor = $nextNl + 1;
         }
-        unset($head, $uMap);
+
+
+        if ($slugTotal < 268) {
+            $tail = substr($head, $lastNl + 1);
+            while ($slugTotal < 268 && !feof($fh)) {
+                $chunk = $tail . fread($fh, 1048576);
+                if ($chunk === '') break;
+                
+                $lastNl = strrpos($chunk, "\n");
+                if ($lastNl === false) { $tail = $chunk; continue; }
+                
+                $cursor = 25;
+                while ($cursor < $lastNl) {
+                    $comma = strpos($chunk, ',', $cursor);
+                    if ($comma === false || $comma >= $lastNl) break;
+                    
+                    $slug = substr($chunk, $cursor, $comma - $cursor);
+                    if (!isset($slugSeen[$slug])) {
+                        $slugs[$slugTotal] = $slug;
+                        $slugSeen[$slug] = true;
+                        $slugTotal++;
+                        if ($slugTotal === 268) break 2;
+                    }
+                    $cursor = $comma + 52;
+                }
+                $tail = substr($chunk, $lastNl + 1);
+            }
+        }
+        unset($head, $slugSeen);
+
 
         $baseUri = 'https://stitcher.io/blog/';
         $sufLen = 1;
         while (true) {
             $chk = [];
             $ok = true;
-            foreach ($urls as $u) {
-                $tail = substr($baseUri . $u, -$sufLen);
+            foreach ($slugs as $s) {
+                $tail = substr($baseUri . $s, -$sufLen);
                 if (isset($chk[$tail])) { $sufLen++; $ok = false; break; }
                 $chk[$tail] = true;
             }
             if ($ok) break;
         }
 
-        $dict = [];
+
+        $jumpTbl = [];
         $maxStride = 0;
-        foreach ($urls as $i => $u) {
-            $stride = strlen($u) + 52;
+        foreach ($slugs as $i => $s) {
+            $stride = strlen($s) + 52;
             if ($stride > $maxStride) $maxStride = $stride;
-            $dict[substr($baseUri . $u, -$sufLen)] = ($stride << 20) | ($i * $dTotal);
+            $jumpTbl[substr($baseUri . $s, -$sufLen)] = ($stride << 20) | ($i * $totalDates);
         }
-        $gridSz = $uTotal * $dTotal;
 
-        fseek($fd, 0, SEEK_END);
-        $fSize = ftell($fd);
-        fclose($fd);
 
+        fseek($fh, 0, SEEK_END);
+        $fSize = ftell($fh);
+        fclose($fh);
+
+        $grain = 8388608;
         $chunks = [];
-        $bound = 0;
-        $grain = intdiv($fSize, $workers);
-        $fd = fopen($inputPath, 'rb');
-        stream_set_read_buffer($fd, 0);
+        $offset = 0;
+        $fh = fopen($inputPath, 'rb');
+        stream_set_read_buffer($fh, 0);
 
-        for ($i = 0; $i < $workers; $i++) {
-            $upper = ($i === $workers - 1) ? $fSize : $bound + $grain;
+        while ($offset < $fSize) {
+            $hi = $offset + $grain;
+            if ($hi > $fSize) $hi = $fSize;
+            
             $start = 0;
-            if ($bound > 0) { fseek($fd, $bound); fgets($fd); $start = ftell($fd); }
+            if ($offset > 0) { fseek($fh, $offset); fgets($fh); $start = ftell($fh); }
+            
             $end = $fSize;
-            if ($upper < $fSize) { fseek($fd, $upper); fgets($fd); $end = ftell($fd); }
+            if ($hi < $fSize) { fseek($fh, $hi); fgets($fh); $end = ftell($fh); }
+            
             $chunks[] = [$start, $end];
-            $bound = $upper;
+            $offset = $hi;
         }
-        fclose($fd);
+        fclose($fh);
+        $chunkTotal = count($chunks);
 
-        $pipes = [];
+
+        $workers = 8;
+        $memSz = $slugTotal * $totalDates;
+        $sockets = [];
+
+        $sOff = 26 + $sufLen;
+        $fence = ($maxStride * 10) + $sOff;
 
         for ($w = 0; $w < $workers; $w++) {
-            $sock = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($sock[0], $gridSz * 2);
-            stream_set_chunk_size($sock[1], $gridSz * 2);
+            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            stream_set_chunk_size($pair[0], $memSz << 1);
+            stream_set_chunk_size($pair[1], $memSz << 1);
             
             if (pcntl_fork() === 0) {
-                fclose($sock[0]);
-                $mem = str_repeat("\0", $gridSz);
-                $fh = fopen($inputPath, 'rb');
-                stream_set_read_buffer($fh, 0);
+                fclose($pair[0]);
+                $bins = str_repeat("\0", $memSz);
+                $fd = fopen($inputPath, 'rb');
+                stream_set_read_buffer($fd, 0);
 
-                [$sByte, $eByte] = $chunks[$w];
-                fseek($fh, $sByte);
-                $rem = $eByte - $sByte;
 
-                switch ($sufLen) {
-                    case 6: $o=32; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=32){ $t=$dict[substr($buf,$p-32,6)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
-                    case 7: $o=33; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=33){ $t=$dict[substr($buf,$p-33,7)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
-                    case 8: $o=34; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=34){ $t=$dict[substr($buf,$p-34,8)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
-                    case 9: $o=35; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=35){ $t=$dict[substr($buf,$p-35,9)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
-                    case 10: $o=36; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=36){ $t=$dict[substr($buf,$p-36,10)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
-                    case 11: $o=37; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=37){ $t=$dict[substr($buf,$p-37,11)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
-                    case 12: $o=38; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=38){ $t=$dict[substr($buf,$p-38,12)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
-                    default: $o=26+$sufLen; $f=($maxStride*10)+$o; while($rem>0){ $buf=fread($fh,$rem>262144?262144:$rem); $bL=strlen($buf); $rem-=$bL; $nl=strrpos($buf,"\n"); if($nl===false)break; $tail=$bL-$nl-1; if($tail>0){ fseek($fh,-$tail,SEEK_CUR); $rem+=$tail; } $p=$nl; while($p>$f){ $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } while($p>=$o){ $t=$dict[substr($buf,$p-$o,$sufLen)]; $x=($t&1048575)+$dIds[substr($buf,$p-22,7)]; $mem[$x]=$inc[$mem[$x]]; $p-=$t>>20; } } break;
+                if ($sufLen === 1) {
+                    for ($c = $w; $c < $chunkTotal; $c += $workers) {
+                        [$s, $e] = $chunks[$c]; fseek($fd, $s); $left = $e - $s;
+                        while ($left > 0) {
+                            $buf = fread($fd, $left > 131072 ? 131072 : $left); $bL = strlen($buf); $left -= $bL;
+                            $nl = strrpos($buf, "\n"); if ($nl === false) break;
+                            $tail = $bL - $nl - 1; if ($tail > 0) { fseek($fd, -$tail, SEEK_CUR); $left += $tail; }
+                            
+                            $idx = $nl;
+                            while ($idx > $fence) {
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                            }
+                            while ($idx >= 27) {
+                                $v=$jumpTbl[$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                            }
+                        }
+                    }
+                } elseif ($sufLen === 2) {
+                    for ($c = $w; $c < $chunkTotal; $c += $workers) {
+                        [$s, $e] = $chunks[$c]; fseek($fd, $s); $left = $e - $s;
+                        while ($left > 0) {
+                            $buf = fread($fd, $left > 131072 ? 131072 : $left); $bL = strlen($buf); $left -= $bL;
+                            $nl = strrpos($buf, "\n"); if ($nl === false) break;
+                            $tail = $bL - $nl - 1; if ($tail > 0) { fseek($fd, -$tail, SEEK_CUR); $left += $tail; }
+                            
+                            $idx = $nl;
+                            while ($idx > $fence) {
+
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                            }
+                            while ($idx >= 28) {
+                                $v=$jumpTbl[$buf[$idx-28].$buf[$idx-27]]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                            }
+                        }
+                    }
+                } else {
+                    for ($c = $w; $c < $chunkTotal; $c += $workers) {
+                        [$s, $e] = $chunks[$c]; fseek($fd, $s); $left = $e - $s;
+                        while ($left > 0) {
+                            $buf = fread($fd, $left > 131072 ? 131072 : $left); $bL = strlen($buf); $left -= $bL;
+                            $nl = strrpos($buf, "\n"); if ($nl === false) break;
+                            $tail = $bL - $nl - 1; if ($tail > 0) { fseek($fd, -$tail, SEEK_CUR); $left += $tail; }
+                            
+                            $idx = $nl;
+                            while ($idx > $fence) {
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                            }
+                            while ($idx >= $sOff) {
+                                $v=$jumpTbl[substr($buf,$idx-$sOff,$sufLen)]; $i=($v&1048575)+$dateTbl[substr($buf,$idx-22,7)]; $bins[$i]=$add1[$bins[$i]]; $idx-=$v>>20;
+                            }
+                        }
+                    }
                 }
                 
-                fclose($fh);
-                fwrite($sock[1], chunk_split($mem, 1, "\0"));
-                fclose($sock[1]);
+                fclose($fd);
+                fwrite($pair[1], chunk_split($bins, 1, "\0"));
+                fclose($pair[1]);
                 exit(0);
             }
-            fclose($sock[1]);
-            $pipes[$w] = $sock[0];
+            fclose($pair[1]);
+            $sockets[$w] = $pair[0];
         }
 
-        $wArr = []; $eArr = [];
-        $bins = array_fill(0, $workers, '');
 
-        while ($pipes !== []) {
-            $rArr = $pipes;
-            stream_select($rArr, $wArr, $eArr, null);
-            foreach ($rArr as $k => $p) {
-                $pay = fread($p, 2097152);
-                if ($pay !== '' && $pay !== false) {
-                    $bins[$k] .= $pay;
+        $results = array_fill(0, $workers, '');
+        $wA = []; $eA = [];
+        
+        while (!empty($sockets)) {
+            $rA = $sockets;
+            stream_select($rA, $wA, $eA, null);
+            foreach ($rA as $k => $sock) {
+                $data = fread($sock, 8388608);
+                if ($data !== '' && $data !== false) {
+                    $results[$k] .= $data;
                 }
-                if (feof($p)) {
-                    fclose($p);
-                    unset($pipes[$k]);
+                if (feof($sock)) {
+                    fclose($sock);
+                    unset($sockets[$k]);
                 }
             }
         }
 
-        $master = $bins[0];
-        for ($i = 1; $i < $workers; $i++) sodium_add($master, $bins[$i]);
-        $visits = unpack('v*', $master);
+
+        $merged = $results[0];
+        for ($i = 1; $i < $workers; $i++) {
+            sodium_add($merged, $results[$i]);
+        }
+        $counts = unpack('v*', $merged);
+
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 2097152);
+        stream_set_write_buffer($out, 1048576);
         fwrite($out, '{');
 
-        $jUris = [];
-        for ($u = 0; $u < $uTotal; $u++) $jUris[$u] = '"\/blog\/' . $urls[$u] . '": {';
-
-        $sep = "\n    ";
-        $ptr = 1;
-
-        for ($u = 0; $u < $uTotal; $u++) {
-            $end = $ptr + $dTotal;
-            
-            while ($ptr < $end && $visits[$ptr] === 0) $ptr++;
-            if ($ptr === $end) continue;
-
-            $dOff = $ptr - ($end - $dTotal);
-            $blk = $sep . $jUris[$u] . "\n" . $dStrs[$dOff] . $visits[$ptr];
-            $sep = ",\n    ";
-
-            for ($ptr++; $ptr < $end; $ptr++) {
-                if ($visits[$ptr] !== 0) {
-                    $blk .= ",\n" . $dStrs[$ptr - ($end - $dTotal)] . $visits[$ptr];
-                }
-            }
-            $blk .= "\n    }";
-            fwrite($out, $blk);
+        $jsonUrls = [];
+        for ($i = 0; $i < $slugTotal; $i++) {
+            $jsonUrls[$i] = '"\/blog\/' . str_replace('/', '\/', $slugs[$i]) . '": {';
         }
 
+        $sep = "\n    ";
+        $cBase = 1;
+
+        for ($u = 0; $u < $slugTotal; $u++) {
+            $limit = $cBase + $totalDates;
+            
+
+            while ($cBase < $limit && $counts[$cBase] === 0) $cBase++;
+            if ($cBase === $limit) continue;
+
+            $dOff = $cBase - ($limit - $totalDates);
+            $block = $sep . $jsonUrls[$u] . "\n" . $jsonDates[$dOff] . $counts[$cBase];
+            $sep = ",\n    ";
+
+            for ($cBase++; $cBase < $limit; $cBase++) {
+                if ($counts[$cBase] !== 0) {
+                    $block .= ",\n" . $jsonDates[$cBase - ($limit - $totalDates)] . $counts[$cBase];
+                }
+            }
+            $block .= "\n    }";
+            fwrite($out, $block);
+        }
+        
         fwrite($out, "\n}");
         fclose($out);
     }
