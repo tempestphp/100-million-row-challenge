@@ -239,6 +239,7 @@ final class Parser
                 exit(0);
             }
             fclose($pair[1]);
+            stream_set_read_buffer($pair[0], 0);
             $sockets[$w] = $pair[0];
         }
 
@@ -267,7 +268,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 8_388_608);
+        stream_set_write_buffer($out, 4_194_304);
         fwrite($out, '{');
 
         $datePrefixes = [];
