@@ -42,7 +42,9 @@ final class Parser
         $dates = [];
         $dateCount = 0;
         for ($y = 1; $y <= 6; $y++) {
-            for ($m = 1; $m <= 12; $m++) {
+            $mStart = ($y === 1) ? 2 : 1;
+            $mEnd = ($y === 6) ? 2 : 12;
+            for ($m = $mStart; $m <= $mEnd; $m++) {
                 $maxD = match ($m) {
                     2 => $y === 4 ? 29 : 28,
                     4, 6, 9, 11 => 30,
@@ -50,7 +52,9 @@ final class Parser
                 };
                 $mStr = ($m < 10 ? '0' : '') . $m;
                 $ymStr = "{$y}-{$mStr}-";
-                for ($d = 1; $d <= $maxD; $d++) {
+                $dStart = ($y === 1 && $m === 2) ? 27 : 1;
+                $dEnd = ($y === 6 && $m === 2) ? 26 : $maxD;
+                for ($d = $dStart; $d <= $dEnd; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $dateCount;
                     $dates[$dateCount] = '202' . $key;
@@ -148,6 +152,7 @@ final class Parser
             stream_set_chunk_size($pair[0], $outputSize << 1);
             stream_set_chunk_size($pair[1], $outputSize << 1);
             if (pcntl_fork() === 0) {
+                fclose($pair[0]);
                 $output = str_repeat("\0", $outputSize);
                 $reader = fopen($inputPath, 'rb');
                 stream_set_read_buffer($reader, 0);
