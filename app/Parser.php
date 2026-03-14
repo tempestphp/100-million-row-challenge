@@ -148,7 +148,6 @@ final class Parser
             stream_set_chunk_size($pair[0], $outputSize << 1);
             stream_set_chunk_size($pair[1], $outputSize << 1);
             if (pcntl_fork() === 0) {
-                fclose($pair[0]);
                 $output = str_repeat("\0", $outputSize);
                 $reader = fopen($inputPath, 'rb');
                 stream_set_read_buffer($reader, 0);
