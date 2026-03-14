@@ -92,29 +92,13 @@ final class Parser
         unset($raw);
 
         $prefix = 'https://stitcher.io/blog/';
-        $tailLength = 1;
-        while (true) {
-            $slugBaseMap = [];
-            for ($p = 0; $p < $slugTotal; $p++) {
-                $tail = substr($prefix . $paths[$p], -$tailLength);
-                if (isset($slugBaseMap[$tail])) {
-                    $tailLength++;
-                    continue 2;
-                }
-                $slugBaseMap[$tail] = true;
-            }
-            break;
-        }
-
+        $tailLength = 22;
         $shift = 20;
         $mask = (1 << $shift) - 1;
-        $maxStride = 0;
+        $maxStride = 100;
         $slugBaseMap = [];
         for ($p = 0; $p < $slugTotal; $p++) {
             $stride = strlen($paths[$p]) + 52;
-            if ($stride > $maxStride) {
-                $maxStride = $stride;
-            }
             $slugBaseMap[substr($prefix . $paths[$p], -$tailLength)] = ($stride << $shift) | ($p * $dateCount);
         }
         $tailOffset = 26 + $tailLength;
@@ -128,7 +112,7 @@ final class Parser
         $fileSize = ftell($handle);
         fclose($handle);
 
-        $grain = 1 << 23;
+        $grain = 1 << 24;
         $chunks = [];
         $lo = 0;
         $handle = fopen($inputPath, 'rb');
