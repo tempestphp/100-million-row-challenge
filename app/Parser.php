@@ -66,16 +66,15 @@ final class Parser
 
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
-        $raw = fread($handle, 181_000);
+        $raw = fread($handle, 142_000);
 
         $prefix = 'https://stitcher.io/blog/';
         $paths = [];
         $slugBaseMap = [];
         $slugTotal = 0;
         $pos = 0;
-        $lastNl = strrpos($raw, "\n") ?: 0;
 
-        while ($pos < $lastNl && $slugTotal < 268) {
+        while ($slugTotal < 268) {
             $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) break;
             $slug = substr($raw, $pos + 25, $nl - $pos - 51);
