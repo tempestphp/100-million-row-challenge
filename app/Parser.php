@@ -112,7 +112,7 @@ final class Parser
         $tailOffset = 26 + $tailLength;
         $dateOffset = 22;
         $dateLength = 7;
-        $fence = ($maxStride * 10) + $tailOffset;
+        $fence = ($maxStride * 12) + $tailOffset;
 
         $outputSize = $slugTotal * $dateCount;
 
@@ -173,6 +173,16 @@ final class Parser
                         $p = $lastNl;
 
                         while ($p > $fence) {
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
+                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $p -= $packed >> $shift;
+
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
+                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $p -= $packed >> $shift;
+
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
                             $output[$idx] = $next[$output[$idx]];
