@@ -1,10 +1,10 @@
 <?php
-
 namespace App;
 
 use function array_fill;
 use function chr;
 use function chunk_split;
+use function count;
 use function fclose;
 use function feof;
 use function fgets;
@@ -17,6 +17,7 @@ use function gc_disable;
 use function pcntl_fork;
 use function sodium_add;
 use function str_repeat;
+use function str_replace;
 use function stream_select;
 use function stream_set_chunk_size;
 use function stream_set_read_buffer;
@@ -36,9 +37,13 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
+    private const NUM_DAYS = 2191;
+
     public static function parse($inputPath, $outputPath)
     {
         gc_disable();
+
+        $threads = 8;
 
         $up = [];
         for ($c = 0; $c < 255; $c++) {
@@ -48,26 +53,27 @@ final class Parser
 
         $tm = [];
         $timeStr = [];
-        $numDays = 0;
-
+        $numDays = self::NUM_DAYS;
+        $dayIndex = 0;
+        
         for ($yr = 1; $yr <= 6; $yr++) {
             for ($mo = 1; $mo <= 12; $mo++) {
                 $limit = match ($mo) {
-                    2 => $yr === 4 ? 29 : 28,
+                    2 => ($yr === 4) ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
-
-                $mm = $mo < 10 ? "0$mo" : (string) $mo;
+                
+                $mm = $mo < 10 ? "0$mo" : (string)$mo;
                 $prefix = "{$yr}-{$mm}-";
-
+                
                 for ($dy = 1; $dy <= $limit; $dy++) {
-                    $dd = $dy < 10 ? "0$dy" : (string) $dy;
+                    $dd = $dy < 10 ? "0$dy" : (string)$dy;
                     $key = $prefix . $dd;
-
-                    $tm[$key] = $numDays;
-                    $timeStr[$numDays] = "        \"202$key\": ";
-                    $numDays++;
+                    
+                    $tm[$key] = $dayIndex;
+                    $timeStr[$dayIndex] = "        \"202$key\": ";
+                    $dayIndex++;
                 }
             }
         }
@@ -77,60 +83,49 @@ final class Parser
         $headBuf = fread($fd, 181000);
 
         $uriList = [];
-        $seen = [];
-        $uriCount = 0;
+        $fm = [];
         $ptr = 0;
         $endLine = strrpos($headBuf, "\n") ?: 0;
 
-        while ($ptr < $endLine && $uriCount < 268) {
+        while ($ptr < $endLine && count($uriList) < 268) {
             $nl = strpos($headBuf, "\n", $ptr + 52);
-            if ($nl === false) {
-                break;
-            }
-
+            if ($nl === false) break;
+            
             $route = substr($headBuf, $ptr + 25, $nl - $ptr - 51);
-            if (!isset($seen[$route])) {
-                $uriList[$uriCount] = $route;
-                $seen[$route] = true;
-                $uriCount++;
+            if (!isset($fm[$route])) {
+                $slot = count($uriList);
+                $uriList[$slot] = $route;
+                $fm[$route] = $slot * $numDays;
             }
-
             $ptr = $nl + 1;
         }
-        unset($headBuf, $seen);
+        unset($headBuf);
 
         $baseUrl = 'https://stitcher.io/blog/';
         $fm = [];
+        $sh = 20;
         $mx = 0;
-
-        for ($u = 0; $u < $uriCount; $u++) {
-            $route = $uriList[$u];
-            $jmp = strlen($route) + 52;
-            if ($jmp > $mx) {
-                $mx = $jmp;
-            }
-
-            $fm[substr($baseUrl . $route, -22)] = ($jmp << 20) | ($u * $numDays);
+        
+        for ($u = 0; $u < 268; $u++) {
+            $jmp = strlen($uriList[$u]) + 52;
+            if ($jmp > $mx) $mx = $jmp;
+            $suf = substr($baseUrl . $uriList[$u], -22);
+            $fm[$suf] = ($jmp << $sh) | ($u * $numDays);
         }
-
-        // 8-unroll en vez de 12: menos código caliente y menos temporales.
-        $batchLimit = ($mx << 3) + 48;
-
+        
         fseek($fd, 0, SEEK_END);
         $totalBytes = ftell($fd);
-
+        $sm = 0b11111111111111111111;
         $tasks = [];
         $bound = 0;
         $startPos = 0;
-        $jobN = 0;
-
+        
+        #$fd = fopen($inputPath, 'rb');
         stream_set_read_buffer($fd, 0);
-
+        
         while ($bound < $totalBytes) {
-            $upper = $bound + 33554432;
-            if ($upper > $totalBytes) {
-                $upper = $totalBytes;
-            }
+            $upper = $bound + 0b10000000000000000000000000;
+            if ($upper > $totalBytes) $upper = $totalBytes;
 
             if ($upper < $totalBytes) {
                 fseek($fd, $upper);
@@ -140,42 +135,34 @@ final class Parser
                 $nextStartPos = $totalBytes;
             }
 
-            $tasks[$jobN++] = [$startPos, $nextStartPos];
+            $tasks[] = [$startPos, $nextStartPos];
             $startPos = $nextStartPos;
             $bound = $upper;
         }
-
         fclose($fd);
 
+        $jobN = count($tasks);
         $ipc = [];
 
-        for ($t = 0; $t < 8; $t++) {
+        for ($t = 0; $t < $threads; $t++) {
             $pipe = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pipe[0], 1174376);
             stream_set_chunk_size($pipe[1], 1174376);
-
+            
             if (pcntl_fork() === 0) {
                 fclose($pipe[0]);
-
                 $st = str_repeat("\0", 587188);
                 $in = fopen($inputPath, 'rb');
                 stream_set_read_buffer($in, 0);
 
-                for ($job = $t; $job < $jobN; $job += 8) {
-                    $task = $tasks[$job];
-                    $from = $task[0];
-                    $to = $task[1];
-
+                for ($job = $t; $job < $jobN; $job += $threads) {
+                    [$from, $to] = $tasks[$job];
                     fseek($in, $from);
                     $rem = $to - $from;
 
                     while ($rem > 0) {
-                        $buf = fread($in, $rem > 131072 ? 131072 : $rem);
+                        $buf = fread($in, $rem > 0b100000000000000000 ? 0b100000000000000000 : $rem);
                         $n = strlen($buf);
-                        if ($n === 0) {
-                            break;
-                        }
-
                         $rem -= $n;
 
                         $brk = strrpos($buf, "\n");
@@ -191,81 +178,42 @@ final class Parser
 
                         $p = $brk;
 
-                        while ($p > $batchLimit) {
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
-
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
-
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
-
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
-
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
-
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
-
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
-
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
+                        while ($p > 1040) {
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                         }
 
-                        while ($p > 47) {
-                            $v = $fm[substr($buf, $p - 48, 22)];
-                            $idx = ($v & 0xFFFFF) + $tm[substr($buf, $p - 22, 7)];
-                            $p -= $v >> 20;
-                            $st[$idx] = $up[$st[$idx]];
+                        while ($p >= 48) {
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                         }
                     }
                 }
 
-                fclose($in);
                 fwrite($pipe[1], chunk_split($st, 1, "\0"));
-                fclose($pipe[1]);
                 exit(0);
             }
-
             fclose($pipe[1]);
             $ipc[$t] = $pipe[0];
         }
 
-        $bins = array_fill(0, 8, '');
-
+        $bins = array_fill(0, $threads, '');
+        
         while ($ipc !== []) {
-            $rA = $ipc;
-            $wA = [];
-            $eA = [];
+            $rA = $ipc; $wA = []; $eA = [];
             stream_select($rA, $wA, $eA, null);
-
             foreach ($rA as $k => $sock) {
-                $payload = fread($sock, 8388608);
-                if ($payload !== false && $payload !== '') {
+                $payload = fread($sock, 0b100000000000000000000000);
+                if ( $payload !== false) {
                     $bins[$k] .= $payload;
                 }
-
                 if (feof($sock)) {
                     fclose($sock);
                     unset($ipc[$k]);
@@ -274,57 +222,45 @@ final class Parser
         }
 
         $master = $bins[0];
-        for ($t = 1; $t < 8; $t++) {
+        for ($t = 1; $t < $threads; $t++) {
             sodium_add($master, $bins[$t]);
         }
-
         $visits = unpack('v*', $master);
 
-        self::writeJson($outputPath, $visits, $uriList, $timeStr, $uriCount, $numDays);
-    }
-
-    private static function writeJson($outputPath, $visits, $uriList, $timeStr, $uriCount, $numDays): void
-    {
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 2097152);
+        stream_set_write_buffer($out, 0b1000000000000000000000); 
         fwrite($out, '{');
 
         $fmtUris = [];
-        for ($u = 0; $u < $uriCount; $u++) {
-            $fmtUris[$u] = '"\/blog\/' . $uriList[$u] . '": {';
+        for ($u = 0; $u < 268; $u++) {
+            $fmtUris[$u] = '"\/blog\/' .  $uriList[$u] . '": {';
         }
 
         $sep = "\n    ";
-        $base = 1;
+        $ptrBase = 1;
 
-        for ($u = 0; $u < $uriCount; $u++) {
-            $limit = $base + $numDays;
-            $p = $base;
-
-            while ($p < $limit && $visits[$p] === 0) {
-                $p++;
+        for ($u = 0; $u < 268; $u++) {
+            $limit = $ptrBase + $numDays;
+            
+            while ($ptrBase < $limit && $visits[$ptrBase] === 0) {
+                $ptrBase++;
             }
 
-            if ($p === $limit) {
-                $base = $limit;
-                continue;
-            }
+            if ($ptrBase === $limit) continue;
 
-            $dayBase = $base - 1;
-            $json = $sep . $fmtUris[$u] . "\n" . $timeStr[$p - $base] . $visits[$p];
+            $dOff = $ptrBase - ($limit - $numDays);
+            $json = $sep . $fmtUris[$u] . "\n" . $timeStr[$dOff] . $visits[$ptrBase];
             $sep = ",\n    ";
 
-            for ($p++; $p < $limit; $p++) {
-                $hits = $visits[$p];
+            for ($ptrBase++; $ptrBase < $limit; $ptrBase++) {
+                $hits = $visits[$ptrBase];
                 if ($hits !== 0) {
-                    $json .= ",\n" . $timeStr[$p - $base] . $hits;
+                    $json .= ",\n" . $timeStr[$ptrBase - ($limit - $numDays)] . $hits;
                 }
             }
 
             $json .= "\n    }";
             fwrite($out, $json);
-
-            $base = $limit;
         }
 
         fwrite($out, "\n}");
