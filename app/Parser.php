@@ -168,63 +168,63 @@ final class Parser
                         while ($p > 1248) {
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
 
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
                         }
 
                         while ($p >= 48) {
