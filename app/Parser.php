@@ -115,34 +115,30 @@ final class Parser
 
         fseek($fd, 0, SEEK_END);
         $totalBytes = ftell($fd);
-        fclose($fd);
+        #fclose($fd);
 
         $slotMask = 0b11111111111111111111;
         $tasks = [];
         $bound = 0;
+        $startPos = 0;
         
-        $fd = fopen($inputPath, 'rb');
+        #$fd = fopen($inputPath, 'rb');
         stream_set_read_buffer($fd, 0);
         
         while ($bound < $totalBytes) {
             $upper = $bound + 0b10000000000000000000000000;
             if ($upper > $totalBytes) $upper = $totalBytes;
 
-            $startPos = 0;
-            if ($bound > 0) {
-                fseek($fd, $bound);
-                fgets($fd);
-                $startPos = ftell($fd);
-            }
-
-            $endPos = $totalBytes;
             if ($upper < $totalBytes) {
                 fseek($fd, $upper);
                 fgets($fd);
-                $endPos = ftell($fd);
+                $nextStartPos = ftell($fd);
+            } else {
+                $nextStartPos = $totalBytes;
             }
 
-            $tasks[] = [$startPos, $endPos];
+            $tasks[] = [$startPos, $nextStartPos];
+            $startPos = $nextStartPos;
             $bound = $upper;
         }
         fclose($fd);
