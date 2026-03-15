@@ -5,7 +5,6 @@ namespace App;
 use function array_fill;
 use function chr;
 use function chunk_split;
-use function count;
 use function fclose;
 use function feof;
 use function fgets;
@@ -15,6 +14,7 @@ use function fseek;
 use function ftell;
 use function fwrite;
 use function gc_disable;
+use function intdiv;
 use function pcntl_fork;
 use function sodium_add;
 use function str_repeat;
@@ -101,34 +101,24 @@ final class Parser
         fseek($handle, 0, SEEK_END);
         $fileSize = ftell($handle);
 
-        $chunks = [];
-        $lo = 0;
-        stream_set_read_buffer($handle, 0);
-        while ($lo < $fileSize) {
-            $hi = $lo + 33554432;
-            if ($hi > $fileSize) {
-                $hi = $fileSize;
-            }
-
-            $from = 0;
-            if ($lo > 0) {
-                fseek($handle, $lo);
+        $segments = [];
+        for ($w = 0; $w < $workers; $w++) {
+            $from = intdiv($fileSize * $w, $workers);
+            $to   = intdiv($fileSize * ($w + 1), $workers);
+            if ($from > 0) {
+                fseek($handle, $from);
                 fgets($handle);
                 $from = ftell($handle);
             }
-
-            $to = $fileSize;
-            if ($hi < $fileSize) {
-                fseek($handle, $hi);
+            if ($w < $workers - 1) {
+                fseek($handle, $to);
                 fgets($handle);
                 $to = ftell($handle);
+            } else {
+                $to = $fileSize;
             }
-
-            $chunks[] = [$from, $to];
-            $lo = $hi;
+            $segments[$w] = [$from, $to];
         }
-
-        $chunkCount = count($chunks);
 
         $sockets = [];
 
@@ -141,12 +131,11 @@ final class Parser
                 $reader = fopen($inputPath, 'rb');
                 stream_set_read_buffer($reader, 0);
 
-                for ($chunkIndex = $w; $chunkIndex < $chunkCount; $chunkIndex += $workers) {
-                    [$from, $to] = $chunks[$chunkIndex];
-                    fseek($reader, $from);
-                    $left = $to - $from;
+                [$from, $to] = $segments[$w];
+                fseek($reader, $from);
+                $left = $to - $from;
 
-                    while ($left > 0) {
+                while ($left > 0) {
                         $chunk = fread($reader, $left > 131_072 ? 131_072 : $left);
                         $chunkLen = strlen($chunk);
                         $left -= $chunkLen;
@@ -231,7 +220,6 @@ final class Parser
                             $output[$idx] = $next[$output[$idx]];
                         }
                     }
-                }
 
                 fclose($reader);
                 fwrite($pair[1], chunk_split($output, 1, "\0"));
@@ -244,12 +232,11 @@ final class Parser
         $mainOutput = str_repeat("\0", $outputSize);
         stream_set_read_buffer($handle, 0);
 
-        for ($chunkIndex = $workers - 1; $chunkIndex < $chunkCount; $chunkIndex += $workers) {
-            [$from, $to] = $chunks[$chunkIndex];
-            fseek($handle, $from);
-            $left = $to - $from;
+        [$from, $to] = $segments[$workers - 1];
+        fseek($handle, $from);
+        $left = $to - $from;
 
-            while ($left > 0) {
+        while ($left > 0) {
                 $chunk = fread($handle, $left > 131_072 ? 131_072 : $left);
                 $chunkLen = strlen($chunk);
                 $left -= $chunkLen;
@@ -334,7 +321,6 @@ final class Parser
                     $mainOutput[$idx] = $next[$mainOutput[$idx]];
                 }
             }
-        }
 
         fclose($handle);
         $mainMerged = chunk_split($mainOutput, 1, "\0");
