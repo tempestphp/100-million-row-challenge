@@ -38,8 +38,12 @@ final class Parser
     {
         gc_disable();
 
+        $next = [];
+        for ($i = 0; $i < 255; $i++) {
+            $next[chr($i)] = chr($i + 1);
+        }
+
         $dateIds = [];
-        $dates = [];
         $dateCount = 0;
         for ($y = 1; $y <= 6; $y++) {
             for ($m = 1; $m <= 12; $m++) {
@@ -57,11 +61,6 @@ final class Parser
                     $dateCount++;
                 }
             }
-        }
-
-        $next = [];
-        for ($i = 0; $i < 255; $i++) {
-            $next[chr($i)] = chr($i + 1);
         }
 
         $handle = fopen($inputPath, 'rb');
@@ -120,9 +119,12 @@ final class Parser
 
         fseek($handle, 0, SEEK_END);
         $fileSize = ftell($handle);
+        fclose($handle);
 
         $grain = 1 << 25;
         $chunks = [];
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
         $lo = 0;
         while ($lo < $fileSize) {
             $hi = $lo + $grain;
