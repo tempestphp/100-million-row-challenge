@@ -205,7 +205,7 @@ final class Parser
                     }
                 }
 
-                fclose($reader);
+                #fclose($reader);
                 fwrite($pipe[1], chunk_split($state, 1, "\0"));
                 exit(0);
             }
@@ -220,7 +220,7 @@ final class Parser
             stream_select($rA, $wA, $eA, null);
             foreach ($rA as $k => $sock) {
                 $payload = fread($sock, 0b100000000000000000000000);
-                if ($payload !== '' && $payload !== false) {
+                if ( $payload !== false) {
                     $bins[$k] .= $payload;
                 }
                 if (feof($sock)) {
