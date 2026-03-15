@@ -79,8 +79,10 @@ final class Parser
         stream_set_read_buffer($fd, 0);
         $headBuf = fread($fd, 181000);
 
-        $uriList = [];
+        $urlPrefixLen = 25;
+        $lineTailLen = 27;
         $uriJump = [];
+        $uriJson = [];
         $uriSuffix = [];
         $fm = [];
         $uriCount = 0;
@@ -88,19 +90,19 @@ final class Parser
         $endLine = strrpos($headBuf, "\n") ?: 0;
 
         while ($ptr < $endLine && $uriCount < 268) {
-            $nl = strpos($headBuf, "\n", $ptr + 52);
-            if ($nl === false) break;
+            $sep = strpos($headBuf, ',', $ptr + $urlPrefixLen);
+            if ($sep === false || $sep >= $endLine) break;
 
-            $routeLen = $nl - $ptr - 51;
-            $route = substr($headBuf, $ptr + 25, $routeLen);
+            $routeLen = $sep - $ptr - $urlPrefixLen;
+            $route = substr($headBuf, $ptr + $urlPrefixLen, $routeLen);
             if (!isset($fm[$route])) {
-                $uriList[$uriCount] = $route;
                 $uriJump[$uriCount] = $routeLen + 52;
+                $uriJson[$uriCount] = '"\/blog\/' . $route . '": {';
                 $uriSuffix[$uriCount] = substr('https://stitcher.io/blog/' . $route, -22);
                 $fm[$route] = $uriCount * $numDays;
                 $uriCount++;
             }
-            $ptr = $nl + 1;
+            $ptr = $sep + $lineTailLen;
         }
         unset($headBuf);
 
@@ -234,11 +236,6 @@ final class Parser
         stream_set_write_buffer($out, 0b1000000000000000000000); 
         fwrite($out, '{');
 
-        $fmtUris = [];
-        for ($u = 0; $u < $uriCount; $u++) {
-            $fmtUris[$u] = '"\/blog\/' .  $uriList[$u] . '": {';
-        }
-
         $sep = "\n    ";
         $ptrBase = 1;
 
@@ -252,7 +249,7 @@ final class Parser
             if ($ptrBase === $limit) continue;
 
             $dOff = $ptrBase - ($limit - $numDays);
-            $json = $sep . $fmtUris[$u] . "\n" . $timeStr[$dOff] . $visits[$ptrBase];
+            $json = $sep . $uriJson[$u] . "\n" . $timeStr[$dOff] . $visits[$ptrBase];
             $sep = ",\n    ";
 
             for ($ptrBase++; $ptrBase < $limit; $ptrBase++) {
