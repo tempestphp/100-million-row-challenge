@@ -38,11 +38,6 @@ final class Parser
     {
         gc_disable();
 
-        $next = [];
-        for ($i = 0; $i < 255; $i++) {
-            $next[chr($i)] = chr($i + 1);
-        }
-
         $dateIds = [];
         $dateCount = 0;
         for ($y = 1; $y <= 6; $y++) {
@@ -61,6 +56,11 @@ final class Parser
                     $dateCount++;
                 }
             }
+        }
+
+        $next = [];
+        for ($i = 0; $i < 255; $i++) {
+            $next[chr($i)] = chr($i + 1);
         }
 
         $handle = fopen($inputPath, 'rb');
@@ -194,9 +194,7 @@ final class Parser
                     }
                 }
 
-                fclose($reader);
                 fwrite($pair[1], chunk_split($output, 1, "\0"));
-                fclose($pair[1]);
                 exit(0);
             }
             fclose($pair[1]);
