@@ -4,13 +4,12 @@ namespace App;
 
 use function array_fill;
 use function fclose;
-use function feof;
 use function fopen;
 use function fread;
 use function fseek;
+use function ftell;
 use function fwrite;
 use function gc_disable;
-use function str_replace;
 use function stream_set_read_buffer;
 use function stream_set_write_buffer;
 use function strlen;
@@ -18,6 +17,7 @@ use function strpos;
 use function strrpos;
 use function substr;
 use const SEEK_CUR;
+use const SEEK_END;
 
 final class Parser
 {
@@ -25,223 +25,195 @@ final class Parser
     {
         gc_disable();
 
-        $dix = [];
-        $dls = [];
-        $dn = 0;
-        for ($yy = 1; $yy <= 6; $yy++) {
-            for ($mm = 1; $mm <= 12; $mm++) {
-                $md = match ($mm) {
-                    2 => $yy === 4 ? 29 : 28,
+        $dateIds = [];
+        $datePrefixes = [];
+        $dateCount = 0;
+        for ($y = 1; $y <= 6; $y++) {
+            for ($m = 1; $m <= 12; $m++) {
+                $maxD = match ($m) {
+                    2 => $y === 4 ? 29 : 28,
                     4, 6, 9, 11 => 30,
                     default => 31,
                 };
-                $ms = ($mm < 10 ? '0' : '') . $mm;
-                $ym = $yy . '-' . $ms . '-';
-                for ($dd = 1; $dd <= $md; $dd++) {
-                    $ds = ($dd < 10 ? '0' : '') . $dd;
-                    $dk = $ym . $ds;
-                    $dix[$dk] = $dn;
-                    $dls[$dn] = '202' . $dk;
-                    $dn++;
+                $mStr = ($m < 10 ? '0' : '') . $m;
+                $ymStr = "{$y}-{$mStr}-";
+                for ($d = 1; $d <= $maxD; $d++) {
+                    $key = $ymStr . (($d < 10 ? '0' : '') . $d);
+                    $dateIds[$key] = $dateCount;
+                    $datePrefixes[$dateCount] = '        "202' . $key . '": ';
+                    $dateCount++;
                 }
             }
         }
 
-        $fp = fopen($inputPath, 'rb');
-        stream_set_read_buffer($fp, 0);
-        $peek = fread($fp, 181000);
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $raw = fread($handle, 142000);
 
-        $slugs = [];
-        $lut = [];
-        $sn = 0;
-        $at = 0;
-        $cut = strrpos($peek, "\n") ?: 0;
-
-        while ($at < $cut && $sn < 268) {
-            $nl = strpos($peek, "\n", $at + 52);
+        $paths = [];
+        $slugBaseMap = [];
+        $slugTotal = 0;
+        $pos = 0;
+        while ($slugTotal < 268) {
+            $nl = strpos($raw, "\n", $pos + 52);
             if ($nl === false) {
                 break;
             }
 
-            $slug = substr($peek, $at + 25, $nl - $at - 51);
-            if (!isset($lut[$slug])) {
-                $slugs[$sn] = $slug;
-                $lut[$slug] = $sn * $dn;
-                $sn++;
+            $slug = substr($raw, $pos + 25, $nl - $pos - 51);
+            if (! isset($slugBaseMap[$slug])) {
+                $paths[$slugTotal] = $slug;
+                $slugBaseMap[$slug] = $slugTotal * $dateCount;
+                $slugTotal++;
             }
 
-            $at = $nl + 1;
-        }
-        unset($peek);
-
-        $base = 'https://stitcher.io/blog/';
-        $tail = 1;
-        while (true) {
-            $seen = [];
-            $p = 0;
-            while ($p < $sn) {
-                $sig = substr($base . $slugs[$p], -$tail);
-                if (isset($seen[$sig])) {
-                    $tail++;
-                    continue 2;
-                }
-
-                $seen[$sig] = true;
-                $p++;
-            }
-
-            break;
+            $pos = $nl + 1;
         }
 
-        $sh = 20;
-        $msk = (1 << $sh) - 1;
-        $hop = 0;
-        $lut = [];
-        for ($p = 0; $p < $sn; $p++) {
-            $step = strlen($slugs[$p]) + 52;
-            if ($step > $hop) {
-                $hop = $step;
-            }
-
-            $lut[substr($base . $slugs[$p], -$tail)] = ($step << $sh) | ($p * $dn);
+        $prefix = 'https://stitcher.io/blog/';
+        $slugBaseMap = [];
+        for ($p = 0; $p < $slugTotal; $p++) {
+            $stride = strlen($paths[$p]) + 52;
+            $slugBaseMap[substr($prefix . $paths[$p], -22)] = ($stride << 20) | ($p * $dateCount);
         }
-        $tailAt = 26 + $tail;
-        $dayAt = 22;
-        $dayLen = 7;
-        $gate = ($hop * 10) + $tailAt;
 
-        $cells = $sn * $dn;
+        $outputSize = $slugTotal * $dateCount;
+        $counts = array_fill(0, $outputSize, 0);
 
-        fclose($fp);
+        fseek($handle, 0, SEEK_END);
+        $left = ftell($handle);
+        fseek($handle, 0);
 
-        $cnt = array_fill(0, $cells, 0);
-        $fp = fopen($inputPath, 'rb');
-        stream_set_read_buffer($fp, 0);
-
-        while (!feof($fp)) {
-            $buf = fread($fp, 163_840);
-            $len = strlen($buf);
-            if ($len === 0) {
+        while ($left > 0) {
+            $chunk = fread($handle, $left > 131_072 ? 131_072 : $left);
+            $chunkLen = strlen($chunk);
+            if ($chunkLen === 0) {
                 break;
             }
 
-            $nl = strrpos($buf, "\n");
-            if ($nl === false) {
-                continue;
+            $left -= $chunkLen;
+
+            $lastNl = strrpos($chunk, "\n");
+            if ($lastNl === false) {
+                break;
             }
 
-            $back = $len - $nl - 1;
-            if ($back > 0) {
-                fseek($fp, -$back, SEEK_CUR);
+            $tail = $chunkLen - $lastNl - 1;
+            if ($tail > 0) {
+                fseek($handle, -$tail, SEEK_CUR);
+                $left += $tail;
             }
 
-            $i = $nl;
-            while ($i > $gate) {
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+            $p = $lastNl;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+            while ($p > 1248) {
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
 
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
+
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
+
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
+
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
             }
 
-            while ($i >= $tailAt) {
-                $v = $lut[substr($buf, $i - $tailAt, $tail)];
-                $ix = ($v & $msk) + $dix[substr($buf, $i - $dayAt, $dayLen)];
-                $cnt[$ix]++;
-                $i -= $v >> $sh;
+            while ($p >= 48) {
+                $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                $p -= $packed >> 20;
+                $counts[$idx]++;
             }
         }
 
-        fclose($fp);
+        fclose($handle);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 1_048_576);
+        stream_set_write_buffer($out, 2097152);
         fwrite($out, '{');
 
-        $dpre = [];
-        for ($d = 0; $d < $dn; $d++) {
-            $dpre[$d] = '        "' . $dls[$d] . '": ';
-        }
-
-        $spre = [];
-        for ($p = 0; $p < $sn; $p++) {
-            $spre[$p] = '"\/blog\/' . str_replace('/', '\/', $slugs[$p]) . '": {';
+        $escapedPaths = [];
+        for ($p = 0; $p < $slugTotal; $p++) {
+            $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
         }
 
         $sep = "\n    ";
-        $baseIx = 0;
-        for ($p = 0; $p < $sn; $p++) {
-            $d = 0;
-            $ix = $baseIx;
-            while ($d < $dn && $cnt[$ix] === 0) {
-                $d++;
-                $ix++;
+        $base = 0;
+
+        for ($p = 0; $p < $slugTotal; $p++) {
+            $start = $base;
+            $limit = $base + $dateCount;
+
+            while ($base < $limit && $counts[$base] === 0) {
+                $base++;
             }
 
-            if ($d === $dn) {
-                $baseIx += $dn;
+            if ($base === $limit) {
                 continue;
             }
 
-            $json = $sep . $spre[$p] . "\n" . $dpre[$d] . $cnt[$ix];
+            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$base - $start] . $counts[$base];
             $sep = ",\n    ";
-            $d++;
-            while ($d < $dn) {
-                $ix++;
-                if ($cnt[$ix] !== 0) {
-                    $json .= ",\n" . $dpre[$d] . $cnt[$ix];
-                }
 
-                $d++;
+            for ($base++; $base < $limit; $base++) {
+                $count = $counts[$base];
+                if ($count !== 0) {
+                    $buf .= ",\n" . $datePrefixes[$base - $start] . $count;
+                }
             }
 
-            $json .= "\n    }";
-            fwrite($out, $json);
-            $baseIx += $dn;
+            $buf .= "\n    }";
+            fwrite($out, $buf);
         }
 
         fwrite($out, "\n}");
