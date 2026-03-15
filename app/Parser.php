@@ -100,15 +100,39 @@ final class Parser
         unset($headBuf);
 
         $baseUrl = 'https://stitcher.io/blog/';
-        $fm = [];
+        $fm13 = [];
+        $fm7 = [];
         $sh = 20;
         $mx = 0;
+        $collide = [
+            'short-closures-in-php' => true,
+            'why-we-need-multi-line-short-closures-in-php' => true,
+            'solid-interfaces-and-final-rant-with-brent' => true,
+            'what-are-objects-anyway-rant-with-brent' => true,
+            'things-dependency-injection-is-not-about' => true,
+            'what-event-sourcing-is-not-about' => true,
+            'php-8-in-8-code-blocks' => true,
+            'php-81-in-8-code-blocks' => true,
+            'php-82-in-8-code-blocks' => true,
+            'improvements-on-laravel-nova' => true,
+            'abstract-resources-in-laravel-nova' => true,
+            'php-8-before-and-after' => true,
+            'php-81-before-and-after' => true,
+            'my-journey-into-event-sourcing' => true,
+            'thoughts-on-event-sourcing' => true,
+            'a-new-major-version-of-laravel-event-sourcing' => true,
+        ];
         
-        for ($u = 0; $u < 268; $u++) {
+        for ($u = 0; $u < $uriCount; $u++) {
             $jmp = strlen($uriList[$u]) + 52;
             if ($jmp > $mx) $mx = $jmp;
-            $suf = substr($baseUrl . $uriList[$u], -22);
-            $fm[$suf] = ($jmp << $sh) | ($u * $numDays);
+            $v = ($jmp << $sh) | ($u * $numDays);
+            $full = $baseUrl . $uriList[$u];
+            if (isset($collide[$uriList[$u]])) {
+                $fm7[substr($full, -22, 7)] = $v;
+            } else {
+                $fm13[substr($full, -13)] = $v;
+            }
         }
         
         fseek($fd, 0, SEEK_END);
@@ -176,22 +200,22 @@ final class Parser
                         $p = $brk;
 
                         while ($p > 1248) {
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                         }
 
                         while ($p >= 48) {
-                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm13[substr($buf,$p-39,13)] ?? $fm7[substr($buf,$p-48,7)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                         }
                     }
                 }
