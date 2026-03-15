@@ -104,13 +104,16 @@ final class Parser
         $sh = 20;
         $mx = 0;
         
-        for ($u = 0; $u < 268; $u++) {
+        for ($u = 0; $u < $uriCount; $u++) {
             $jmp = strlen($uriList[$u]) + 52;
             if ($jmp > $mx) $mx = $jmp;
             $suf = substr($baseUrl . $uriList[$u], -22);
             $fm[$suf] = ($jmp << $sh) | ($u * $numDays);
         }
         
+        $guard = ($mx * 12) + 48;
+        $gridSize = $uriCount * $numDays;
+
         fseek($fd, 0, SEEK_END);
         $totalBytes = ftell($fd);
         $sm = 0b11111111111111111111;
@@ -144,12 +147,12 @@ final class Parser
 
         for ($t = 0; $t < $threads; $t++) {
             $pipe = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-            stream_set_chunk_size($pipe[0], 1174376);
-            stream_set_chunk_size($pipe[1], 1174376);
+            stream_set_chunk_size($pipe[0], $gridSize * 2);
+            stream_set_chunk_size($pipe[1], $gridSize * 2);
             
             if (pcntl_fork() === 0) {
                 fclose($pipe[0]);
-                $st = str_repeat("\0", 587188);
+                $st = str_repeat("\0", $gridSize);
                 $in = fopen($inputPath, 'rb');
                 stream_set_read_buffer($in, 0);
 
@@ -176,7 +179,7 @@ final class Parser
 
                         $p = $brk;
 
-                        while ($p > 1248) {
+                        while ($p > $guard) {
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
