@@ -242,7 +242,7 @@ final class Parser
 
         $fmtUris = [];
         for ($u = 0; $u < $uriCount; $u++) {
-            $fmtUris[$u] = '"\/blog\/' . str_replace('/', '\/', $uriList[$u]) . '": {';
+            $fmtUris[$u] = '"\/blog\/' .  $uriList[$u] . '": {';
         }
 
         $sep = "\n    ";
