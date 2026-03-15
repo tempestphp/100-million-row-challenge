@@ -43,13 +43,13 @@ final class Parser
 
         $threads = 8;
 
-        $bump = [];
+        $up = [];
         for ($c = 0; $c < 255; $c++) {
-            $bump[chr($c)] = chr($c + 1);
+            $up[chr($c)] = chr($c + 1);
         }
-        $bump[chr(255)] = chr(255);
+        $up[chr(255)] = chr(255);
 
-        $timeMap = [];
+        $tm = [];
         $timeStr = [];
         $numDays = 0;
         
@@ -68,7 +68,7 @@ final class Parser
                     $dd = $dy < 10 ? "0$dy" : (string)$dy;
                     $key = $prefix . $dd;
                     
-                    $timeMap[$key] = $numDays;
+                    $tm[$key] = $numDays;
                     $timeStr[$numDays] = "        \"202$key\": ";
                     $numDays++;
                 }
@@ -80,7 +80,7 @@ final class Parser
         $headBuf = fread($fd, 181000);
 
         $uriList = [];
-        $fastMap = [];
+        $fm = [];
         $uriCount = 0;
         $ptr = 0;
         $endLine = strrpos($headBuf, "\n") ?: 0;
@@ -90,9 +90,9 @@ final class Parser
             if ($nl === false) break;
             
             $route = substr($headBuf, $ptr + 25, $nl - $ptr - 51);
-            if (!isset($fastMap[$route])) {
+            if (!isset($fm[$route])) {
                 $uriList[$uriCount] = $route;
-                $fastMap[$route] = $uriCount * $numDays;
+                $fm[$route] = $uriCount * $numDays;
                 $uriCount++;
             }
             $ptr = $nl + 1;
@@ -100,22 +100,20 @@ final class Parser
         unset($headBuf);
 
         $baseUrl = 'https://stitcher.io/blog/';
-        $fastMap = [];
-        $slotShift = 20;
-        $strideMax = 0;
+        $fm = [];
+        $sh = 20;
+        $mx = 0;
         
         for ($u = 0; $u < 268; $u++) {
-            $jump = strlen($uriList[$u]) + 52;
-            if ($jump > $strideMax) $strideMax = $jump;
+            $jmp = strlen($uriList[$u]) + 52;
+            if ($jmp > $mx) $mx = $jmp;
             $suf = substr($baseUrl . $uriList[$u], -22);
-            $fastMap[$suf] = ($jump << $slotShift) | ($u * $numDays);
+            $fm[$suf] = ($jmp << $sh) | ($u * $numDays);
         }
         
         fseek($fd, 0, SEEK_END);
         $totalBytes = ftell($fd);
-        #fclose($fd);
-
-        $slotMask = 0b11111111111111111111;
+        $sm = 0b11111111111111111111;
         $tasks = [];
         $bound = 0;
         $startPos = 0;
@@ -141,7 +139,7 @@ final class Parser
         }
         fclose($fd);
 
-        $taskTotal = count($tasks);
+        $jobN = count($tasks);
         $ipc = [];
 
         for ($t = 0; $t < $threads; $t++) {
@@ -151,56 +149,55 @@ final class Parser
             
             if (pcntl_fork() === 0) {
                 fclose($pipe[0]);
-                $state = str_repeat("\0", 587188);
-                $reader = fopen($inputPath, 'rb');
-                stream_set_read_buffer($reader, 0);
+                $st = str_repeat("\0", 587188);
+                $in = fopen($inputPath, 'rb');
+                stream_set_read_buffer($in, 0);
 
-                for ($job = $t; $job < $taskTotal; $job += $threads) {
+                for ($job = $t; $job < $jobN; $job += $threads) {
                     [$from, $to] = $tasks[$job];
-                    fseek($reader, $from);
-                    $left = $to - $from;
+                    fseek($in, $from);
+                    $rem = $to - $from;
 
-                    while ($left > 0) {
-                        $buf = fread($reader, $left > 0b100000000000000000 ? 0b100000000000000000 : $left);
-                        $cLen = strlen($buf);
-                        $left -= $cLen;
+                    while ($rem > 0) {
+                        $buf = fread($in, $rem > 0b100000000000000000 ? 0b100000000000000000 : $rem);
+                        $n = strlen($buf);
+                        $rem -= $n;
 
-                        $lastBrk = strrpos($buf, "\n");
-                        if ($lastBrk === false) {
+                        $brk = strrpos($buf, "\n");
+                        if ($brk === false) {
                             break;
                         }
 
-                        $over = $cLen - $lastBrk - 1;
-                        if ($over > 0) {
-                            fseek($reader, -$over, SEEK_CUR);
-                            $left += $over;
+                        $ov = $n - $brk - 1;
+                        if ($ov > 0) {
+                            fseek($in, -$ov, SEEK_CUR);
+                            $rem += $ov;
                         }
 
-                        $p = $lastBrk;
+                        $p = $brk;
 
                         while ($p > 1248) {
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                         }
 
                         while ($p >= 48) {
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>$slotShift; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                         }
                     }
                 }
 
-                #fclose($reader);
-                fwrite($pipe[1], chunk_split($state, 1, "\0"));
+                fwrite($pipe[1], chunk_split($st, 1, "\0"));
                 exit(0);
             }
             fclose($pipe[1]);
