@@ -43,7 +43,6 @@ final class Parser
         $workers = 8;
 
         $dateIds = [];
-        $dates = [];
         $dateCount = 0;
         for ($y = 1; $y <= 6; $y++) {
             for ($m = 1; $m <= 12; $m++) {
@@ -57,7 +56,7 @@ final class Parser
                 for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
                     $dateIds[$key] = $dateCount;
-                    $dates[$dateCount] = '202' . $key;
+                    $datePrefixes[$dateCount] = '        "202' . $key . '": ';
                     $dateCount++;
                 }
             }
@@ -225,6 +224,16 @@ final class Parser
                             $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
                             $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> $shift;
+
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
+                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $p -= $packed >> $shift;
+
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)];
+                            $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)];
+                            $output[$idx] = $next[$output[$idx]];
+                            $p -= $packed >> $shift;
                         }
 
                         while ($p >= $tailOffset) {
@@ -252,7 +261,7 @@ final class Parser
             $read = $sockets;
             stream_select($read, $write, $except, 5);
             foreach ($read as $key => $socket) {
-                $data = fread($socket, $outputSize * 2);
+                $data = fread($socket, $outputSize * 1.5);
                 if ($data !== '' && $data !== false) {
                     $buffers[$key] .= $data;
                 }
@@ -273,10 +282,6 @@ final class Parser
         stream_set_write_buffer($out, 2097152);
         fwrite($out, '{');
 
-        $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "' . $dates[$d] . '": ';
-        }
 
         $escapedPaths = [];
         for ($p = 0; $p < $slugTotal; $p++) {
@@ -287,34 +292,27 @@ final class Parser
         $base = 1;
 
         for ($p = 0; $p < $slugTotal; $p++) {
-            $firstDate = -1;
-            $idx = $base;
-            for ($d = 0; $d < $dateCount; $d++) {
-                if ($counts[$idx] !== 0) {
-                    $firstDate = $d;
-                    break;
-                }
-                $idx++;
+            $start = $base;
+            $limit = $base + $dateCount;
+
+            while ($base < $limit && $counts[$base] === 0) {
+                $base++;
             }
 
-            if ($firstDate === -1) {
-                $base += $dateCount;
-                continue;
-            }
+            if ($base === $limit) continue;
 
-            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$firstDate] . $counts[$idx];
+            $buf = $sep . $escapedPaths[$p] . "\n" . $datePrefixes[$base - $start] . $counts[$base];
             $sep = ",\n    ";
 
-            for ($d = $firstDate + 1; $d < $dateCount; $d++) {
-                $idx++;
-                $count = $counts[$idx];
-                if ($count === 0) continue;
-                $buf .= ",\n" . $datePrefixes[$d] . $count;
+            for ($base++; $base < $limit; $base++) {
+                $count = $counts[$base];
+                if ($count !== 0) {
+                    $buf .= ",\n" . $datePrefixes[$base - $start] . $count;
+                }
             }
 
             $buf .= "\n    }";
             fwrite($out, $buf);
-            $base += $dateCount;
         }
 
         fwrite($out, "\n}");
