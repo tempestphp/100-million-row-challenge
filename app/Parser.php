@@ -37,8 +37,6 @@ use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const NUM_DAYS = 2191;
-
     public static function parse($inputPath, $outputPath)
     {
         gc_disable();
@@ -53,27 +51,26 @@ final class Parser
 
         $tm = [];
         $timeStr = [];
-        $numDays = self::NUM_DAYS;
-        $dayIndex = 0;
-        
+        $numDays = 0;
+        $monthDays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        $monthStr = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
+        $dayStr = ['', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31'];
+        $jsonDatePrefix = '        "202';
+
         for ($yr = 1; $yr <= 6; $yr++) {
-            for ($mo = 1; $mo <= 12; $mo++) {
-                $limit = match ($mo) {
-                    2 => ($yr === 4) ? 29 : 28,
-                    4, 6, 9, 11 => 30,
-                    default => 31,
-                };
-                
-                $mm = $mo < 10 ? "0$mo" : (string)$mo;
-                $prefix = "{$yr}-{$mm}-";
-                
+            $yearPrefix = $yr . '-';
+            $isLeap = $yr === 4;
+
+            for ($mo = 0; $mo < 12; $mo++) {
+                $limit = $monthDays[$mo] + (($isLeap && $mo === 1) ? 1 : 0);
+                $prefix = $yearPrefix . $monthStr[$mo] . '-';
+
                 for ($dy = 1; $dy <= $limit; $dy++) {
-                    $dd = $dy < 10 ? "0$dy" : (string)$dy;
-                    $key = $prefix . $dd;
-                    
-                    $tm[$key] = $dayIndex;
-                    $timeStr[$dayIndex] = "        \"202$key\": ";
-                    $dayIndex++;
+                    $key = $prefix . $dayStr[$dy];
+
+                    $tm[$key] = $numDays;
+                    $timeStr[$numDays] = $jsonDatePrefix . $key . '": ';
+                    $numDays++;
                 }
             }
         }
@@ -83,34 +80,38 @@ final class Parser
         $headBuf = fread($fd, 181000);
 
         $uriList = [];
+        $uriJump = [];
+        $uriSuffix = [];
         $fm = [];
+        $uriCount = 0;
         $ptr = 0;
         $endLine = strrpos($headBuf, "\n") ?: 0;
 
-        while ($ptr < $endLine && count($uriList) < 268) {
+        while ($ptr < $endLine && $uriCount < 268) {
             $nl = strpos($headBuf, "\n", $ptr + 52);
             if ($nl === false) break;
-            
-            $route = substr($headBuf, $ptr + 25, $nl - $ptr - 51);
+
+            $routeLen = $nl - $ptr - 51;
+            $route = substr($headBuf, $ptr + 25, $routeLen);
             if (!isset($fm[$route])) {
-                $slot = count($uriList);
-                $uriList[$slot] = $route;
-                $fm[$route] = $slot * $numDays;
+                $uriList[$uriCount] = $route;
+                $uriJump[$uriCount] = $routeLen + 52;
+                $uriSuffix[$uriCount] = substr('https://stitcher.io/blog/' . $route, -22);
+                $fm[$route] = $uriCount * $numDays;
+                $uriCount++;
             }
             $ptr = $nl + 1;
         }
         unset($headBuf);
 
-        $baseUrl = 'https://stitcher.io/blog/';
         $fm = [];
         $sh = 20;
         $mx = 0;
         
         for ($u = 0; $u < 268; $u++) {
-            $jmp = strlen($uriList[$u]) + 52;
+            $jmp = $uriJump[$u];
             if ($jmp > $mx) $mx = $jmp;
-            $suf = substr($baseUrl . $uriList[$u], -22);
-            $fm[$suf] = ($jmp << $sh) | ($u * $numDays);
+            $fm[$uriSuffix[$u]] = ($jmp << $sh) | ($u * $numDays);
         }
         
         fseek($fd, 0, SEEK_END);
@@ -161,7 +162,7 @@ final class Parser
                     $rem = $to - $from;
 
                     while ($rem > 0) {
-                        $buf = fread($in, $rem > 327680 ? 327680 : $rem);
+                        $buf = fread($in, $rem > 0b100000000000000000 ? 0b100000000000000000 : $rem);
                         $n = strlen($buf);
                         $rem -= $n;
 
@@ -178,7 +179,9 @@ final class Parser
 
                         $p = $brk;
 
-                        while ($p > 960) {
+                        while ($p > 1248) {
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
+                            $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
@@ -232,14 +235,14 @@ final class Parser
         fwrite($out, '{');
 
         $fmtUris = [];
-        for ($u = 0; $u < 268; $u++) {
+        for ($u = 0; $u < $uriCount; $u++) {
             $fmtUris[$u] = '"\/blog\/' .  $uriList[$u] . '": {';
         }
 
         $sep = "\n    ";
         $ptrBase = 1;
 
-        for ($u = 0; $u < 268; $u++) {
+        for ($u = 0; $u < $uriCount; $u++) {
             $limit = $ptrBase + $numDays;
             
             while ($ptrBase < $limit && $visits[$ptrBase] === 0) {
