@@ -40,7 +40,7 @@ final class Parser
     {
         gc_disable();
 
-        $workers = 8;
+        $workers = 9;
 
         $dateIds = [];
         $dateCount = 0;
