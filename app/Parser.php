@@ -31,7 +31,7 @@ use function unpack;
 
 final class Parser
 {
-    private const int WORKERS = 10;
+    private const int WORKERS = 14;
     private const int DISCOVERY_BYTES = 262144;
     private const int READ_CHUNK = 393216;
     private const int MIN_SLUG_LEN = 4;
