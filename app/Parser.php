@@ -41,7 +41,6 @@ final class Parser
             $stats = $this->segment($inputPath, 0, $fileSize);
         }
 
-        ksort($stats, SORT_STRING);
         foreach ($stats as &$dates) {
             ksort($dates, SORT_STRING);
         }
