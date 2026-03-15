@@ -6,7 +6,6 @@ final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        ini_set('memory_limit', '4G');
         $fileSize = filesize($inputPath);
         $numWorkers = max(1, min(12, intdiv($fileSize, 10000)));
         $chunkSize = intdiv($fileSize, $numWorkers);
@@ -24,7 +23,6 @@ final class Parser
             $pid = pcntl_fork();
 
             if ($pid === 0) {
-                ini_set('memory_limit', '1G');
                 $this->processChunk($inputPath, $start, $end, $tempFile);
                 exit(0);
             }
@@ -122,7 +120,13 @@ final class Parser
         $pathSeen = [];
 
         foreach ($tempFiles as $tempFile) {
-            [$order, $data] = unserialize(file_get_contents($tempFile));
+            $raw = file_get_contents($tempFile);
+            $chunk = unserialize($raw);
+            unset($raw);
+
+            $order = $chunk[0];
+            $data = $chunk[1];
+            unset($chunk);
 
             foreach ($order as $path) {
                 if (!isset($pathSeen[$path])) {
@@ -130,6 +134,7 @@ final class Parser
                     $pathOrder[] = $path;
                 }
             }
+            unset($order);
 
             foreach ($data as $path => $dates) {
                 if (!isset($merged[$path])) {
@@ -146,15 +151,41 @@ final class Parser
                     unset($ref);
                 }
             }
+            unset($data);
         }
 
-        // Build result in original path order with sorted dates
-        $result = [];
+        // Stream JSON to file to avoid building the entire string in memory
+        $fp = fopen($outputPath, 'wb');
+        fwrite($fp, "{\n");
+
+        $firstPath = true;
         foreach ($pathOrder as $path) {
             ksort($merged[$path]);
-            $result[$path] = $merged[$path];
+
+            if (!$firstPath) {
+                fwrite($fp, ",\n");
+            }
+            $firstPath = false;
+
+            $encodedPath = json_encode($path);
+            fwrite($fp, "    $encodedPath: {\n");
+
+            $firstDate = true;
+            foreach ($merged[$path] as $date => $count) {
+                if (!$firstDate) {
+                    fwrite($fp, ",\n");
+                }
+                $firstDate = false;
+
+                $encodedDate = json_encode($date);
+                fwrite($fp, "        $encodedDate: $count");
+            }
+
+            fwrite($fp, "\n    }");
+            unset($merged[$path]);
         }
 
-        file_put_contents($outputPath, json_encode($result, JSON_PRETTY_PRINT));
+        fwrite($fp, "\n}");
+        fclose($fp);
     }
 }
