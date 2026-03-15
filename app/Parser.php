@@ -117,7 +117,7 @@ final class Parser
         $totalBytes = ftell($fd);
         fclose($fd);
 
-        $grain = 1 << 25;
+        $slotMask = 0b11111111111111111111;
         $tasks = [];
         $bound = 0;
         
@@ -125,7 +125,7 @@ final class Parser
         stream_set_read_buffer($fd, 0);
         
         while ($bound < $totalBytes) {
-            $upper = $bound + $grain;
+            $upper = $bound + 0b10000000000000000000000000;
             if ($upper > $totalBytes) $upper = $totalBytes;
 
             $startPos = 0;
@@ -167,7 +167,7 @@ final class Parser
                     $left = $to - $from;
 
                     while ($left > 0) {
-                        $buf = fread($reader, $left > 131072 ? 131072 : $left);
+                        $buf = fread($reader, $left > 0b100000000000000000 ? 0b100000000000000000 : $left);
                         $cLen = strlen($buf);
                         $left -= $cLen;
 
@@ -185,22 +185,22 @@ final class Parser
                         $p = $lastBrk;
 
                         while ($p > $guard) {
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
                         }
 
                         while ($p >= 48) {
-                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&1048575)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
+                            $v=$fastMap[substr($buf,$p-48,22)]; $idx=($v&$slotMask)+$timeMap[substr($buf,$p-22,7)]; $p-=$v>>20; $state[$idx]=$bump[$state[$idx]];
                         }
                     }
                 }
@@ -219,7 +219,7 @@ final class Parser
             $rA = $ipc; $wA = []; $eA = [];
             stream_select($rA, $wA, $eA, null);
             foreach ($rA as $k => $sock) {
-                $payload = fread($sock, 8388608);
+                $payload = fread($sock, 0b100000000000000000000000);
                 if ($payload !== '' && $payload !== false) {
                     $bins[$k] .= $payload;
                 }
@@ -237,7 +237,7 @@ final class Parser
         $visits = unpack('v*', $master);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 2097152); 
+        stream_set_write_buffer($out, 0b1000000000000000000000); 
         fwrite($out, '{');
 
         $fmtUris = [];
