@@ -2,355 +2,328 @@
 
 namespace App;
 
-use App\Commands\Visit;
-use function fopen;
+use function array_fill;
+use function chr;
+use function chunk_split;
 use function fclose;
+use function feof;
+use function fgets;
+use function fopen;
 use function fread;
 use function fseek;
-use function fgets;
 use function ftell;
 use function fwrite;
-use function filesize;
+use function intdiv;
+use function sodium_add;
+use function str_repeat;
+use function stream_select;
+use function stream_set_chunk_size;
+use function stream_set_read_buffer;
+use function stream_set_write_buffer;
+use function stream_socket_pair;
+use function implode;
 use function strlen;
-use function substr;
 use function strpos;
 use function strrpos;
-use function array_fill;
-use function array_count_values;
-use function chr;
+use function substr;
 use function unpack;
-use function pack;
-use function file_put_contents;
-use function file_get_contents;
-use function file_exists;
-use function str_replace;
-use function implode;
-use function pcntl_fork;
-use function pcntl_wait;
-use function getmypid;
-use function sys_get_temp_dir;
-use function stream_set_read_buffer;
-use function unlink;
-use function count;
-use function flock;
-use function fflush;
-use function gc_disable;
-use const LOCK_EX;
-use const LOCK_UN;
 use const SEEK_CUR;
+use const SEEK_END;
+use const STREAM_IPPROTO_IP;
+use const STREAM_PF_UNIX;
+use const STREAM_SOCK_STREAM;
 
 final class Parser
 {
-    private const WORKERS = 10;
-    private const CHUNKS = 120;
-    private const READ_CHUNK = 524_288;
+    private const CHUNK_BYTES = 1_048_576;
+    private const NUM_WORKERS = 12;
 
-    public function parse(string $inputPath, string $outputPath): void
+    public static function parse(string $inputPath, string $outputPath): void
     {
         gc_disable();
-        self::run($inputPath, $outputPath, filesize($inputPath));
-    }
 
-    private static function run(string $inputPath, string $outputPath, int $fileSize): void
-    {
-        $dateIds = [];
-        $dates = [];
-        $dateCount = 0;
-        for ($y = 21; $y <= 26; $y++) {
-            $yStr = (string) $y;
+        $dateKeyToIndex = [];
+        $numDates = 0;
+        for ($y = 1; $y <= 6; $y++) {
             for ($m = 1; $m <= 12; $m++) {
-                $md = match ($m) { 2 => $y === 24 ? 29 : 28, 4, 6, 9, 11 => 30, default => 31 };
+                $maxD = match ($m) {
+                    2 => $y === 4 ? 29 : 28,
+                    4, 6, 9, 11 => 30,
+                    default => 31,
+                };
                 $mStr = ($m < 10 ? '0' : '') . $m;
-                $ymStr = $yStr . '-' . $mStr . '-';
-                for ($d = 1; $d <= $md; $d++) {
+                $ymStr = "{$y}-{$mStr}-";
+                for ($d = 1; $d <= $maxD; $d++) {
                     $key = $ymStr . (($d < 10 ? '0' : '') . $d);
-                    $dateIds[$key] = $dateCount;
-                    $dates[$dateCount] = $key;
-                    $dateCount++;
+                    $dateKeyToIndex[$key] = $numDates;
+                    $jsonDateLabels[$numDates] = '        "202' . $key . '": ';
+                    $numDates++;
                 }
             }
         }
 
-        $dateIdChars = [];
-        foreach ($dateIds as $date => $id) {
-            $dateIdChars[$date] = chr($id & 0xFF) . chr($id >> 8);
+        $byteInc = [];
+        for ($i = 0; $i < 255; $i++) {
+            $byteInc[chr($i)] = chr($i + 1);
         }
 
-        $f = fopen($inputPath, 'rb');
-        stream_set_read_buffer($f, 0);
-        $raw = fread($f, 2_097_152);
-        fclose($f);
+        $handle = fopen($inputPath, 'rb');
+        stream_set_read_buffer($handle, 0);
+        $header = fread($handle, 181_000);
 
-        $pathIds = [];
-        $paths = [];
-        $pathCount = 0;
-        $pos = 0;
-        $lastNl = strrpos($raw, "\n") ?: 0;
-        while ($pos < $lastNl) {
-            $nlPos = strpos($raw, "\n", $pos + 52);
-            if ($nlPos === false) break;
-            $slug = substr($raw, $pos + 25, $nlPos - $pos - 51);
-            if (isset($pathIds[$slug])) {
-                $pos = $nlPos + 1;
-                continue;
+        $uriPrefix = 'https://stitcher.io/blog/';
+        $pathSlugs = [];
+        $seen = [];
+        $numPaths = 0;
+        $offset = 0;
+        $headerEnd = strrpos($header, "\n") ?: 0;
+
+        while ($offset < $headerEnd && $numPaths < 268) {
+            $lineEnd = strpos($header, "\n", $offset + 52);
+            if ($lineEnd === false) break;
+            $slug = substr($header, $offset + 25, $lineEnd - $offset - 51);
+            if (!isset($seen[$slug])) {
+                $pathSlugs[$numPaths] = $slug;
+                $seen[$slug] = $numPaths * $numDates;
+                $numPaths++;
             }
-            $pathIds[$slug] = $pathCount;
-            $paths[$pathCount] = $slug;
-            $pathCount++;
-            $pos = $nlPos + 1;
+            $offset = $lineEnd + 1;
         }
-        unset($raw);
+        unset($header);
 
-        foreach (Visit::all() as $v) {
-            $slug = substr($v->uri, 25);
-            if (isset($pathIds[$slug])) continue;
-            $pathIds[$slug] = $pathCount;
-            $paths[$pathCount] = $slug;
-            $pathCount++;
-        }
-
-        $numChunks = self::CHUNKS;
-        $offsets = [0];
-        $fh = fopen($inputPath, 'rb');
-        for ($i = 1; $i < $numChunks; $i++) {
-            fseek($fh, (int)($fileSize * $i / $numChunks));
-            fgets($fh);
-            $offsets[] = ftell($fh);
-        }
-        fclose($fh);
-        $offsets[] = $fileSize;
-
-        $me = getmypid();
-        $tmp = sys_get_temp_dir();
-        $w = self::WORKERS;
-        $ch = [];
-        $totalSize = $pathCount * $dateCount;
-
-        $useSem = false;
-        $sem = null;
-        $queueShm = null;
-        $queueFile = '';
-
-        if (function_exists('sem_get') && function_exists('shmop_open')) {
-            set_error_handler(static fn() => true);
-            try {
-                $sem = \sem_get($me + 1, 1, 0644, true);
-                $queueShm = \shmop_open($me + 2, 'c', 0644, 4);
-                if ($sem !== false && $queueShm instanceof \Shmop) {
-                    \shmop_write($queueShm, pack('V', 0), 0);
-                    $useSem = true;
+        $suffixLen = 1;
+        while (true) {
+            $seen = [];
+            for ($i = 0; $i < $numPaths; $i++) {
+                $suffix = substr($uriPrefix . $pathSlugs[$i], -$suffixLen);
+                if (isset($seen[$suffix])) {
+                    $suffixLen++;
+                    continue 2;
                 }
-            } catch (\Throwable) {
-                $useSem = false;
-            } finally {
-                restore_error_handler();
+                $seen[$suffix] = true;
             }
+            break;
         }
 
-        if (!$useSem) {
-            $queueFile = "$tmp/q{$me}";
-            file_put_contents($queueFile, pack('V', 0));
+        $strideBits = 20;
+        $baseMask = (1 << $strideBits) - 1;
+        $maxLineLen = 0;
+        $uriSuffixToPacked = [];
+        for ($i = 0; $i < $numPaths; $i++) {
+            $lineLen = strlen($pathSlugs[$i]) + 52;
+            if ($lineLen > $maxLineLen) $maxLineLen = $lineLen;
+            $uriSuffixToPacked[substr($uriPrefix . $pathSlugs[$i], -$suffixLen)] = ($lineLen << $strideBits) | ($i * $numDates);
+        }
+        $suffixStartFromNewline = 26 + $suffixLen;
+        $dateStartFromNewline = 22;
+        $dateKeyLen = 7;
+        $unrollMinPos = ($maxLineLen * 16) + $suffixStartFromNewline;
+
+        $cellCount = $numPaths * $numDates;
+
+        fseek($handle, 0, SEEK_END);
+        $fileSize = ftell($handle);
+
+        $numWorkers = self::NUM_WORKERS;
+        $ranges = [];
+        for ($wi = 0; $wi < $numWorkers; $wi++) {
+            $from = intdiv($fileSize * $wi, $numWorkers);
+            $to   = intdiv($fileSize * ($wi + 1), $numWorkers);
+            if ($from > 0) {
+                fseek($handle, $from);
+                fgets($handle);
+                $from = ftell($handle);
+            }
+            if ($wi < $numWorkers - 1) {
+                fseek($handle, $to);
+                fgets($handle);
+                $to = ftell($handle);
+            } else {
+                $to = $fileSize;
+            }
+            $ranges[$wi] = [$from, $to];
         }
 
-        for ($i = 0; $i < $w; $i++) {
-            $pid = pcntl_fork();
-            if ($pid === 0) {
-                $payload = $useSem
-                    ? self::workerLoopSem($inputPath, $queueShm, $sem, $offsets, $numChunks, $pathIds, $dateIdChars, $pathCount, $dateCount)
-                    : self::workerLoopFlock($inputPath, $queueFile, $offsets, $numChunks, $pathIds, $dateIdChars, $pathCount, $dateCount);
-                
-                file_put_contents("$tmp/p{$me}w$i", $payload);
-                exit(0);
-            }
-            $ch[$pid] = $i;
-        }
+        $childSockets = [];
 
-        $cnt = array_fill(0, $totalSize, 0);
-        $pending = $w;
-        while ($pending > 0) {
-            $pid = pcntl_wait($status);
-            
-            if ($pid <= 0 || !isset($ch[$pid])) {
-                $pending--;
-                continue;
-            }
+        for ($wi = 0; $wi < $numWorkers - 1; $wi++) {
+            $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+            stream_set_chunk_size($pair[0], $cellCount << 1);
+            stream_set_chunk_size($pair[1], $cellCount << 1);
+            if (pcntl_fork() === 0) {
+                fclose($pair[0]);
+                $cells = str_repeat("\0", $cellCount);
+                $reader = fopen($inputPath, 'rb');
+                stream_set_read_buffer($reader, 0);
 
-            $idx = $ch[$pid];
-            $file = "$tmp/p{$me}w$idx";
-            
-            if (file_exists($file)) {
-                $content = file_get_contents($file);
-                unlink($file);
-                
-                if ($content !== '') {
-                    $wc = unpack('V*', $content);
-                    $len = count($wc);
-                    for ($j = 1; $j <= $len; $j += 2) {
-                        $cnt[$wc[$j]] += $wc[$j + 1];
+                [$from, $to] = $ranges[$wi];
+                fseek($reader, $from);
+                $remaining = $to - $from;
+
+                while ($remaining > 0) {
+                    $chunk = fread($reader, $remaining > self::CHUNK_BYTES ? self::CHUNK_BYTES : $remaining);
+                    $chunkLen = strlen($chunk);
+                    $remaining -= $chunkLen;
+
+                    $lastNl = strrpos($chunk, "\n");
+                    if ($lastNl === false) break;
+
+                    $tail = $chunkLen - $lastNl - 1;
+                    if ($tail > 0) {
+                        fseek($reader, -$tail, SEEK_CUR);
+                        $remaining += $tail;
+                    }
+
+                    $p = $lastNl;
+
+                    while ($p > $unrollMinPos) {
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                    }
+
+                    while ($p >= $suffixStartFromNewline) {
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
                     }
                 }
+
+                fclose($reader);
+                fwrite($pair[1], chunk_split($cells, 1, "\0"));
+                fclose($pair[1]);
+                exit(0);
             }
-            $pending--;
+            fclose($pair[1]);
+            $childSockets[$wi] = $pair[0];
         }
 
-        if ($useSem) {
-            \shmop_delete($queueShm);
-            \sem_remove($sem);
-        } else {
-            if (file_exists($queueFile)) unlink($queueFile);
-        }
+        $parentCells = str_repeat("\0", $cellCount);
+        stream_set_read_buffer($handle, 0);
 
-        self::writeJson($outputPath, $cnt, $paths, $dates, $dateCount);
-    }
+        [$from, $to] = $ranges[$numWorkers - 1];
+        fseek($handle, $from);
+        $remaining = $to - $from;
 
-    private static function claimChunkSem(mixed $queueShm, mixed $sem, int $numChunks): int
-    {
-        \sem_acquire($sem);
-        $ci = unpack('V', \shmop_read($queueShm, 0, 4))[1];
-        if ($ci >= $numChunks) {
-            \sem_release($sem);
-            return -1;
-        }
-        \shmop_write($queueShm, pack('V', $ci + 1), 0);
-        \sem_release($sem);
-        return $ci;
-    }
+        while ($remaining > 0) {
+            $chunk = fread($handle, $remaining > self::CHUNK_BYTES ? self::CHUNK_BYTES : $remaining);
+            $chunkLen = strlen($chunk);
+            $remaining -= $chunkLen;
 
-    private static function claimChunkFlock(mixed $qf, int $numChunks): int
-    {
-        flock($qf, LOCK_EX);
-        fseek($qf, 0);
-        $ci = unpack('V', fread($qf, 4))[1];
-        if ($ci >= $numChunks) {
-            flock($qf, LOCK_UN);
-            return -1;
-        }
-        fseek($qf, 0);
-        fwrite($qf, pack('V', $ci + 1));
-        fflush($qf);
-        flock($qf, LOCK_UN);
-        return $ci;
-    }
+            $lastNl = strrpos($chunk, "\n");
+            if ($lastNl === false) break;
 
-    private static function workerLoopSem(string $f, mixed $queueShm, mixed $sem, array $offsets, int $numChunks, array $pi, array $dc, int $pc, int $dateCount): string
-    {
-        $bk = array_fill(0, $pc, '');
-        $h = fopen($f, 'rb');
-        stream_set_read_buffer($h, 0);
-
-        while (($ci = self::claimChunkSem($queueShm, $sem, $numChunks)) !== -1) {
-            self::parseRange($h, $offsets[$ci], $offsets[$ci + 1], $pi, $dc, $bk);
-        }
-
-        fclose($h);
-        return self::packSparsePayload($bk, $pc, $dateCount);
-    }
-
-    private static function workerLoopFlock(string $f, string $queueFile, array $offsets, int $numChunks, array $pi, array $dc, int $pc, int $dateCount): string
-    {
-        $bk = array_fill(0, $pc, '');
-        $h = fopen($f, 'rb');
-        stream_set_read_buffer($h, 0);
-        $qf = fopen($queueFile, 'c+b');
-
-        while (($ci = self::claimChunkFlock($qf, $numChunks)) !== -1) {
-            self::parseRange($h, $offsets[$ci], $offsets[$ci + 1], $pi, $dc, $bk);
-        }
-
-        fclose($qf);
-        fclose($h);
-        return self::packSparsePayload($bk, $pc, $dateCount);
-    }
-
-    private static function packSparsePayload(array $bk, int $pc, int $dateCount): string
-    {
-        $sparseData = [];
-        for ($i = 0; $i < $pc; $i++) {
-            if ($bk[$i] === '') continue;
-            $off = $i * $dateCount;
-            foreach (array_count_values(unpack('v*', $bk[$i])) as $did => $c) {
-                $sparseData[] = $off + $did;
-                $sparseData[] = $c;
-            }
-        }
-        return $sparseData ? pack('V*', ...$sparseData) : '';
-    }
-
-    private static function parseRange(mixed $h, int $s, int $e, array $pi, array $dc, array &$bk): void
-    {
-        fseek($h, $s);
-        $r = $e - $s;
-
-        while ($r > 0) {
-            $toRead = $r > self::READ_CHUNK ? self::READ_CHUNK : $r;
-            $d = fread($h, $toRead);
-            $l = strlen($d);
-            $r -= $l;
-
-            $ln = strrpos($d, "\n");
-            if ($ln === false) break;
-
-            $tail = $l - $ln - 1;
+            $tail = $chunkLen - $lastNl - 1;
             if ($tail > 0) {
-                fseek($h, -$tail, SEEK_CUR);
-                $r += $tail;
+                fseek($handle, -$tail, SEEK_CUR);
+                $remaining += $tail;
             }
 
-            $p = 25;
-            $fc = $ln - 792;
+            $p = $lastNl;
 
-            while ($p < $fc) {
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                $x = strpos($d, ',', $p); $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)]; $p = $x + 52;
-                if ($p > $ln) break;
+            while ($p > $unrollMinPos) {
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
             }
 
-            while ($p < $ln) {
-                $x = strpos($d, ',', $p);
-                if ($x === false) break;
-                $bk[$pi[substr($d, $p, $x - $p)]] .= $dc[substr($d, $x + 3, 8)];
-                $p = $x + 52;
+            while ($p >= $suffixStartFromNewline) {
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
             }
         }
-    }
 
-    private static function writeJson(string $outputPath, array $cnt, array $paths, array $dates, int $dateCount): void
-    {
-        $datePrefixes = [];
-        for ($d = 0; $d < $dateCount; $d++) {
-            $datePrefixes[$d] = '        "20' . $dates[$d] . '": ';
+        fclose($handle);
+        $merged = chunk_split($parentCells, 1, "\0");
+
+        $payloadSize = $cellCount << 1;
+        $childPayloads = array_fill(0, $numWorkers - 1, '');
+        while ($childSockets !== []) {
+            $read = $childSockets;
+            $write = [];
+            $except = [];
+            stream_select($read, $write, $except, null);
+            foreach ($read as $key => $socket) {
+                $data = fread($socket, $payloadSize);
+                if ($data !== '' && $data !== false) {
+                    $childPayloads[$key] .= $data;
+                }
+                if (feof($socket)) {
+                    fclose($socket);
+                    unset($childSockets[$key]);
+                }
+            }
         }
 
-        $pc = count($paths);
+        for ($wi = 0; $wi < $numWorkers - 1; $wi++) {
+            sodium_add($merged, $childPayloads[$wi]);
+        }
+        $counts = unpack('v*', $merged);
+
+        $out = fopen($outputPath, 'wb');
+        stream_set_write_buffer($out, 4_194_304);
+
         $escapedPaths = [];
-        for ($p = 0; $p < $pc; $p++) {
-            $escapedPaths[$p] = '"\\/blog\\/' . str_replace('/', '\\/', $paths[$p]) . '"';
+        for ($p = 0; $p < $numPaths; $p++) {
+            $escapedPaths[$p] = '"\/blog\/' . $pathSlugs[$p] . '": {';
         }
 
-        $first = true;
         $parts = ['{'];
-        for ($p = 0; $p < $pc; $p++) {
-            $base = $p * $dateCount;
-            $de = [];
-            for ($d = 0; $d < $dateCount; $d++) {
-                $c = $cnt[$base + $d];
-                if ($c === 0) continue;
-                $de[] = $datePrefixes[$d] . $c;
-            }
-            if (!$de) continue;
+        $sep = "\n    ";
+        $base = 1;
 
-            $sep = $first ? "\n    " : ",\n    ";
-            $first = false;
-            $parts[] = $sep . $escapedPaths[$p] . ": {\n" . implode(",\n", $de) . "\n    }";
+        for ($p = 0; $p < $numPaths; $p++) {
+            $limit = $base + $numDates;
+
+            while ($base < $limit && $counts[$base] === 0) {
+                $base++;
+            }
+
+            if ($base === $limit) continue;
+
+            $dOff = $base - ($limit - $numDates);
+            $buf = $sep . $escapedPaths[$p] . "\n" . $jsonDateLabels[$dOff] . $counts[$base];
+            $sep = ",\n    ";
+
+            for ($base++; $base < $limit; $base++) {
+                $count = $counts[$base];
+                if ($count === 0) continue;
+                $buf .= ",\n" . $jsonDateLabels[$base - ($limit - $numDates)] . $count;
+            }
+
+            $buf .= "\n    }";
+            $parts[] = $buf;
         }
 
-        $parts[] = "\n}";
-        file_put_contents($outputPath, implode('', $parts));
+        fwrite($out, implode('', $parts) . "\n}");
+        fclose($out);
     }
 }
+
