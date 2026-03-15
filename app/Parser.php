@@ -88,20 +88,7 @@ final class Parser
         }
         unset($raw);
 
-        $tailLength = 1;
-        while (true) {
-            $slugBaseMap = [];
-            for ($p = 0; $p < $slugTotal; $p++) {
-                $tail = substr($prefix . $paths[$p], -$tailLength);
-                if (isset($slugBaseMap[$tail])) {
-                    $tailLength++;
-                    continue 2;
-                }
-                $slugBaseMap[$tail] = true;
-            }
-            break;
-        }
-
+        $tailLength = 22;
         $shift = 20;
         $mask = (1 << $shift) - 1;
         $maxStride = 0;
