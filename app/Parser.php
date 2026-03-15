@@ -178,7 +178,7 @@ final class Parser
 
                         $p = $brk;
 
-                        while ($p > 1040) {
+                        while ($p > 960) {
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
                             $v=$fm[substr($buf,$p-48,22)]; $idx=($v&$sm)+$tm[substr($buf,$p-22,7)]; $p-=$v>>$sh; $st[$idx]=$up[$st[$idx]];
