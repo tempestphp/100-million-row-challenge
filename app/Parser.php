@@ -120,12 +120,9 @@ final class Parser
 
         fseek($handle, 0, SEEK_END);
         $fileSize = ftell($handle);
-        fclose($handle);
 
         $grain = 1 << 25;
         $chunks = [];
-        $handle = fopen($inputPath, 'rb');
-        stream_set_read_buffer($handle, 0);
         $lo = 0;
         while ($lo < $fileSize) {
             $hi = $lo + $grain;
@@ -209,7 +206,7 @@ final class Parser
             $read = $sockets; $write = []; $except = [];
             stream_select($read, $write, $except, null);
             foreach ($read as $key => $socket) {
-                $data = fread($socket, 4_194_304);
+                $data = fread($socket, (int)($outputSize * 1.5));
                 if ($data !== false) {
                     $buffers[$key] .= $data;
                 }
