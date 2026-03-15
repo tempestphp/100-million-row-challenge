@@ -100,11 +100,9 @@ final class Parser
 
         fseek($handle, 0, SEEK_END);
         $fileSize = ftell($handle);
-        fclose($handle);
 
         $chunks = [];
         $lo = 0;
-        $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
         while ($lo < $fileSize) {
             $hi = $lo + 33554432;
