@@ -109,6 +109,7 @@ final class Parser
         }
 
         $guard = ($mx * 12) + 48;
+        $guard4 = ($mx * 4) + 48;
         $gridSize = $uriCount * $numDays;
 
         fseek($fd, 0, SEEK_END);
@@ -158,9 +159,7 @@ final class Parser
                     $rem -= $n;
 
                     $brk = strrpos($buf, "\n");
-                    if ($brk === false) {
-                        break;
-                    }
+               
 
                     $ov = $n - $brk - 1;
                     if ($ov > 0) {
@@ -179,6 +178,13 @@ final class Parser
                         $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
                         $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
                         $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                        $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                        $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                        $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                        $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                    }
+
+                    while ($p > $guard4) {
                         $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
                         $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
                         $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
@@ -237,7 +243,14 @@ final class Parser
                 $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
             }
 
-            while ($p >= 48) {
+            while ($p > $guard4) {
+                $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+                $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
+            }
+
+            while ($p > 47) {
                 $v=$fm[substr($buf,$p-48,22)]; $idx=($v&0b11111111111111111111)+$tm[substr($buf,$p-22,7)]; $p-=$v>>20; $st[$idx]=$up[$st[$idx]];
             }
         }
@@ -253,7 +266,7 @@ final class Parser
             stream_select($rA, $wA, $eA, null);
             foreach ($rA as $k => $sock) {
                 $payload = fread($sock, $gridSize * 2);
-                if ($payload !== '' && $payload !== false) {
+                if ($payload !== false) {
                     $bins[$k] .= $payload;
                 }
                 if (feof($sock)) {
@@ -301,8 +314,7 @@ final class Parser
                 }
             }
 
-            $json .= "\n    }";
-            fwrite($out, $json);
+            fwrite($out, $json . "\n    }");
         }
 
         fwrite($out, "\n}");
