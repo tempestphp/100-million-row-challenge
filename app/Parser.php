@@ -39,6 +39,7 @@ final class Parser
         gc_disable();
 
         $dateIds = [];
+        $dates = [];
         $dateCount = 0;
         for ($y = 1; $y <= 6; $y++) {
             for ($m = 1; $m <= 12; $m++) {
@@ -114,7 +115,6 @@ final class Parser
         $dateOffset = 22;
         $dateLength = 7;
         $fence = ($maxStride * 12) + $tailOffset;
-        $fence2 = $tailOffset - 1;
 
         $outputSize = $slugTotal * $dateCount;
 
@@ -143,7 +143,7 @@ final class Parser
         $workers = 8;
         $sockets = [];
 
-        for ($w = 0; $w < $workers; $w++) {
+        for ($w = 0; $w < $workers - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize << 1);
             stream_set_chunk_size($pair[1], $outputSize << 1);
@@ -189,7 +189,7 @@ final class Parser
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
 
-                        while ($p > $fence2) {
+                        while ($p >= $tailOffset) {
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
                     }
@@ -204,13 +204,52 @@ final class Parser
             $sockets[$w] = $pair[0];
         }
 
-        $buffers = array_fill(0, $workers, '');
+        // Parent processes last worker's interleaved chunks
+        $mainOutput = str_repeat("\0", $outputSize);
+        $reader = fopen($inputPath, 'rb');
+        stream_set_read_buffer($reader, 0);
+        for ($ci = $workers - 1; $ci < $chunkCount; $ci += $workers) {
+            [$from, $to] = $chunks[$ci];
+            fseek($reader, $from);
+            $remaining = $to - $from;
+            while ($remaining > 0) {
+                $chunk = fread($reader, $remaining > 131_072 ? 131_072 : $remaining);
+                $chunkLen = strlen($chunk);
+                $remaining -= $chunkLen;
+                $lastNl = strrpos($chunk, "\n");
+                if ($lastNl === false) break;
+                $tail = $chunkLen - $lastNl - 1;
+                if ($tail > 0) { fseek($reader, -$tail, SEEK_CUR); $remaining += $tail; }
+                $p = $lastNl;
+                while ($p > $fence) {
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                }
+                while ($p >= $tailOffset) {
+                    $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                }
+            }
+        }
+        fclose($reader);
+        $merged = chunk_split($mainOutput, 1, "\0");
+
+        $buffers = array_fill(0, $workers - 1, '');
         while ($sockets !== []) {
             $read = $sockets; $write = []; $except = [];
             stream_select($read, $write, $except, null);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, 8_388_608);
-                if ($data !== false) {
+                if ($data !== '' && $data !== false) {
                     $buffers[$key] .= $data;
                 }
                 if (feof($socket)) {
@@ -220,8 +259,7 @@ final class Parser
             }
         }
 
-        $merged = $buffers[0];
-        for ($w = 1; $w < $workers; $w++) {
+        for ($w = 0; $w < $workers - 1; $w++) {
             sodium_add($merged, $buffers[$w]);
         }
         $counts = unpack('v*', $merged);
