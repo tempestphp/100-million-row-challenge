@@ -161,7 +161,7 @@ final class Parser
                     $rem = $to - $from;
 
                     while ($rem > 0) {
-                        $buf = fread($in, $rem > 0b100000000000000000 ? 0b100000000000000000 : $rem);
+                        $buf = fread($in, $rem > 327680 ? 327680 : $rem);
                         $n = strlen($buf);
                         $rem -= $n;
 
