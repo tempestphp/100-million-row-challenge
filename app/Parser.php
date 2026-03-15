@@ -6,18 +6,13 @@ use RuntimeException;
 
 final class Parser
 {
-    /**
-     * "https://stitcher.io" is exactly 19 bytes on every input line.
-     */
-    private const int PREFIX_LEN = 19;
-
-    /** 64 KB read buffer per fread() call. */
+    /** Read size for buffered `fread()` parsing. */
     private const int BUF_SIZE = 65536;
 
-    /** Segments smaller than this get slurped via file_get_contents(). */
+    /** Segments at or below this size are read in a single call. */
     private const int SLURP_LIMIT = 16 * 1024 * 1024;
 
-    /** Target bytes per parallel worker. */
+    /** Target segment size when splitting work across workers. */
     private const int BYTES_PER_WORKER = 20 * 1024 * 1024;
 
     public function parse(string $inputPath, string $outputPath): void
@@ -34,14 +29,18 @@ final class Parser
         $cpus = $this->cpuCount();
         $numWorkers = min($cpus, max(2, (int) ceil($fileSize / self::BYTES_PER_WORKER)));
 
-        if ($numWorkers > 1 && $fileSize > self::BYTES_PER_WORKER && function_exists('pcntl_fork')) {
-            $stats = $this->parallel($inputPath, $fileSize, $numWorkers);
+        if ($numWorkers > 1 && $fileSize > self::BYTES_PER_WORKER) {
+            if (class_exists(\parallel\Runtime::class)) {
+                $stats = $this->parallelExt($inputPath, $fileSize, $numWorkers);
+            } elseif (function_exists('pcntl_fork')) {
+                $stats = $this->parallelFork($inputPath, $fileSize, $numWorkers);
+            } else {
+                $stats = $this->segment($inputPath, 0, $fileSize);
+            }
         } else {
             $stats = $this->segment($inputPath, 0, $fileSize);
         }
 
-        // Keys are already pre-escaped (slashes replaced during parsing).
-        // Sort paths alphabetically, dates ascending within each path.
         ksort($stats, SORT_STRING);
         foreach ($stats as &$dates) {
             ksort($dates, SORT_STRING);
@@ -70,20 +69,159 @@ final class Parser
     }
 
     // ----------------------------------------------------------------
-    //  Parallel execution via pcntl_fork
+    //  Parallel extension path
+    //
+    //  Uses `parallel\Runtime` workers when the extension is available.
+    //  The worker closure must be self-contained, so the parsing logic
+    //  used in this path is defined inline.
     // ----------------------------------------------------------------
 
-    private function parallel(string $inputPath, int $fileSize, int $numWorkers): array
+    private function parallelExt(string $inputPath, int $fileSize, int $numWorkers): array
+    {
+        $segments = $this->split($inputPath, $fileSize, $numWorkers);
+        $workerCount = count($segments);
+
+        $futures = [];
+
+        for ($w = 0; $w < $workerCount; $w++) {
+            $runtime = new \parallel\Runtime();
+
+            $segStart = $segments[$w][0];
+            $segEnd = $segments[$w][1];
+
+            $futures[$w] = $runtime->run(static function (string $file, int $start, int $end): array {
+                gc_disable();
+
+                $size = $end - $start;
+                $stats = [];
+                $pathCache = [];
+
+                // Self-contained parser for the worker runtime.
+                $parse = static function (string $buf) use (&$stats, &$pathCache): void {
+                    $offset = 0;
+                    $len = strlen($buf);
+
+                    while ($offset < $len) {
+                        $nl = strpos($buf, "\n", $offset);
+                        if ($nl === false) $nl = $len;
+
+                        $comma = strpos($buf, ',', $offset + 19);
+
+                        if ($comma !== false && $comma < $nl) {
+                            $rawPath = substr($buf, $offset + 19, $comma - $offset - 19);
+                            $date = substr($buf, $comma + 1, 10);
+
+                            if (isset($pathCache[$rawPath])) {
+                                $path = $pathCache[$rawPath];
+                            } else {
+                                $path = str_replace('/', '\\/', $rawPath);
+                                $pathCache[$rawPath] = $path;
+                            }
+
+                            if (!isset($stats[$path])) {
+                                $stats[$path] = [$date => 1];
+                            } elseif (!isset($stats[$path][$date])) {
+                                $stats[$path][$date] = 1;
+                            } else {
+                                ++$stats[$path][$date];
+                            }
+                        }
+
+                        $offset = $nl + 1;
+                    }
+                };
+
+                // Small segments are read in a single call.
+                if ($size <= 16 * 1024 * 1024) {
+                    $content = file_get_contents($file, false, null, $start, $size);
+                    if ($content !== false && $content !== '') {
+                        $parse($content);
+                    }
+                    return $stats;
+                }
+
+                // Large segments are processed with buffered reads.
+                $h = fopen($file, 'rb');
+                if ($h === false) return [];
+                if ($start > 0) fseek($h, $start);
+
+                $remaining = $size;
+                $carry = '';
+                $bufSize = 65536;
+
+                while ($remaining > 0) {
+                    $read = min($bufSize, $remaining);
+                    $chunk = fread($h, $read);
+                    if ($chunk === false || $chunk === '') break;
+                    $remaining -= strlen($chunk);
+
+                    $buf = $carry . $chunk;
+                    $lastNl = strrpos($buf, "\n");
+
+                    if ($lastNl === false) {
+                        $carry = $buf;
+                        continue;
+                    }
+
+                    $carry = ($lastNl + 1 < strlen($buf)) ? substr($buf, $lastNl + 1) : '';
+                    $parse(substr($buf, 0, $lastNl));
+                }
+
+                if ($carry !== '') {
+                    $parse($carry);
+                }
+
+                fclose($h);
+                return $stats;
+            }, [$inputPath, $segStart, $segEnd]);
+        }
+
+        // Collect worker results in segment order before merging.
+        $merged = [];
+        for ($w = 0; $w < $workerCount; $w++) {
+            $partial = $futures[$w]->value();
+
+            foreach ($partial as $path => $dates) {
+                if (!isset($merged[$path])) {
+                    $merged[$path] = $dates;
+                    continue;
+                }
+                $ref = &$merged[$path];
+                foreach ($dates as $date => $count) {
+                    if (isset($ref[$date])) {
+                        $ref[$date] += $count;
+                    } else {
+                        $ref[$date] = $count;
+                    }
+                }
+                unset($ref);
+            }
+        }
+
+        return $merged;
+    }
+
+    // ----------------------------------------------------------------
+    //  Process-based parallel fallback
+    //
+    //  Uses `pcntl_fork()` workers and exchanges partial results through
+    //  temporary files. `/dev/shm` is preferred when available.
+    // ----------------------------------------------------------------
+
+    private function parallelFork(string $inputPath, int $fileSize, int $numWorkers): array
     {
         $segments = $this->split($inputPath, $fileSize, $numWorkers);
         $workerCount = count($segments);
         $igb = function_exists('igbinary_serialize');
+
+        $tmpDir = is_writable('/dev/shm') ? '/dev/shm' : sys_get_temp_dir();
+
         $tmpFiles = [];
         $pids = [];
         $forked = 0;
 
         for ($w = 0; $w < $workerCount; $w++) {
-            $tmp = tempnam(sys_get_temp_dir(), 'tp-');
+            $tmp = tempnam($tmpDir, 'tp-');
             if ($tmp === false) throw new RuntimeException('tempnam failed');
             $tmpFiles[$w] = $tmp;
 
@@ -92,8 +230,8 @@ final class Parser
 
             if ($pid === 0) {
                 gc_disable();
-                $r = $this->segment($inputPath, $segments[$w][0], $segments[$w][1]);
-                file_put_contents($tmp, $igb ? igbinary_serialize($r) : serialize($r));
+                $result = $this->segment($inputPath, $segments[$w][0], $segments[$w][1]);
+                file_put_contents($tmp, $igb ? igbinary_serialize($result) : serialize($result));
                 exit(0);
             }
 
@@ -101,34 +239,32 @@ final class Parser
             $forked++;
         }
 
-        // Collect finished children
-        $partials = [];
-        $map = array_flip($pids);
+        $pidMap = array_flip($pids);
         $left = count($pids);
-
         while ($left > 0) {
             $pid = pcntl_waitpid(-1, $st, WNOHANG);
-            if ($pid > 0 && isset($map[$pid])) {
-                $w = $map[$pid];
+            if ($pid > 0 && isset($pidMap[$pid])) {
                 $left--;
-                $raw = file_get_contents($tmpFiles[$w]);
-                @unlink($tmpFiles[$w]);
-                if ($raw !== false) {
-                    $p = $igb ? igbinary_unserialize($raw) : unserialize($raw);
-                    if (is_array($p)) $partials[$w] = $p;
-                }
             } elseif ($pid === 0) {
                 usleep(50);
             }
         }
 
-        // Handle any workers that failed to fork
+        $partials = [];
+        for ($w = 0; $w < $forked; $w++) {
+            $raw = file_get_contents($tmpFiles[$w]);
+            @unlink($tmpFiles[$w]);
+            if ($raw !== false) {
+                $p = $igb ? igbinary_unserialize($raw) : unserialize($raw);
+                if (is_array($p)) $partials[$w] = $p;
+            }
+        }
+
         for ($w = $forked; $w < $workerCount; $w++) {
             @unlink($tmpFiles[$w]);
             $partials[$w] = $this->segment($inputPath, $segments[$w][0], $segments[$w][1]);
         }
 
-        // Merge partial results
         ksort($partials);
         $merged = [];
 
@@ -153,9 +289,13 @@ final class Parser
         return $merged;
     }
 
-    /**
-     * Split file into byte-range segments aligned to newline boundaries.
-     */
+    // ----------------------------------------------------------------
+    //  Segment planning
+    //
+    //  Splits the input into newline-aligned byte ranges that can be
+    //  processed independently by either parallel strategy.
+    // ----------------------------------------------------------------
+
     private function split(string $inputPath, int $fileSize, int $n): array
     {
         $chunk = (int) ceil($fileSize / $n);
@@ -187,7 +327,9 @@ final class Parser
     }
 
     // ----------------------------------------------------------------
-    //  Core I/O: fread with carry buffer
+    //  Segment parsing
+    //
+    //  Shared by single-threaded execution and the `pcntl_fork()` path.
     // ----------------------------------------------------------------
 
     private function segment(string $inputPath, int $start, int $end): array
@@ -236,26 +378,15 @@ final class Parser
     }
 
     // ----------------------------------------------------------------
-    //  Hot loop: fixed-offset extraction with pre-escaped path keys
+    //  Line extraction
+    //
+    //  Parses complete lines from an in-memory buffer and updates the
+    //  aggregated visit counts keyed by escaped path and date.
     // ----------------------------------------------------------------
 
-    /**
-     * Parse a buffer of complete lines and aggregate into stats.
-     *
-     * Each line: "https://stitcher.io{path},{YYYY-MM-DD}T{rest}"
-     *
-     * Path keys are stored with "/" already replaced by "\/" so the
-     * JSON writer can emit them directly without any per-key escaping.
-     *
-     * The path lookup table ($pathMap) caches the raw->escaped mapping
-     * so str_replace runs once per unique path rather than once per line.
-     * With ~500 unique blog paths across 100M rows, this effectively
-     * eliminates str_replace from the hot path.
-     */
     private function extract(string $buf, array &$stats): void
     {
-        /** @var array<string, string> raw path -> escaped path cache */
-        static $pathMap = [];
+        static $pathCache = [];
 
         $offset = 0;
         $len = strlen($buf);
@@ -264,26 +395,19 @@ final class Parser
             $nl = strpos($buf, "\n", $offset);
             if ($nl === false) $nl = $len;
 
-            // Comma is the separator between URL and datetime.
-            // Search starts at offset+19 to skip "https://stitcher.io".
             $comma = strpos($buf, ',', $offset + 19);
 
             if ($comma !== false && $comma < $nl) {
-                // Extract raw path and date
                 $rawPath = substr($buf, $offset + 19, $comma - $offset - 19);
                 $date = substr($buf, $comma + 1, 10);
 
-                // Look up or create the pre-escaped path key.
-                // The escaped version has "/" -> "\/" for JSON output.
-                if (isset($pathMap[$rawPath])) {
-                    $path = $pathMap[$rawPath];
+                if (isset($pathCache[$rawPath])) {
+                    $path = $pathCache[$rawPath];
                 } else {
                     $path = str_replace('/', '\\/', $rawPath);
-                    $pathMap[$rawPath] = $path;
+                    $pathCache[$rawPath] = $path;
                 }
 
-                // Aggregate: three-branch access avoids unnecessary
-                // reference creation on the most common case (increment).
                 if (!isset($stats[$path])) {
                     $stats[$path] = [$date => 1];
                 } elseif (!isset($stats[$path][$date])) {
@@ -298,20 +422,12 @@ final class Parser
     }
 
     // ----------------------------------------------------------------
-    //  Custom JSON writer: bypasses json_encode() entirely
+    //  JSON output
+    //
+    //  Streams the final structure directly to disk using the required
+    //  pretty-printed layout.
     // ----------------------------------------------------------------
 
-    /**
-     * Write stats as pretty-printed JSON identical to
-     * json_encode($data, JSON_PRETTY_PRINT) output.
-     *
-     * Path keys are already pre-escaped with "\/" from the parsing phase,
-     * so the writer emits them directly. Date keys contain only digits and
-     * hyphens, and values are integers, so neither needs any escaping.
-     *
-     * Output is buffered in a 64 KB string and flushed periodically to
-     * minimize fwrite() syscalls.
-     */
     private function writeJson(string $outputPath, array $stats): void
     {
         $h = fopen($outputPath, 'wb');
@@ -327,7 +443,6 @@ final class Parser
             $pathKey = $pathKeys[$p];
             $dates = $stats[$pathKey];
 
-            // Path key is already escaped from parsing phase
             $buf .= '    "' . $pathKey . "\": {\n";
 
             $dateKeys = array_keys($dates);
@@ -340,8 +455,6 @@ final class Parser
 
             $buf .= ($p < $lastPath) ? "    },\n" : "    }\n";
 
-            // Flush when buffer exceeds limit (using isset on offset is
-            // faster than strlen comparison)
             if (isset($buf[$bufLimit])) {
                 fwrite($h, $buf);
                 $buf = '';
