@@ -5,13 +5,13 @@ namespace App;
 final class Parser
 {
     private const int BUFFER_SIZE = 262144;
-    private const int CHUNK_SIZE = 67108864;
     private const int OUTPUT_BUFFER_SIZE = 20971520;
 
     private static $f;
     private static $fo;
     private static $sequence;
     private static $partialIds;
+    private static $partialSuffixIds;
     private static $dateIds;
     private static $uriIds;
     private static $countsSize;
@@ -289,6 +289,20 @@ final class Parser
             '11-million-rows-in-seconds',
         ];
 
+        $partialIds = [];
+        $partialSuffixIds = [];
+        $uriIds = [];
+        $id = 0;
+        foreach($allPartialIds as $partial) {
+            $partialSuffixIds[\substr('https://stitcher.io/blog/'.$partial, -22)] = ((52+\strlen($partial))<<20) | $id;
+
+            $partialIds[$partial] = $id;
+
+            $uriIds[$id] = $partial;
+
+            $id += 2232;
+        }
+        $countsSize = $id;
 
         $dateIds = [];
         $id = 0;
@@ -350,18 +364,9 @@ final class Parser
             }
         }
 
-        $partialIds = [];
-        $uriIds = [];
-        $id = 0;
-        foreach($allPartialIds as $partial) {
-            $partialIds[$partial] = $id;
-
-            $uriIds[$id] = $partial;
-
-            $id += 2232;
-        }
-        self::$countsSize = $id;
+        self::$countsSize = $countsSize;
         self::$partialIds = $partialIds;
+        self::$partialSuffixIds = $partialSuffixIds;
         self::$dateIds = $dateIds;
         self::$uriIds = $uriIds;
     }
@@ -3419,39 +3424,42 @@ s1:
         $i = 0;
 
         $partialIds = self::$partialIds;
+        $partialSuffixIds = self::$partialSuffixIds;
         $dateIds = self::$dateIds;
 
-        list($counts, $b, $bp, $bm) = self::parseFileSequence();
+        list($counts, $b, $bm, $bp) = self::parseFileSequence();
         if (0 === \strlen($b)) return $counts;
 
         $bRem = '';
         $f = self::$f;
 
         // --------------------------------------------------------------------
-        if ($bp>=$bm) goto l1e;
-        goto l1s;
+        if ($bm>=$bp) {
+            $bRem = (1+$bp < \strlen($b) ? \substr($b, 1+$bp) : '');
+            goto l1e;
+        }
 
 l1:
-        $bm = \strrpos($b, "\n");
-l1s:
+        $bp = \strrpos($b, "\n");
+        $bRem = (1+$bp < \strlen($b) ? \substr($b, 1+$bp) : '');
+
         do {
-            $i = \strpos($b, ',', $bp);
-            ++$counts[$partialIds[\substr($b, $bp, $i-$bp)] + $dateIds[\substr($b, 4+$i, 7)]];
-            $bp = 52 + $i;
-        } while ($bp<$bm);
+            $i = $partialSuffixIds[\substr($b, $bp-48, 22)];
+            ++$counts[($i & 0x0FFFFF) + $dateIds[\substr($b, $bp-22, 7)]];
+            $bp -= ($i >> 20);
+        } while ($bp>$bm);
 
 l1e:
-        if ($bp === (25+\strlen($b))) {
+        if (0 === \strlen($bRem)) {
             if (0 === \strlen($b = \fread($f, self::BUFFER_SIZE))) return $counts;
-            $bp = 25;
+            $bm = 25;
             goto l1;
         }
 
-        $bRem = \substr($b, $bp-25);
         $b = \fread($f, self::BUFFER_SIZE);
-        $bp = \strpos($b, "\n", 0);
-        $bRem .= \substr($b, 0, $bp);
-        $bp += 26;
+        $bm = \strpos($b, "\n", 0);
+        $bRem .= \substr($b, 0, $bm);
+        $bm += 26;
 
         ++$counts[$partialIds[\substr($bRem, 25, \strlen($bRem)-51)] + $dateIds[\substr($bRem, \strlen($bRem)-22, 7)]];
 
@@ -3471,8 +3479,8 @@ l1e:
 
         $f = \fopen($inputPath, 'rb');
         if (false === $f) throw new \Exception('Input file could not be opened: '.$inputPath);
-        \stream_set_chunk_size($f, self::CHUNK_SIZE);
-        \stream_set_read_buffer($f, self::CHUNK_SIZE);
+        \stream_set_read_buffer($f, 0);
+        \stream_set_chunk_size($f, self::BUFFER_SIZE);
         self::$f = $f;
 
         self::initialize();
