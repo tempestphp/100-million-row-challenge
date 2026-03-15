@@ -81,7 +81,6 @@ final class Parser
             $slug = substr($raw, $pos + 25, $nl - $pos - 51);
             if (!isset($slugBaseMap[$slug])) {
                 $paths[$slugTotal] = $slug;
-                $escapedPaths[$slugTotal] = '"\/blog\/' . $slug . '": {';
                 $slugBaseMap[$slug] = $slugTotal * $dateCount;
                 $slugTotal++;
             }
@@ -211,7 +210,7 @@ final class Parser
             stream_select($read, $write, $except, null);
             foreach ($read as $key => $socket) {
                 $data = fread($socket, 8_388_608);
-                if ($data !== '' && $data !== false) {
+                if ($data !== false) {
                     $buffers[$key] .= $data;
                 }
                 if (feof($socket)) {
@@ -230,6 +229,11 @@ final class Parser
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, 4_194_304);
         fwrite($out, '{');
+
+        $escapedPaths = [];
+        for ($p = 0; $p < $slugTotal; $p++) {
+            $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
+        }
 
         $sep = "\n    ";
         $base = 1;
