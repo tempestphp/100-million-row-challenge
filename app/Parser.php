@@ -113,7 +113,7 @@ final class Parser
         $tailOffset = 26 + $tailLength;
         $dateOffset = 22;
         $dateLength = 7;
-        $fence = ($maxStride * 12) + $tailOffset;
+        $fence = ($maxStride * 10) + $tailOffset;
 
         $outputSize = $slugTotal * $dateCount;
 
@@ -184,8 +184,6 @@ final class Parser
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
-                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
 
                         while ($p >= $tailOffset) {
@@ -194,7 +192,9 @@ final class Parser
                     }
                 }
 
+                fclose($reader);
                 fwrite($pair[1], chunk_split($output, 1, "\0"));
+                fclose($pair[1]);
                 exit(0);
             }
             fclose($pair[1]);
