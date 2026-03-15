@@ -36,7 +36,7 @@ use const STREAM_SOCK_STREAM;
 final class Parser
 {
     private const CHUNK_BYTES = 1_048_576;
-    private const NUM_WORKERS = 16;
+    private const NUM_WORKERS = 18;
 
     public static function parse(string $inputPath, string $outputPath): void
     {
@@ -282,7 +282,7 @@ final class Parser
             $except = [];
             stream_select($read, $write, $except, null);
             foreach ($read as $key => $socket) {
-                $data = fread($socket, 8_388_608);
+                $data = fread($socket, $payloadSize);
                 if ($data !== '' && $data !== false) {
                     $childPayloads[$key] .= $data;
                 }
@@ -299,7 +299,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 8_388_608);
+        stream_set_write_buffer($out, 4_194_304);
 
         $escapedPaths = [];
         for ($p = 0; $p < $numPaths; $p++) {
