@@ -227,8 +227,8 @@ final class Parser
                         while ($p >= 48) {
                             $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                             $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                            $output[$idx] = $next[$output[$idx]];
                             $p -= $packed >> 20;
+                            $output[$idx] = $next[$output[$idx]];
                         }
                     }
                 }
@@ -330,8 +330,8 @@ final class Parser
                 while ($p >= 48) {
                     $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
                     $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
-                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
                     $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
                 }
             }
         }
