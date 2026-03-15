@@ -36,7 +36,7 @@ use const STREAM_SOCK_STREAM;
 final class Parser
 {
     private const CHUNK_BYTES = 1_048_576;
-    private const NUM_WORKERS = 12;
+    private const NUM_WORKERS = 16;
 
     public static function parse(string $inputPath, string $outputPath): void
     {
@@ -192,10 +192,19 @@ final class Parser
                         $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
                         $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
                         $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
                     }
 
                     while ($p >= $suffixStartFromNewline) {
-                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
+                        $s = substr($chunk, $p - $suffixStartFromNewline, $suffixLen);
+                        $dk = substr($chunk, $p - $dateStartFromNewline, $dateKeyLen);
+                        if (!isset($uriSuffixToPacked[$s], $dateKeyToIndex[$dk])) { $p -= $maxLineLen; continue; }
+                        $packed = $uriSuffixToPacked[$s];
+                        $idx = ($packed & $baseMask) + $dateKeyToIndex[$dk];
+                        $p -= $packed >> $strideBits;
+                        $cells[$idx] = $byteInc[$cells[$idx]];
                     }
                 }
 
@@ -246,10 +255,19 @@ final class Parser
                 $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
                 $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
                 $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
             }
 
             while ($p >= $suffixStartFromNewline) {
-                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
+                $s = substr($chunk, $p - $suffixStartFromNewline, $suffixLen);
+                $dk = substr($chunk, $p - $dateStartFromNewline, $dateKeyLen);
+                if (!isset($uriSuffixToPacked[$s], $dateKeyToIndex[$dk])) { $p -= $maxLineLen; continue; }
+                $packed = $uriSuffixToPacked[$s];
+                $idx = ($packed & $baseMask) + $dateKeyToIndex[$dk];
+                $p -= $packed >> $strideBits;
+                $parentCells[$idx] = $byteInc[$parentCells[$idx]];
             }
         }
 
@@ -264,7 +282,7 @@ final class Parser
             $except = [];
             stream_select($read, $write, $except, null);
             foreach ($read as $key => $socket) {
-                $data = fread($socket, $payloadSize);
+                $data = fread($socket, 8_388_608);
                 if ($data !== '' && $data !== false) {
                     $childPayloads[$key] .= $data;
                 }
@@ -281,7 +299,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 4_194_304);
+        stream_set_write_buffer($out, 8_388_608);
 
         $escapedPaths = [];
         for ($p = 0; $p < $numPaths; $p++) {
