@@ -39,7 +39,6 @@ final class Parser
         gc_disable();
 
         $dateIds = [];
-        $dates = [];
         $dateCount = 0;
         for ($y = 1; $y <= 6; $y++) {
             for ($m = 1; $m <= 12; $m++) {
@@ -115,6 +114,7 @@ final class Parser
         $dateOffset = 22;
         $dateLength = 7;
         $fence = ($maxStride * 12) + $tailOffset;
+        $fence2 = $tailOffset - 1;
 
         $outputSize = $slugTotal * $dateCount;
 
@@ -189,7 +189,7 @@ final class Parser
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
 
-                        while ($p >= $tailOffset) {
+                        while ($p > $fence2) {
                             $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
                     }
