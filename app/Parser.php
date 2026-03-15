@@ -192,9 +192,6 @@ final class Parser
                         $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
                         $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
                         $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
-                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
-                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
-                        $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $cells[$idx] = $byteInc[$cells[$idx]];
                     }
 
                     while ($p >= $suffixStartFromNewline) {
@@ -235,10 +232,6 @@ final class Parser
             $p = $lastNl;
 
             while ($p > $unrollMinPos) {
-                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
-                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
-                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
-                $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
                 $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
                 $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
                 $packed = $uriSuffixToPacked[substr($chunk, $p - $suffixStartFromNewline, $suffixLen)]; $idx = ($packed & $baseMask) + $dateKeyToIndex[substr($chunk, $p - $dateStartFromNewline, $dateKeyLen)]; $p -= $packed >> $strideBits; $parentCells[$idx] = $byteInc[$parentCells[$idx]];
