@@ -122,7 +122,7 @@ final class Parser
         $fileSize = ftell($handle);
         fclose($handle);
 
-        $grain = 1 << 26;
+        $grain = 1 << 25;
         $chunks = [];
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
