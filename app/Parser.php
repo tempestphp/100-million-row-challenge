@@ -36,7 +36,7 @@ use const STREAM_SOCK_STREAM;
 final class Parser
 {
     private const CHUNK_BYTES = 1_048_576;
-    private const NUM_WORKERS = 18;
+    private const NUM_WORKERS = 16;
 
     public static function parse(string $inputPath, string $outputPath): void
     {
