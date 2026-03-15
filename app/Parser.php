@@ -209,7 +209,7 @@ final class Parser
             $read = $sockets; $write = []; $except = [];
             stream_select($read, $write, $except, null);
             foreach ($read as $key => $socket) {
-                $data = fread($socket, 8_388_608);
+                $data = fread($socket, 4_194_304);
                 if ($data !== false) {
                     $buffers[$key] .= $data;
                 }
@@ -227,7 +227,7 @@ final class Parser
         $counts = unpack('v*', $merged);
 
         $out = fopen($outputPath, 'wb');
-        stream_set_write_buffer($out, 4_194_304);
+        stream_set_write_buffer($out, 2_097_152);
         fwrite($out, '{');
 
         $escapedPaths = [];
