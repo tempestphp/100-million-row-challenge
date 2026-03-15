@@ -127,13 +127,12 @@ final class Parser
             $chunks[] = [$from, $to];
             $lo = $hi;
         }
-        fclose($handle);
 
         $chunkCount = count($chunks);
 
         $sockets = [];
 
-        for ($w = 0; $w < $workers; $w++) {
+        for ($w = 0; $w < $workers - 1; $w++) {
             $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
             stream_set_chunk_size($pair[0], $outputSize * 2);
             stream_set_chunk_size($pair[1], $outputSize * 2);
@@ -242,7 +241,105 @@ final class Parser
             $sockets[$w] = $pair[0];
         }
 
-        $buffers = array_fill(0, $workers, '');
+        $mainOutput = str_repeat("\0", $outputSize);
+        stream_set_read_buffer($handle, 0);
+
+        for ($chunkIndex = $workers - 1; $chunkIndex < $chunkCount; $chunkIndex += $workers) {
+            [$from, $to] = $chunks[$chunkIndex];
+            fseek($handle, $from);
+            $left = $to - $from;
+
+            while ($left > 0) {
+                $chunk = fread($handle, $left > 131_072 ? 131_072 : $left);
+                $chunkLen = strlen($chunk);
+                $left -= $chunkLen;
+
+                $lastNl = strrpos($chunk, "\n");
+                if ($lastNl === false) break;
+
+                $tail = $chunkLen - $lastNl - 1;
+                if ($tail > 0) {
+                    fseek($handle, -$tail, SEEK_CUR);
+                    $left += $tail;
+                }
+
+                $p = $lastNl;
+
+                while ($p > 1248) {
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $p -= $packed >> 20;
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                }
+
+                while ($p >= 48) {
+                    $packed = $slugBaseMap[substr($chunk, $p - 48, 22)];
+                    $idx = ($packed & 1048575) + $dateIds[substr($chunk, $p - 22, 7)];
+                    $mainOutput[$idx] = $next[$mainOutput[$idx]];
+                    $p -= $packed >> 20;
+                }
+            }
+        }
+
+        fclose($handle);
+        $mainMerged = chunk_split($mainOutput, 1, "\0");
+
+        $buffers = array_fill(0, $workers - 1, '');
 
         $write = [];
         $except = [];
@@ -261,8 +358,8 @@ final class Parser
             }
         }
 
-        $merged = $buffers[0];
-        for ($w = 1; $w < $workers; $w++) {
+        $merged = $mainMerged;
+        for ($w = 0; $w < $workers - 1; $w++) {
             sodium_add($merged, $buffers[$w]);
         }
         $counts = unpack('v*', $merged);
