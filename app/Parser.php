@@ -81,6 +81,7 @@ final class Parser
             $slug = substr($raw, $pos + 25, $nl - $pos - 51);
             if (!isset($slugBaseMap[$slug])) {
                 $paths[$slugTotal] = $slug;
+                $escapedPaths[$slugTotal] = '"\/blog\/' . $slug . '": {';
                 $slugBaseMap[$slug] = $slugTotal * $dateCount;
                 $slugTotal++;
             }
@@ -88,7 +89,20 @@ final class Parser
         }
         unset($raw);
 
-        $tailLength = 22;
+        $tailLength = 1;
+        while (true) {
+            $slugBaseMap = [];
+            for ($p = 0; $p < $slugTotal; $p++) {
+                $tail = substr($prefix . $paths[$p], -$tailLength);
+                if (isset($slugBaseMap[$tail])) {
+                    $tailLength++;
+                    continue 2;
+                }
+                $slugBaseMap[$tail] = true;
+            }
+            break;
+        }
+
         $shift = 20;
         $mask = (1 << $shift) - 1;
         $maxStride = 0;
@@ -216,11 +230,6 @@ final class Parser
         $out = fopen($outputPath, 'wb');
         stream_set_write_buffer($out, 4_194_304);
         fwrite($out, '{');
-
-        $escapedPaths = [];
-        for ($p = 0; $p < $slugTotal; $p++) {
-            $escapedPaths[$p] = '"\/blog\/' . $paths[$p] . '": {';
-        }
 
         $sep = "\n    ";
         $base = 1;
