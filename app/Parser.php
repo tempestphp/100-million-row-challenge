@@ -2,12 +2,12 @@
 
 namespace App;
 
-use Exception;
+require_once __DIR__ . '/parse.php';
 
 final class Parser
 {
-    public function parse(string $inputPath, string $outputPath): void
+    public function parse($i, $o)
     {
-        throw new Exception('TODO');
+        \App\parse($i, $o);
     }
 }
