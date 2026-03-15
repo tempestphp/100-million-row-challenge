@@ -122,7 +122,7 @@ final class Parser
         $fileSize = ftell($handle);
         fclose($handle);
 
-        $grain = 1 << 25;
+        $grain = 1 << 26;
         $chunks = [];
         $handle = fopen($inputPath, 'rb');
         stream_set_read_buffer($handle, 0);
@@ -149,57 +149,54 @@ final class Parser
             stream_set_chunk_size($pair[1], $outputSize << 1);
             if (pcntl_fork() === 0) {
                 fclose($pair[0]);
-                $st = str_repeat("\0", $outputSize);
-                $in = fopen($inputPath, 'rb');
-                stream_set_read_buffer($in, 0);
-                $fm = $slugBaseMap; $tm = $dateIds; $up = $next;
-                $to2 = $tailOffset; $tl = $tailLength; $do = $dateOffset; $dl = $dateLength;
-                $mk = $mask; $sh = $shift; $fn = $fence;
+                $output = str_repeat("\0", $outputSize);
+                $reader = fopen($inputPath, 'rb');
+                stream_set_read_buffer($reader, 0);
 
                 for ($ci = $w; $ci < $chunkCount; $ci += $workers) {
                     [$from, $to] = $chunks[$ci];
-                    fseek($in, $from);
-                    $rem = $to - $from;
+                    fseek($reader, $from);
+                    $remaining = $to - $from;
 
-                    while ($rem > 0) {
-                        $buf = fread($in, $rem > 131_072 ? 131_072 : $rem);
-                        $bl = strlen($buf);
-                        $rem -= $bl;
+                    while ($remaining > 0) {
+                        $chunk = fread($reader, $remaining > 131_072 ? 131_072 : $remaining);
+                        $chunkLen = strlen($chunk);
+                        $remaining -= $chunkLen;
 
-                        $nl = strrpos($buf, "\n");
-                        if ($nl === false) break;
+                        $lastNl = strrpos($chunk, "\n");
+                        if ($lastNl === false) break;
 
-                        $ov = $bl - $nl - 1;
-                        if ($ov > 0) {
-                            fseek($in, -$ov, SEEK_CUR);
-                            $rem += $ov;
+                        $tail = $chunkLen - $lastNl - 1;
+                        if ($tail > 0) {
+                            fseek($reader, -$tail, SEEK_CUR);
+                            $remaining += $tail;
                         }
 
-                        $p = $nl;
+                        $p = $lastNl;
 
-                        while ($p > $fn) {
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
+                        while ($p > $fence) {
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
 
-                        while ($p >= $to2) {
-                            $v = $fm[substr($buf, $p - $to2, $tl)]; $i = ($v & $mk) + $tm[substr($buf, $p - $do, $dl)]; $p -= $v >> $sh; $st[$i] = $up[$st[$i]];
+                        while ($p >= $tailOffset) {
+                            $packed = $slugBaseMap[substr($chunk, $p - $tailOffset, $tailLength)]; $idx = ($packed & $mask) + $dateIds[substr($chunk, $p - $dateOffset, $dateLength)]; $p -= $packed >> $shift; $output[$idx] = $next[$output[$idx]];
                         }
                     }
                 }
 
-                fclose($in);
-                fwrite($pair[1], chunk_split($st, 1, "\0"));
+                fclose($reader);
+                fwrite($pair[1], chunk_split($output, 1, "\0"));
                 fclose($pair[1]);
                 exit(0);
             }
