@@ -1,6 +1,6 @@
 > [!IMPORTANT]
-> - The challenge is live; you have until March 15, 11:59PM CET to submit your entry. 
-> - Check out [the Leaderboard](https://marcosmarcolin.github.io/leaderboard-100-million-row-challenge/) (props to [Marcos](https://github.com/marcosmarcolin)). 
+> - The challenge has concluded! We no longer accept new submissions, and existing submissions should not add or remove commits.
+> - Check out [the Leaderboard](https://tempestphp.com/challenges/parsing-100m-lines) (props to [Marcos](https://github.com/marcosmarcolin) for the original idea). 
 > - Comment on your PR with `/bench` to request a re-run.
 > - [Join our Discord](https://tempestphp.com/discord) and then come to [this thread](https://discord.com/channels/1236153076688359495/1476516330017394829) to discuss the challenge with other participants.
     

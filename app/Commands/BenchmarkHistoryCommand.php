@@ -90,7 +90,7 @@ final class BenchmarkHistoryCommand
             if (!isset($currentBestByBranch[$branch]) || $time < $currentBestByBranch[$branch]) {
                 $currentBestByBranch[$branch] = $time;
 
-                $checkpoint = floor($time * 100) / 100;
+                $checkpoint = floor(round($time * 100, 6)) / 100;
 
                 if (!isset($bestCheckpoint[$branch]) || $checkpoint < $bestCheckpoint[$branch]) {
                     $bestCheckpoint[$branch] = $checkpoint;
@@ -101,7 +101,7 @@ final class BenchmarkHistoryCommand
 
         $allCheckpoints = array_unique(array_values($bestCheckpoint));
         sort($allCheckpoints);
-        $topCheckpoints = array_slice($allCheckpoints, 0, 3);
+        $topCheckpoints = array_slice($allCheckpoints, 0, 5);
 
         $candidates = [];
 
@@ -121,7 +121,7 @@ final class BenchmarkHistoryCommand
         usort($candidates, fn($a, $b) =>
             ($a['checkpoint'] <=> $b['checkpoint']) ?: strcmp($a['reached_at'], $b['reached_at']));
 
-        $finalists = array_slice($candidates, 0, 3);
+        $finalists = array_slice($candidates, 0, 5);
         $topBranches = array_column($finalists, 'branch');
         sort($topBranches);
 
