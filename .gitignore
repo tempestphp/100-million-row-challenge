@@ -5,6 +5,7 @@ data/real-data.json
 data/real-data-expected.json
 data/real-data-actual.json
 data/data.json
+data/data-expected.json
 test-data-actual.json
 .idea
 .tempest
