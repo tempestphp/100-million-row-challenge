@@ -1,0 +1,9 @@
+data/
+.git/
+data/*.csv
+data/*.json
+performance-journey.md
+README.md
+leaderboard.csv
+.gitignore
+.phpactor.json

@@ -19,7 +19,10 @@ final class DataParseCommand
 
         $startTime = microtime(true);
 
-        new Parser()->parse($inputPath, $outputPath);
+        // Allow workers to be set via environment variable
+        $workers = $workers ?? (getenv('NUM_WORKERS') ? (int)getenv('NUM_WORKERS') : null);
+
+        new Parser()->parse($inputPath, $outputPath, $workers);
 
         $endTime = microtime(true);
         $executionTime = $endTime - $startTime;
