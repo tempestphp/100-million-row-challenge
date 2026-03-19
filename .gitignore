@@ -11,3 +11,15 @@ test-data-actual.json
 .env
 .DS_Store
 .benchmark
+debug.php
+test.php
+parse.php
+benchmark.sh
+slug.sh
+tests.sh
+gere-*
+mine_*
+tempest:*
+current_best.php
+other.php
+mtParse.php
