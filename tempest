@@ -1,6 +1,29 @@
 #!/usr/bin/env php
 <?php
 
+$argv = $_SERVER['argv'];
+
+if (($argv[1] ?? null) === 'data:parse') {
+    require __DIR__ . '/app/Parser.php';
+    require __DIR__ . '/app/Commands/Visit.php';
+
+    $inputPath  = '';
+    $outputPath = '';
+
+    foreach ($argv as $arg) {
+        if (str_starts_with($arg, '--input-path=')) {
+            $inputPath = trim(substr($arg, 13), '"\'');
+        } elseif (str_starts_with($arg, '--output-path=')) {
+            $outputPath = trim(substr($arg, 14), '"\'');
+        }
+    }
+
+    if ($inputPath && $outputPath) {
+        \App\Parser::parse($inputPath, $outputPath);
+        return;
+    }
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
