@@ -1,9 +1,27 @@
 #!/usr/bin/env php
 <?php
 
-use Tempest\Console\ConsoleApplication;
-
 require_once getcwd() . '/vendor/autoload.php';
+require_once 'tests/temp.php';
+
+if ( ($argv[1] ?? null) === 'data:parse' ) {
+    $inputPath = \substr($argv[2] ?? "", 13);
+    $outputPath = \substr($argv[3] ?? "", 14);
+
+    if ($inputPath === '' || $outputPath === '') {
+        $inputPath = realpath(__DIR__ . '/data/data.csv');
+        $outputPath = realpath(__DIR__ . '/data/data.json');
+    }
+
+    new \Tests\Temp()->parse(
+        $inputPath,
+        $outputPath,
+    );
+
+    return 0;
+}
+
+use Tempest\Console\ConsoleApplication;
 
 ConsoleApplication::boot(loadBuiltInCommands: false)->run();
 
