@@ -8,6 +8,10 @@
             "App\\": "app/"
         }
     },
+    "config": {
+        "optimize-autoloader": true,
+        "classmap-authoritative": true
+    },
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require-dev": {
