@@ -1,0 +1,10 @@
+services:
+  benchmark:
+    build: .
+    cpus: 2
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    volumes:
+      - ./data:/app/data
+      - ./app:/app/app
+    command: php tempest data:parse
