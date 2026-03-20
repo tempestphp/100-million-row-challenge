@@ -1,6 +1,18 @@
 #!/usr/bin/env php
 <?php
 
+if (isset($argv[1]) && $argv[1] === 'data:parse') {
+    $dir = __DIR__;
+    $input = $argv[2] ?? $dir . '/data/data.csv';
+    $output = $argv[3] ?? $dir . '/data/data.json';
+    if (($p = strpos($input, '=')) !== false) $input = substr($input, $p + 1);
+    if (($p = strpos($output, '=')) !== false) $output = substr($output, $p + 1);
+
+    require_once $dir . '/app/Parser.php';
+    (new \App\Parser())->parse($input, $output);
+    exit(0);
+}
+
 use Tempest\Console\ConsoleApplication;
 
 require_once getcwd() . '/vendor/autoload.php';
