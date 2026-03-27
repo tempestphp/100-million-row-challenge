@@ -2,12 +2,13 @@
 
 namespace App;
 
-use Exception;
+use App\Solutions\Papoon;
+use App\Solutions\SingleThread;
 
 final class Parser
 {
     public function parse(string $inputPath, string $outputPath): void
     {
-        throw new Exception('TODO');
+        (new SingleThread())($inputPath, $outputPath);
     }
 }
