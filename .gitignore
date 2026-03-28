@@ -10,4 +10,4 @@ test-data-actual.json
 .tempest
 .env
 .DS_Store
-.benchmark
+.benchmark*.json
