@@ -3,6 +3,52 @@
 
 use Tempest\Console\ConsoleApplication;
 
+if (($argv[1] ?? null) === 'data:parse') {
+    $normalizePath = static fn (string $path): string => trim($path, "\"'");
+    $inputPath = __DIR__ . '/data/data.csv';
+    $outputPath = __DIR__ . '/data/data.json';
+    $argc = count($argv);
+
+    if (
+        $argc === 4
+        && str_starts_with($argv[2], '--input-path=')
+        && str_starts_with($argv[3], '--output-path=')
+    ) {
+        $inputPath = $normalizePath(substr($argv[2], 13));
+        $outputPath = $normalizePath(substr($argv[3], 14));
+    } else {
+        for ($index = 2; $index < $argc; $index++) {
+            $argument = $argv[$index];
+
+            if (str_starts_with($argument, '--input-path=')) {
+                $inputPath = $normalizePath(substr($argument, 13));
+                continue;
+            }
+
+            if (str_starts_with($argument, '--output-path=')) {
+                $outputPath = $normalizePath(substr($argument, 14));
+                continue;
+            }
+
+            if ($argument === '--input-path' && isset($argv[$index + 1])) {
+                $inputPath = $normalizePath($argv[++$index]);
+                continue;
+            }
+
+            if ($argument === '--output-path' && isset($argv[$index + 1])) {
+                $outputPath = $normalizePath($argv[++$index]);
+            }
+        }
+    }
+
+    require_once __DIR__ . '/app/Commands/Visit.php';
+    require_once __DIR__ . '/app/Parser.php';
+
+    (new App\Parser())->parse($inputPath, $outputPath);
+
+    exit(0);
+}
+
 require_once getcwd() . '/vendor/autoload.php';
 
 ConsoleApplication::boot(loadBuiltInCommands: false)->run();
