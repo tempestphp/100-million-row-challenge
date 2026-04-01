@@ -1,7 +1,9 @@
 {
     "require": {
         "php": "^8.5",
-        "tempest/framework": "^3.2"
+        "tempest/framework": "^3.2",
+      "ext-igbinary": "*",
+      "ext-shmop": "*"
     },
     "autoload": {
         "psr-4": {
